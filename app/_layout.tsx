@@ -14,11 +14,15 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="welcome" options={{ headerShown: false }} />
+          <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="messages/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
           <Stack.Screen name="zone" options={{ headerShown: false, animation: 'slide_from_right' }} />
           <Stack.Screen name="profile/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
           <Stack.Screen name="edit-profile" options={{ headerShown: false, animation: 'slide_from_right' }} />
+          <Stack.Screen name="register" options={{ headerShown: false }} />
+          <Stack.Screen name="interests-setup" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
         <StatusBar style="light" />

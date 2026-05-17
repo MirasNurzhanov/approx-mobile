@@ -1,6 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { getAccessToken, loginRequest, logoutRequest } from '@/services/auth';
+import { getAccessToken, loginRequest } from '@/services/auth';
 
 interface AuthContextValue {
   isAuthenticated: boolean;
@@ -29,9 +30,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    await logoutRequest();
     setIsAuthenticated(false);
-    router.replace('/');
+    await AsyncStorage.clear();
+    router.replace('/welcome');
   }
 
   return (

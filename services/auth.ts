@@ -10,7 +10,8 @@ export async function loginRequest(email: string, password: string) {
 }
 
 export async function logoutRequest() {
-  await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+  await AsyncStorage.removeItem('access_token');
+  await AsyncStorage.removeItem('refresh_token');
 }
 
 export async function getAccessToken() {

@@ -278,7 +278,11 @@ export default function ProfileScreen() {
         </TouchableOpacity>
 
         {/* ── Logout ── */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={logout} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() => { console.log('[Profile] Sign Out pressed'); logout(); }}
+          activeOpacity={0.8}
+        >
           <Ionicons name="log-out-outline" size={18} color="#ff4d4d" />
           <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>

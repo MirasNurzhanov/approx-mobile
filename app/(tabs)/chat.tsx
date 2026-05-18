@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
 import { api } from '@/services/api';
+import { useScrollHandler } from '@/hooks/useScrollHandler';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = 'pending' | 'connected' | 'friends' | 'blocked';
@@ -175,6 +176,7 @@ function BlockedCard({ user, onUnblock }: BlockedCardProps) {
 export default function ChatScreen() {
   const router = useRouter();
   const { top } = useSafeAreaInsets();
+  const scrollProps = useScrollHandler();
 
   const [activeTab, setActiveTab] = useState<Tab>('pending');
   const [friendList, setFriendList] = useState<FriendList>({ connections: [], friends: [] });
@@ -371,6 +373,7 @@ export default function ChatScreen() {
           }
           refreshControl={refreshControl}
           showsVerticalScrollIndicator={false}
+          {...scrollProps}
         />
       ) : activeTab === 'connected' ? (
         <FlatList
@@ -391,6 +394,7 @@ export default function ChatScreen() {
           }
           refreshControl={refreshControl}
           showsVerticalScrollIndicator={false}
+          {...scrollProps}
         />
       ) : activeTab === 'friends' ? (
         <FlatList
@@ -410,6 +414,7 @@ export default function ChatScreen() {
           }
           refreshControl={refreshControl}
           showsVerticalScrollIndicator={false}
+          {...scrollProps}
         />
       ) : (
         <FlatList
@@ -424,6 +429,7 @@ export default function ChatScreen() {
           }
           refreshControl={refreshControl}
           showsVerticalScrollIndicator={false}
+          {...scrollProps}
         />
       )}
 

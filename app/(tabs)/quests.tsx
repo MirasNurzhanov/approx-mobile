@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { Speedometer } from '@/components/Speedometer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ function Section({ title, quests, onVerify, verifyingId }: {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function QuestsScreen() {
   const { top, bottom } = useSafeAreaInsets();
+  const scrollProps = useScrollHandler();
 
   const [quests, setQuests] = useState<Quest[]>([]);
   const [auraPoints, setAuraPoints] = useState<number | null>(null);
@@ -226,6 +228,7 @@ export default function QuestsScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00b4a6" />
         }
+        {...scrollProps}
       >
         {/* ── Header ── */}
         <View style={styles.pageHeader}>

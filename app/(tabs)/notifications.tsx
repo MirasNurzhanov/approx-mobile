@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { Speedometer } from '@/components/Speedometer';
+import { useScrollHandler } from '@/hooks/useScrollHandler';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FriendRequest {
@@ -66,6 +67,7 @@ function isProximity(n: Notification): boolean {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function NotificationsScreen() {
   const { top, bottom } = useSafeAreaInsets();
+  const scrollProps = useScrollHandler();
 
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -164,6 +166,7 @@ export default function NotificationsScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00b4a6" />
         }
+        {...scrollProps}
       >
         {/* ── Page header ── */}
         <View style={styles.pageHeader}>

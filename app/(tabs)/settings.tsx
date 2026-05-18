@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { api } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
+import { useScrollHandler } from '@/hooks/useScrollHandler';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PrivacyMode = 'active' | 'ghost' | 'invisible';
@@ -86,6 +87,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { logout } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
+  const scrollProps = useScrollHandler();
 
   const [privacy, setPrivacy] = useState<PrivacyMode>('active');
   const [loading, setLoading] = useState(true);
@@ -121,6 +123,7 @@ export default function SettingsScreen() {
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: bottom + 110 }]}
         showsVerticalScrollIndicator={false}
+        {...scrollProps}
       >
         {/* ── Header ── */}
         <View style={styles.pageHeader}>

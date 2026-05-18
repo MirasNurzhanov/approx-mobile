@@ -1,11 +1,17 @@
 import * as Location from 'expo-location';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
 import Animated, {
+  FadeIn,
+  FadeOut,
+  type SharedValue,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -40,6 +46,7 @@ const COLOR_FRIEND    = '#3b82f6';
 const COLOR_CONNECTED = '#f97316';
 const COLOR_STRANGER  = '#ffffff';
 const COLOR_SELF      = '#8b5cf6';
+const COLOR_TEAL      = '#00b4a6';
 
 const REL_LABEL: Record<Relationship, string> = {
   stranger: 'Nearby',
@@ -47,8 +54,8 @@ const REL_LABEL: Record<Relationship, string> = {
   friend: 'Friend',
 };
 
-const POLL_MS = 30_000;
-const SHEET_H = 360;
+const POLL_MS   = 30_000;
+const SHEET_H   = 380;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,6 +65,7 @@ function fmtDistance(m?: number): string | null {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
 function UserDot({ color, size = 14 }: { color: string; size?: number }) {
   return (
     <View
@@ -66,13 +74,13 @@ function UserDot({ color, size = 14 }: { color: string; size?: number }) {
         height: size,
         borderRadius: size / 2,
         backgroundColor: color,
-        borderWidth: 2,
-        borderColor: '#0a0a0a',
+        borderWidth: 2.5,
+        borderColor: '#ffffff',
         shadowColor: color,
-        shadowRadius: 6,
-        shadowOpacity: 0.9,
+        shadowRadius: 8,
+        shadowOpacity: 0.95,
         shadowOffset: { width: 0, height: 0 },
-        elevation: 6,
+        elevation: 8,
       }}
     />
   );
@@ -81,15 +89,79 @@ function UserDot({ color, size = 14 }: { color: string; size?: number }) {
 function LegendItem({ color, label }: { color: string; label: string }) {
   return (
     <View style={styles.legendItem}>
-      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <View style={[styles.legendDot, { backgroundColor: color, borderColor: color + '66' }]} />
       <Text style={styles.legendLabel}>{label}</Text>
     </View>
   );
 }
 
+// ─── Top Bar ─────────────────────────────────────────────────────────────────
+function TopBar({ nearby, onPrivacy }: { nearby: number; onPrivacy: () => void }) {
+  const { top } = useSafeAreaInsets();
+  return (
+    <View style={[styles.topBar, { paddingTop: top + 10 }]}>
+      <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+      {/* AURA logo */}
+      <View style={styles.topLogo}>
+        <Text style={styles.topLogoText}>AURA</Text>
+        <View style={styles.topLogoDot} />
+      </View>
+
+      {/* Nearby badge */}
+      <View style={styles.nearbyBadge}>
+        <View style={styles.nearbyBadgeInner}>
+          <Text style={styles.nearbyBadgeText}>👥 {nearby} nearby</Text>
+        </View>
+      </View>
+
+      {/* Privacy icon */}
+      <TouchableOpacity onPress={onPrivacy} activeOpacity={0.7} style={styles.privacyBtn} hitSlop={10}>
+        <Ionicons name="shield-checkmark-outline" size={22} color={COLOR_TEAL} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── Zone Banner ──────────────────────────────────────────────────────────────
+function ZoneBanner({ username }: { username: string }) {
+  const { top } = useSafeAreaInsets();
+  return (
+    <Animated.View
+      entering={FadeIn.duration(350)}
+      exiting={FadeOut.duration(250)}
+      style={[styles.zoneBanner, { top: top + 64 }]}
+    >
+      <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+      <Text style={styles.zoneBannerText}>🎵 You're in @{username}'s zone</Text>
+    </Animated.View>
+  );
+}
+
+// ─── Refresh Button ───────────────────────────────────────────────────────────
+function RefreshButton({ onPress, spinning }: { onPress: () => void; spinning: boolean }) {
+  const rotation = useSharedValue(0);
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  function handlePress() {
+    rotation.value = withTiming(rotation.value + 360, { duration: 600 });
+    onPress();
+  }
+
+  return (
+    <TouchableOpacity onPress={handlePress} activeOpacity={0.85} style={styles.refreshBtn}>
+      <Animated.View style={animStyle}>
+        <Ionicons name="refresh" size={22} color="#0a0a0a" />
+      </Animated.View>
+    </TouchableOpacity>
+  );
+}
+
+// ─── User Sheet ───────────────────────────────────────────────────────────────
 interface SheetProps {
   user: NearbyUser;
-  sheetY: Animated.SharedValue<number>;
+  sheetY: SharedValue<number>;
   onDismiss: () => void;
   friendIds: Set<number>;
   connectionIds: Set<number>;
@@ -108,8 +180,10 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
   const isConnected = !isFriend && connectionIds.has(uid);
   const isStranger  = !isFriend && !isConnected;
 
-  const avatarBorderColor = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_STRANGER;
-  const relLabel = isFriend ? 'Friend' : isConnected ? 'Connected' : REL_LABEL[user.relationship] ?? 'Nearby';
+  const glowColor     = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_TEAL;
+  const relLabel      = isFriend ? 'Friend' : isConnected ? 'Connected' : REL_LABEL[user.relationship] ?? 'Nearby';
+  const relBadgeColor = isFriend ? '#1e3a5f' : isConnected ? '#3d1f0a' : '#0d1f1e';
+  const relTextColor  = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_TEAL;
 
   function sendHi() {
     api.post('/api/proximity/wave/', { target_id: user.id }).catch(() => {});
@@ -129,24 +203,37 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
   return (
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
-      <Animated.View style={[styles.sheet, { paddingBottom: bottom + 16 }, animStyle]}>
+      <Animated.View style={[styles.sheet, { paddingBottom: bottom + 20 }, animStyle]}>
+        {/* Glassmorphism background */}
+        <BlurView intensity={40} tint="dark" style={[StyleSheet.absoluteFill, styles.sheetBlur]} />
+
         <View style={styles.sheetHandle} />
 
         {/* Header */}
         <View style={styles.sheetHeader}>
-          <View style={[styles.sheetAvatar, { borderColor: avatarBorderColor }]}>
-            <Text style={styles.sheetAvatarText}>
-              {user.username.charAt(0).toUpperCase()}
-            </Text>
+          {/* Avatar with glow ring */}
+          <View style={[styles.sheetAvatarGlow, { shadowColor: glowColor }]}>
+            <View style={[styles.sheetAvatarRing, { borderColor: glowColor }]}>
+              <View style={styles.sheetAvatar}>
+                <Text style={styles.sheetAvatarText}>
+                  {user.username.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            </View>
           </View>
-          <View style={{ flex: 1, marginLeft: 12 }}>
+
+          <View style={{ flex: 1, marginLeft: 14 }}>
             <Text style={styles.sheetName}>{user.username}</Text>
-            <Text style={styles.sheetMeta}>
-              {relLabel}{dist ? ` · ${dist}` : ''}
-            </Text>
+            <View style={styles.sheetMetaRow}>
+              <View style={[styles.relBadge, { backgroundColor: relBadgeColor }]}>
+                <Text style={[styles.relBadgeText, { color: relTextColor }]}>{relLabel}</Text>
+              </View>
+              {dist && <Text style={styles.sheetDist}>{dist}</Text>}
+            </View>
           </View>
+
           <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-            <Text style={styles.closeText}>✕</Text>
+            <Ionicons name="close" size={16} color="#666" />
           </Pressable>
         </View>
 
@@ -168,7 +255,7 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
           </View>
         )}
 
-        {/* Actions — context-aware per relationship */}
+        {/* Actions */}
         <View style={styles.actions}>
           {isStranger && (
             <TouchableOpacity style={styles.btnPrimary} activeOpacity={0.8} onPress={sendHi}>
@@ -191,28 +278,27 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MapScreen() {
-  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [nearby, setNearby] = useState<NearbyUser[]>([]);
-  const [permError, setPermError] = useState('');
+  const router = useRouter();
+  const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
+  const [nearby, setNearby]           = useState<NearbyUser[]>([]);
+  const [permError, setPermError]     = useState('');
   const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [friendIds, setFriendIds] = useState<Set<number>>(new Set());
+  const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [friendsReady, setFriendsReady] = useState(false);
+  const [activeZone, setActiveZone]   = useState<{ username: string } | null>(null);
+  const [refreshing, setRefreshing]   = useState(false);
 
   const coordsRef = useRef(coords);
   coordsRef.current = coords;
 
   const sheetY = useSharedValue(SHEET_H);
 
-  // Fetch current user ID + friends list for marker colouring
   useEffect(() => {
     api.get<{ id: number; username: string }>('/api/users/me/')
-      .then((r) => {
-        console.log('[Map] current user id:', r.data.id, r.data.username);
-        setCurrentUserId(r.data.id);
-      })
-      .catch((e) => console.log('[Map] /api/users/me/ failed:', e?.response?.status));
+      .then((r) => setCurrentUserId(r.data.id))
+      .catch(() => {});
 
     api.get<{ friends: { id: number }[]; connections: { id: number }[] }>('/api/friends/list/')
       .then((r) => {
@@ -220,13 +306,9 @@ export default function MapScreen() {
         setConnectionIds(new Set(r.data.connections.map((u) => Number(u.id))));
         setFriendsReady(true);
       })
-      .catch((e) => {
-        console.log('[Map] friends list failed:', e?.response?.status);
-        setFriendsReady(true); // render markers even if friends list fails
-      });
+      .catch(() => setFriendsReady(true));
   }, []);
 
-  // Watch GPS position
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
 
@@ -236,12 +318,8 @@ export default function MapScreen() {
         setPermError('Location permission is required to find nearby people.');
         return;
       }
-      const init = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      const c = { latitude: init.coords.latitude, longitude: init.coords.longitude };
-      console.log('[Map] initial location:', c);
-      setCoords(c);
+      const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
         (loc) => setCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }),
@@ -251,47 +329,24 @@ export default function MapScreen() {
     return () => { sub?.remove(); };
   }, []);
 
-  // Poll nearby users + push location every 30 s
+  const tick = useCallback(async () => {
+    const c = coordsRef.current;
+    if (!c) return;
+
+    setRefreshing(true);
+    const [, nearbyResult] = await Promise.allSettled([
+      api.patch('/api/proximity/location/', { latitude: c.latitude, longitude: c.longitude }),
+      api.get<NearbyUser[]>('/api/proximity/nearby/'),
+    ]);
+
+    if (nearbyResult.status === 'fulfilled') {
+      setNearby(nearbyResult.value.data);
+    }
+    setRefreshing(false);
+  }, []);
+
   useEffect(() => {
     if (!coords) return;
-
-    async function tick() {
-      const c = coordsRef.current;
-      if (!c) return;
-
-      const payload = { latitude: c.latitude, longitude: c.longitude };
-      console.log('[Map] PATCH /api/proximity/location/ payload:', JSON.stringify(payload));
-
-      const [locationResult, nearbyResult] = await Promise.allSettled([
-        api.patch('/api/proximity/location/', payload),
-        api.get<NearbyUser[]>('/api/proximity/nearby/'),
-      ]);
-
-      if (locationResult.status === 'rejected') {
-        const err = locationResult.reason;
-        console.log(
-          '[Map] location PATCH error:',
-          err?.response?.status,
-          JSON.stringify(err?.response?.data),
-        );
-      } else {
-        console.log('[Map] location PATCH ok:', locationResult.value?.status);
-      }
-
-      if (nearbyResult.status === 'fulfilled') {
-        const users = nearbyResult.value.data;
-        console.log('[Map] nearby users raw:', JSON.stringify(users));
-        setNearby(users);
-      } else {
-        const err = nearbyResult.reason;
-        console.log(
-          '[Map] nearby fetch error:',
-          err?.response?.status,
-          JSON.stringify(err?.response?.data),
-        );
-      }
-    }
-
     tick();
     const id = setInterval(tick, POLL_MS);
     return () => clearInterval(id);
@@ -309,13 +364,10 @@ export default function MapScreen() {
   }
 
   const region: Region | undefined = coords
-    ? {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        latitudeDelta: 0.012,
-        longitudeDelta: 0.012,
-      }
+    ? { latitude: coords.latitude, longitude: coords.longitude, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
+
+  const visibleNearby = nearby.filter((u) => currentUserId === null || Number(u.id) !== currentUserId);
 
   return (
     <View style={styles.container}>
@@ -325,7 +377,7 @@ export default function MapScreen() {
         </View>
       ) : !coords ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#00b4a6" size="large" />
+          <ActivityIndicator color={COLOR_TEAL} size="large" />
           <Text style={styles.loadingText}>Locating you…</Text>
         </View>
       ) : (
@@ -338,30 +390,22 @@ export default function MapScreen() {
           rotateEnabled={false}
           pitchEnabled={false}
         >
-          {/* Nearby users — exclude self; rendered first so self marker sits on top */}
-          {nearby
-            .filter((u) => currentUserId === null || Number(u.id) !== currentUserId)
-            .map((user) => {
-              const uid = Number(user.id);
-              const color = friendIds.has(uid)
-                ? COLOR_FRIEND
-                : connectionIds.has(uid)
-                  ? COLOR_CONNECTED
-                  : COLOR_STRANGER;
-              return (
-                <Marker
-                  key={user.id}
-                  coordinate={{ latitude: user.latitude, longitude: user.longitude }}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                  tracksViewChanges={!friendsReady}
-                  onPress={() => openSheet(user)}
-                >
-                  <UserDot color={color} />
-                </Marker>
-              );
-            })}
+          {visibleNearby.map((user) => {
+            const uid = Number(user.id);
+            const color = friendIds.has(uid) ? COLOR_FRIEND : connectionIds.has(uid) ? COLOR_CONNECTED : COLOR_STRANGER;
+            return (
+              <Marker
+                key={user.id}
+                coordinate={{ latitude: user.latitude, longitude: user.longitude }}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={!friendsReady}
+                onPress={() => openSheet(user)}
+              >
+                <UserDot color={color} />
+              </Marker>
+            );
+          })}
 
-          {/* Self — rendered last so it's always on top */}
           <Marker
             coordinate={coords}
             anchor={{ x: 0.5, y: 0.5 }}
@@ -374,13 +418,29 @@ export default function MapScreen() {
         </MapView>
       )}
 
-      {/* Legend */}
+      {/* Top bar */}
+      <TopBar
+        nearby={visibleNearby.length}
+        onPrivacy={() => router.push('/zone')}
+      />
+
+      {/* Zone banner */}
+      {activeZone && <ZoneBanner username={activeZone.username} />}
+
+      {/* Legend (bottom-left) */}
       <View style={styles.legend}>
         <LegendItem color={COLOR_SELF}      label="You" />
         <LegendItem color={COLOR_STRANGER}  label="Nearby" />
         <LegendItem color={COLOR_CONNECTED} label="Connected" />
         <LegendItem color={COLOR_FRIEND}    label="Friend" />
       </View>
+
+      {/* Refresh button (bottom-right) */}
+      {coords && (
+        <View style={styles.refreshWrap}>
+          <RefreshButton onPress={tick} spinning={refreshing} />
+        </View>
+      )}
 
       {/* User detail sheet */}
       {selectedUser && (
@@ -402,96 +462,222 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   map: { flex: 1, backgroundColor: '#0a0a0a' },
-  center: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
+  center: { flex: 1, backgroundColor: '#0a0a0a', alignItems: 'center', justifyContent: 'center', gap: 16 },
   loadingText: { color: '#555', fontSize: 14 },
   errorText: { color: '#ff4d4d', fontSize: 15, textAlign: 'center', padding: 24 },
+
+  // ── Self marker ──
   selfRing: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 2,
     borderColor: '#8b5cf640',
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  // ── Top bar ──
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    overflow: 'hidden',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+    zIndex: 100,
+  },
+  topLogo: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  topLogoText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 3,
+  },
+  topLogoDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLOR_TEAL,
+  },
+  nearbyBadge: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  nearbyBadgeInner: {
+    backgroundColor: 'rgba(0, 180, 166, 0.15)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 180, 166, 0.3)',
+  },
+  nearbyBadgeText: {
+    color: COLOR_TEAL,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  privacyBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,180,166,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,180,166,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Zone banner ──
+  zoneBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(0,180,166,0.25)',
+    zIndex: 90,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  zoneBannerText: {
+    color: COLOR_TEAL,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+
+  // ── Refresh ──
+  refreshWrap: {
+    position: 'absolute',
+    bottom: 90,
+    right: 16,
+    zIndex: 80,
+  },
+  refreshBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: COLOR_TEAL,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLOR_TEAL,
+    shadowRadius: 12,
+    shadowOpacity: 0.5,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
+  },
+
+  // ── Legend ──
   legend: {
     position: 'absolute',
-    bottom: 80,
-    right: 16,
-    backgroundColor: '#0a0a0acc',
+    bottom: 90,
+    left: 16,
+    backgroundColor: 'rgba(10,10,10,0.8)',
     borderRadius: 12,
     padding: 12,
     gap: 8,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: 'rgba(255,255,255,0.06)',
+    zIndex: 80,
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  legendDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1, borderColor: '#333' },
+  legendDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1 },
   legendLabel: { color: '#aaa', fontSize: 11, fontWeight: '500' },
 
   // ── Sheet ──
-  backdrop: { backgroundColor: 'rgba(0,0,0,0.55)', zIndex: 150 },
+  backdrop: { backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 150 },
   sheet: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
     height: SHEET_H,
-    backgroundColor: '#111111',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: '#1e1e1e',
+    borderColor: 'rgba(255,255,255,0.1)',
     paddingHorizontal: 20,
     paddingTop: 10,
     zIndex: 200,
     elevation: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(12,12,12,0.7)',
+  },
+  sheetBlur: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
   },
   sheetHandle: {
-    width: 36,
+    width: 40,
     height: 4,
-    backgroundColor: '#2e2e2e',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 18,
+    marginBottom: 20,
   },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  sheetAvatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: '#1a1a1a',
+
+  // Avatar glow system
+  sheetAvatarGlow: {
+    shadowRadius: 18,
+    shadowOpacity: 0.7,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  sheetAvatarRing: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     borderWidth: 2,
+    padding: 3,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sheetAvatarText: { color: '#fff', fontSize: 19, fontWeight: '700' },
-  sheetName: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  sheetMeta: { color: '#555', fontSize: 12, marginTop: 3 },
+  sheetAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#1a1a2e',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetAvatarText: { color: '#fff', fontSize: 21, fontWeight: '700' },
+
+  sheetName: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 6 },
+  sheetMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  relBadge: {
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  relBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
+  sheetDist: { color: '#555', fontSize: 12 },
+
   closeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#1e1e1e',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeText: { color: '#555', fontSize: 13 },
+
   interestsSection: { marginBottom: 20 },
   sectionLabel: {
     color: '#444',
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   chipRow: { gap: 8 },
   chip: {
@@ -500,25 +686,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#00b4a630',
+    borderColor: `${COLOR_TEAL}30`,
   },
-  chipText: { color: '#00b4a6', fontSize: 12, fontWeight: '500' },
+  chipText: { color: COLOR_TEAL, fontSize: 12, fontWeight: '500' },
+
   actions: { gap: 10 },
   btnPrimary: {
-    backgroundColor: '#00b4a6',
-    borderRadius: 14,
-    paddingVertical: 14,
+    backgroundColor: COLOR_TEAL,
+    borderRadius: 16,
+    paddingVertical: 15,
     alignItems: 'center',
   },
   btnPrimaryText: { color: '#0a0a0a', fontSize: 15, fontWeight: '700' },
-  btnRow: { flexDirection: 'row', gap: 10 },
   btnSecondary: {
-    borderRadius: 14,
-    paddingVertical: 12,
+    borderRadius: 16,
+    paddingVertical: 13,
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: '#252525',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   btnSecondaryText: { color: '#888', fontSize: 14, fontWeight: '600' },
 });

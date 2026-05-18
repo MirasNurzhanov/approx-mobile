@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
+import { useScrollHandler } from '@/hooks/useScrollHandler';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Profile {
@@ -85,6 +86,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { logout } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
+  const scrollProps = useScrollHandler();
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [friendCount, setFriendCount] = useState(0);
@@ -185,6 +187,7 @@ export default function ProfileScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00b4a6" />
         }
+        {...scrollProps}
       >
         {/* ── Hero ── */}
         <View style={styles.hero}>

@@ -4,12 +4,14 @@ import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
 import { AuthProvider } from '@/context/AuthContext';
+import { ScrollNavProvider } from '@/context/ScrollNavContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
+    <ScrollNavProvider>
     <AuthProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
@@ -28,5 +30,6 @@ export default function RootLayout() {
         <StatusBar style="light" />
       </ThemeProvider>
     </AuthProvider>
+    </ScrollNavProvider>
   );
 }

@@ -15,6 +15,7 @@ import axios from 'axios';
 import { router } from 'expo-router';
 import { loginRequest } from '@/services/auth';
 import { BASE_URL } from '@/services/api';
+import { ParticleBackground } from '@/components/ParticleBackground';
 
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
 const MONTH_KEYS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
@@ -238,6 +239,7 @@ export default function RegisterScreen() {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <ParticleBackground />
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.logo}>AURA</Text>
         <Text style={styles.tagline}>Create your account</Text>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -102,6 +103,28 @@ export default function SettingsScreen() {
       .catch((e) => console.log('[Settings] profile fetch error:', e?.response?.status))
       .finally(() => setLoading(false));
   }, []);
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure? This action cannot be undone. All your data will be permanently deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete('/api/users/delete/');
+            } catch {
+              // Proceed with local cleanup even if the request fails
+            }
+            await logout();
+          },
+        },
+      ],
+    );
+  }
 
   async function selectPrivacy(mode: PrivacyMode) {
     if (mode === privacy || saving) return;
@@ -220,6 +243,16 @@ export default function SettingsScreen() {
           <Ionicons name="log-out-outline" size={18} color="#ff4d4d" />
           <Text style={styles.logoutText}>Sign Out</Text>
         </TouchableOpacity>
+
+        {/* ── Delete Account ── */}
+        <TouchableOpacity
+          style={styles.deleteBtn}
+          onPress={confirmDeleteAccount}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="trash-outline" size={18} color="#ff4d4d" />
+          <Text style={styles.deleteText}>Delete Account</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <Speedometer />
@@ -325,6 +358,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a0a0a',
     borderWidth: 1,
     borderColor: '#ff4d4d22',
+    marginBottom: 12,
   },
   logoutText: { color: '#ff4d4d', fontSize: 15, fontWeight: '600' },
+
+  // ── Delete Account ──
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#1a0a0a',
+    borderWidth: 1,
+    borderColor: '#ff4d4d55',
+  },
+  deleteText: { color: '#ff4d4d', fontSize: 15, fontWeight: '600' },
 });

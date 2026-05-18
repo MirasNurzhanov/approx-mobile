@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -39,6 +40,7 @@ interface NearbyUser {
   relationship: Relationship;
   distance?: number;
   shared_interests?: string[];
+  profile_picture?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -55,10 +57,18 @@ const REL_LABEL: Record<Relationship, string> = {
 };
 
 const POLL_MS   = 30_000;
-const SHEET_H   = 380;
+const SHEET_H   = 400;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
+const AVATAR_COLORS = ['#7c3aed', '#0891b2', '#059669', '#d97706', '#be185d', '#0284c7'];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function avatarBgColor(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) hash = username.charCodeAt(i) + (hash << 5) - hash;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
 function fmtDistance(m?: number): string | null {
   if (m == null) return null;
   return m < 1000 ? `${Math.round(m)} m away` : `${(m / 1000).toFixed(1)} km away`;
@@ -96,7 +106,7 @@ function LegendItem({ color, label }: { color: string; label: string }) {
 }
 
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
-function TopBar({ nearby, onPrivacy }: { nearby: number; onPrivacy: () => void }) {
+function TopBar({ nearby, onPrivacy, onSearch }: { nearby: number; onPrivacy: () => void; onSearch: () => void }) {
   const { top } = useSafeAreaInsets();
   return (
     <View style={[styles.topBar, { paddingTop: top + 10 }]}>
@@ -113,6 +123,11 @@ function TopBar({ nearby, onPrivacy }: { nearby: number; onPrivacy: () => void }
           <Text style={styles.nearbyBadgeText}>👥 {nearby} nearby</Text>
         </View>
       </View>
+
+      {/* Search icon */}
+      <TouchableOpacity onPress={onSearch} activeOpacity={0.7} style={styles.privacyBtn} hitSlop={10}>
+        <Ionicons name="search-outline" size={22} color={COLOR_TEAL} />
+      </TouchableOpacity>
 
       {/* Privacy icon */}
       <TouchableOpacity onPress={onPrivacy} activeOpacity={0.7} style={styles.privacyBtn} hitSlop={10}>
@@ -184,6 +199,7 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
   const relLabel      = isFriend ? 'Friend' : isConnected ? 'Connected' : REL_LABEL[user.relationship] ?? 'Nearby';
   const relBadgeColor = isFriend ? '#1e3a5f' : isConnected ? '#3d1f0a' : '#0d1f1e';
   const relTextColor  = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_TEAL;
+  const avatarBg      = avatarBgColor(user.username);
 
   function sendHi() {
     api.post('/api/proximity/wave/', { target_id: user.id }).catch(() => {});
@@ -209,32 +225,35 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
 
         <View style={styles.sheetHandle} />
 
-        {/* Header */}
-        <View style={styles.sheetHeader}>
-          {/* Avatar with glow ring */}
+        {/* Dismiss button — absolute so it doesn't affect hero centering */}
+        <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
+          <Ionicons name="close" size={16} color="#666" />
+        </Pressable>
+
+        {/* Hero: avatar centered, name + badge below */}
+        <View style={styles.sheetHero}>
           <View style={[styles.sheetAvatarGlow, { shadowColor: glowColor }]}>
             <View style={[styles.sheetAvatarRing, { borderColor: glowColor }]}>
-              <View style={styles.sheetAvatar}>
-                <Text style={styles.sheetAvatarText}>
-                  {user.username.charAt(0).toUpperCase()}
-                </Text>
+              <View style={[styles.sheetAvatar, { backgroundColor: avatarBg }]}>
+                {user.profile_picture ? (
+                  <Image source={{ uri: user.profile_picture }} style={styles.sheetAvatarImage} />
+                ) : (
+                  <Text style={styles.sheetAvatarText}>
+                    {user.username.charAt(0).toUpperCase()}
+                  </Text>
+                )}
               </View>
             </View>
           </View>
 
-          <View style={{ flex: 1, marginLeft: 14 }}>
-            <Text style={styles.sheetName}>{user.username}</Text>
-            <View style={styles.sheetMetaRow}>
-              <View style={[styles.relBadge, { backgroundColor: relBadgeColor }]}>
-                <Text style={[styles.relBadgeText, { color: relTextColor }]}>{relLabel}</Text>
-              </View>
-              {dist && <Text style={styles.sheetDist}>{dist}</Text>}
-            </View>
-          </View>
+          <Text style={styles.sheetName}>{user.username}</Text>
 
-          <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-            <Ionicons name="close" size={16} color="#666" />
-          </Pressable>
+          <View style={styles.sheetMetaRow}>
+            <View style={[styles.relBadge, { backgroundColor: relBadgeColor }]}>
+              <Text style={[styles.relBadgeText, { color: relTextColor }]}>{relLabel}</Text>
+            </View>
+            {dist && <Text style={styles.sheetDist}>{dist}</Text>}
+          </View>
         </View>
 
         {/* Shared interests */}
@@ -422,6 +441,7 @@ export default function MapScreen() {
       <TopBar
         nearby={visibleNearby.length}
         onPrivacy={() => router.push('/zone')}
+        onSearch={() => router.push('/search')}
       />
 
       {/* Zone banner */}
@@ -623,35 +643,41 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 20,
   },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  // Centered hero block
+  sheetHero: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
 
-  // Avatar glow system
+  // Avatar glow system — 64px inner / 78px outer ring
   sheetAvatarGlow: {
-    shadowRadius: 18,
-    shadowOpacity: 0.7,
+    shadowRadius: 22,
+    shadowOpacity: 0.75,
     shadowOffset: { width: 0, height: 0 },
-    elevation: 12,
+    elevation: 14,
+    marginBottom: 14,
   },
   sheetAvatarRing: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    borderWidth: 2,
-    padding: 3,
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    borderWidth: 2.5,
+    padding: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sheetAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#1a1a2e',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  sheetAvatarText: { color: '#fff', fontSize: 21, fontWeight: '700' },
+  sheetAvatarText: { color: '#fff', fontSize: 26, fontWeight: '700' },
+  sheetAvatarImage: { width: 64, height: 64, borderRadius: 32 },
 
-  sheetName: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 6 },
+  sheetName: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 8 },
   sheetMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   relBadge: {
     borderRadius: 8,
@@ -662,12 +688,16 @@ const styles = StyleSheet.create({
   sheetDist: { color: '#555', fontSize: 12 },
 
   closeBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 20,
     width: 30,
     height: 30,
     borderRadius: 15,
     backgroundColor: 'rgba(255,255,255,0.07)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 10,
   },
 
   interestsSection: { marginBottom: 20 },

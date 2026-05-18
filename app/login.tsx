@@ -3,6 +3,7 @@ import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'reac
 import { router } from 'expo-router';
 
 import { useAuth } from '@/context/AuthContext';
+import { ParticleBackground } from '@/components/ParticleBackground';
 
 export default function LoginScreen() {
   const { login, isAuthenticated, isLoading } = useAuth();
@@ -30,6 +31,7 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
+      <ParticleBackground />
       <Text style={styles.logo}>AURA</Text>
       <Text style={styles.tagline}>Find your people nearby</Text>
 

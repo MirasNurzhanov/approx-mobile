@@ -1,8 +1,10 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -30,6 +32,7 @@ interface Profile {
   aura_points?: number;
   date_joined?: string;
   interests?: { icon: string; name: string }[];
+  profile_picture?: string;
 }
 
 interface FriendList {
@@ -99,6 +102,7 @@ export default function ProfileScreen() {
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   async function fetchAll() {
     const [profileRes, friendsRes, questsRes] = await Promise.allSettled([
@@ -137,6 +141,48 @@ export default function ProfileScreen() {
     await fetchAll();
     setRefreshing(false);
   }, []);
+
+  async function pickImage() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo library access to change your profile picture.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      await uploadProfilePicture(result.assets[0].uri);
+    }
+  }
+
+  async function uploadProfilePicture(uri: string) {
+    setUploading(true);
+    try {
+      const filename = uri.split('/').pop() ?? 'photo.jpg';
+      const ext = /\.(\w+)$/.exec(filename)?.[1]?.toLowerCase() ?? 'jpeg';
+      const type = ext === 'png' ? 'image/png' : 'image/jpeg';
+
+      const form = new FormData();
+      form.append('profile_picture', {
+        uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
+        name: filename,
+        type,
+      } as any);
+
+      const { data } = await api.patch<Profile>('/api/users/profile/', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setProfile(data);
+    } catch (e: any) {
+      Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   function openEdit() {
     if (!profile) return;
@@ -191,13 +237,34 @@ export default function ProfileScreen() {
       >
         {/* ── Hero ── */}
         <View style={styles.hero}>
-          <View style={styles.avatarWrap}>
+          <TouchableOpacity
+            style={styles.avatarWrap}
+            onPress={pickImage}
+            activeOpacity={0.85}
+            disabled={uploading}
+          >
             <View style={[styles.avatarRing, { borderColor: bgColor + '55' }]}>
               <View style={[styles.avatar, { backgroundColor: bgColor }]}>
-                <Text style={styles.avatarInitial}>{initial}</Text>
+                {profile?.profile_picture ? (
+                  <Image
+                    source={{ uri: profile.profile_picture }}
+                    style={styles.avatarImage}
+                  />
+                ) : (
+                  <Text style={styles.avatarInitial}>{initial}</Text>
+                )}
+                {uploading && (
+                  <View style={styles.avatarUploadOverlay}>
+                    <ActivityIndicator color="#fff" size="small" />
+                  </View>
+                )}
               </View>
             </View>
-          </View>
+            {/* Camera badge */}
+            <View style={styles.cameraBadge}>
+              <Ionicons name="camera" size={12} color="#fff" />
+            </View>
+          </TouchableOpacity>
 
           <Text style={styles.username}>{profile?.username ?? '—'}</Text>
 
@@ -253,6 +320,12 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionList}>
+            <ActionCard
+              icon="trophy-outline"
+              label="Leaderboard"
+              sub="See where you rank in Aura Points"
+              onPress={() => router.push('/leaderboard')}
+            />
             <ActionCard
               icon="location-outline"
               label="Zone Setup"
@@ -380,6 +453,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarInitial: { color: '#fff', fontSize: 32, fontWeight: '700' },
+  avatarImage: { width: 80, height: 80, borderRadius: 40 },
+  avatarUploadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#00b4a6',
+    borderWidth: 2,
+    borderColor: '#0a0a0a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   username: { color: '#ffffff', fontSize: 22, fontWeight: '700', marginBottom: 6 },
   bio: { color: '#888', fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 280, marginBottom: 14 },

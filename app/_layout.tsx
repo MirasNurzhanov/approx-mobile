@@ -23,6 +23,8 @@ export default function RootLayout() {
           <Stack.Screen name="zone" options={{ headerShown: false, animation: 'slide_from_right' }} />
           <Stack.Screen name="profile/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
           <Stack.Screen name="edit-profile" options={{ headerShown: false, animation: 'slide_from_right' }} />
+          <Stack.Screen name="search" options={{ headerShown: false, animation: 'slide_from_right' }} />
+          <Stack.Screen name="leaderboard" options={{ headerShown: false, animation: 'slide_from_right' }} />
           <Stack.Screen name="register" options={{ headerShown: false }} />
           <Stack.Screen name="interests-setup" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />

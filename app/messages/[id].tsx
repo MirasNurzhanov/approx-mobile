@@ -95,22 +95,26 @@ export default function MessagesScreen() {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
   const [wsReady, setWsReady] = useState(false);
+  const [otherUserPicture, setOtherUserPicture] = useState<string | null>(null);
 
   const currentUserIdRef = useRef<number | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
-  // ── Fetch current user id ────────────────────────────────────────────────
+  // ── Fetch current user id + other user's profile picture ────────────────
   useEffect(() => {
     api.get<{ id: number | string }>('/api/users/profile/')
       .then((r) => {
-        // Profile returns { id } not { sender_id } — read it directly.
         const uid = Number(r.data.id);
         currentUserIdRef.current = uid;
-        console.log('[Messages] current user id:', uid, '| raw value:', r.data.id, '| type:', typeof r.data.id);
+        console.log('[Messages] current user id:', uid);
       })
       .catch((e) => console.log('[Messages] profile fetch failed:', e?.response?.status));
-  }, []);
+
+    api.get<{ profile_picture?: string }>(`/api/users/profile/${id}/`)
+      .then((r) => setOtherUserPicture(r.data.profile_picture ?? null))
+      .catch(() => {});
+  }, [id]);
 
   // ── Fetch message history ────────────────────────────────────────────────
   useEffect(() => {
@@ -267,6 +271,18 @@ export default function MessagesScreen() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={26} color="#00b4a6" />
         </TouchableOpacity>
+
+        {/* Avatar */}
+        <View style={styles.headerAvatar}>
+          {otherUserPicture ? (
+            <Image source={{ uri: otherUserPicture }} style={styles.headerAvatarImage} />
+          ) : (
+            <Text style={styles.headerAvatarInitial}>
+              {(username ?? 'C').charAt(0).toUpperCase()}
+            </Text>
+          )}
+        </View>
+
         <View style={styles.headerInfo}>
           <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
           <View style={styles.statusRow}>
@@ -371,6 +387,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
   },
   backBtn: { padding: 4, marginRight: 4 },
+  headerAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1a2e2e',
+    borderWidth: 1.5,
+    borderColor: '#00b4a630',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    overflow: 'hidden',
+  },
+  headerAvatarImage: { width: 36, height: 36, borderRadius: 18 },
+  headerAvatarInitial: { color: '#00b4a6', fontSize: 15, fontWeight: '700' },
   headerInfo: { flex: 1 },
   headerName: { color: '#ffffff', fontSize: 17, fontWeight: '700' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },

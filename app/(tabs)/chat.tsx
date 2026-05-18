@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -25,6 +26,7 @@ interface UserSummary {
   username: string;
   last_message?: string;
   last_message_at?: string;
+  profile_picture?: string;
 }
 
 interface FriendList {
@@ -48,10 +50,18 @@ const ACCENT = {
 };
 
 // ─── Shared sub-components ────────────────────────────────────────────────────
-function Avatar({ name, borderColor }: { name: string; borderColor: string }) {
+function Avatar({ name, borderColor, profilePicture }: {
+  name: string;
+  borderColor: string;
+  profilePicture?: string;
+}) {
   return (
     <View style={[styles.avatar, { borderColor }]}>
-      <Text style={styles.avatarText}>{name.charAt(0).toUpperCase()}</Text>
+      {profilePicture ? (
+        <Image source={{ uri: profilePicture }} style={styles.avatarImage} />
+      ) : (
+        <Text style={styles.avatarText}>{name.charAt(0).toUpperCase()}</Text>
+      )}
     </View>
   );
 }
@@ -74,7 +84,11 @@ interface PendingCardProps {
 function PendingCard({ request, onAccept, onDecline }: PendingCardProps) {
   return (
     <View style={[styles.card, styles.cardPending]}>
-      <Avatar name={request.from_user.username} borderColor={ACCENT.pending} />
+      <Avatar
+        name={request.from_user.username}
+        borderColor={ACCENT.pending}
+        profilePicture={request.from_user.profile_picture}
+      />
       <View style={styles.cardBody}>
         <Text style={styles.cardName}>{request.from_user.username}</Text>
         <Text style={styles.cardSub}>Sent you a Hi 👋</Text>
@@ -114,7 +128,7 @@ function UserCard({ user, type, onMessage, onAddFriend, onMenu }: UserCardProps)
 
   return (
     <TouchableOpacity style={styles.card} onPress={() => onMessage(user)} activeOpacity={0.85}>
-      <Avatar name={user.username} borderColor={borderColor} />
+      <Avatar name={user.username} borderColor={borderColor} profilePicture={user.profile_picture} />
       <View style={styles.cardBody}>
         <Text style={styles.cardName}>{user.username}</Text>
         <Text
@@ -156,7 +170,7 @@ interface BlockedCardProps {
 function BlockedCard({ user, onUnblock }: BlockedCardProps) {
   return (
     <View style={[styles.card, styles.cardBlocked]}>
-      <Avatar name={user.username} borderColor={ACCENT.blocked} />
+      <Avatar name={user.username} borderColor={ACCENT.blocked} profilePicture={user.profile_picture} />
       <View style={styles.cardBody}>
         <Text style={[styles.cardName, styles.cardNameBlocked]}>{user.username}</Text>
         <Text style={styles.cardSub}>Blocked</Text>
@@ -510,7 +524,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+    overflow: 'hidden',
   },
+  avatarImage: { width: 46, height: 46, borderRadius: 23 },
   avatarText: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
 
   // Card body

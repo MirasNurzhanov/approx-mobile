@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
+import { ParticleBackground } from '@/components/ParticleBackground';
 
 interface Interest {
   id: number;
@@ -56,6 +57,7 @@ export default function InterestsSetupScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
+      <ParticleBackground />
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Your Interests</Text>

@@ -1,66 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { Animated, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 
-const { width, height } = Dimensions.get('window');
-
-type ParticleConfig = {
-  id: number;
-  startX: number;
-  startY: number;
-  size: number;
-  duration: number;
-  dy: number;
-  dx: number;
-  maxOpacity: number;
-  initialProgress: number;
-};
-
-// Pre-compute once so positions never change between renders
-const PARTICLES: ParticleConfig[] = Array.from({ length: 32 }, (_, i) => ({
-  id: i,
-  startX: Math.random() * width,
-  startY: Math.random() * height,
-  size: 1.5 + Math.random() * 2.5,
-  duration: 9000 + Math.random() * 13000,
-  dy: -(45 + Math.random() * 75),
-  dx: (Math.random() - 0.5) * 55,
-  maxOpacity: 0.12 + Math.random() * 0.28,
-  initialProgress: Math.random(), // stagger so they don't all start at once
-}));
-
-function Particle({ config }: { config: ParticleConfig }) {
-  const progress = useRef(new Animated.Value(config.initialProgress)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.timing(progress, { toValue: 1, duration: config.duration, useNativeDriver: true })
-    ).start();
-  }, []);
-
-  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [0, config.dy] });
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [0, config.dx] });
-  const opacity = progress.interpolate({
-    inputRange: [0, 0.08, 0.75, 1],
-    outputRange: [0, config.maxOpacity, config.maxOpacity * 0.5, 0],
-  });
-
-  return (
-    <Animated.View
-      style={{
-        position: 'absolute',
-        left: config.startX,
-        top: config.startY,
-        width: config.size,
-        height: config.size,
-        borderRadius: config.size / 2,
-        backgroundColor: '#00b4a6',
-        opacity,
-        transform: [{ translateX }, { translateY }],
-      }}
-    />
-  );
-}
+import { ParticleBackground } from '@/components/ParticleBackground';
 
 export default function WelcomeScreen() {
   const glowPulse = useRef(new Animated.Value(0.45)).current;
@@ -76,10 +18,7 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Particle layer */}
-      {PARTICLES.map((p) => (
-        <Particle key={p.id} config={p} />
-      ))}
+      <ParticleBackground />
 
       {/* Content */}
       <View style={styles.content}>

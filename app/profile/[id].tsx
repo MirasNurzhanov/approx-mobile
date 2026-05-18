@@ -4,6 +4,7 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
+  Image,
   Platform,
   ScrollView,
   StyleSheet,
@@ -32,6 +33,7 @@ interface UserProfile {
   interests?: Interest[];
   relationship?: Relationship;
   aura_points?: number;
+  profile_picture?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -261,7 +263,11 @@ export default function UserProfileScreen() {
         <View style={styles.hero}>
           <View style={[styles.avatarRing, { borderColor: relColor + '60' }]}>
             <View style={[styles.avatar, { backgroundColor: bg }]}>
-              <Text style={styles.avatarInitial}>{initial}</Text>
+              {profile.profile_picture ? (
+                <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarInitial}>{initial}</Text>
+              )}
             </View>
           </View>
 
@@ -400,6 +406,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarInitial: { color: '#fff', fontSize: 34, fontWeight: '700' },
+  avatarImage: { width: 86, height: 86, borderRadius: 43 },
 
   username: { color: '#ffffff', fontSize: 22, fontWeight: '700', marginBottom: 8 },
   bio: { color: '#888', fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 280, marginBottom: 12 },

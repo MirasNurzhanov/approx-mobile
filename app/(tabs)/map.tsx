@@ -23,14 +23,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
+import MapView, { Circle, Marker, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
 import { api } from '@/services/api';
+import { registerNearbyRefresh } from '@/services/nearbyRefresh';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Relationship = 'stranger' | 'connected' | 'friend';
+type Relationship = 'stranger' | 'hi_sent' | 'connected' | 'friend';
 
 interface NearbyUser {
   id: number;
@@ -41,6 +42,15 @@ interface NearbyUser {
   distance?: number;
   shared_interests?: string[];
   profile_picture?: string;
+  zone_active?: boolean;
+  zone_radius?: number;
+  zone_audio_url?: string;
+}
+
+interface SelfZone {
+  zone_active: boolean;
+  zone_radius: number;
+  zone_audio_url?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -51,12 +61,13 @@ const COLOR_SELF      = '#8b5cf6';
 const COLOR_TEAL      = '#00b4a6';
 
 const REL_LABEL: Record<Relationship, string> = {
-  stranger: 'Nearby',
+  stranger:  'Nearby',
+  hi_sent:   'Hi Sent',
   connected: 'Connected',
-  friend: 'Friend',
+  friend:    'Friend',
 };
 
-const POLL_MS   = 30_000;
+const POLL_MS   = 10_000;
 const SHEET_H   = 400;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
@@ -178,11 +189,10 @@ interface SheetProps {
   user: NearbyUser;
   sheetY: SharedValue<number>;
   onDismiss: () => void;
-  friendIds: Set<number>;
-  connectionIds: Set<number>;
+  onFriendChange: () => void;
 }
 
-function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetProps) {
+function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
   const router = useRouter();
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({
@@ -190,19 +200,24 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
   }));
   const dist = fmtDistance(user.distance);
 
-  const uid = Number(user.id);
-  const isFriend    = friendIds.has(uid);
-  const isConnected = !isFriend && connectionIds.has(uid);
-  const isStranger  = !isFriend && !isConnected;
+  const rel         = user.relationship ?? 'stranger';
+  const isFriend    = rel === 'friend';
+  const isConnected = rel === 'connected';
+  const isHiSent    = rel === 'hi_sent';
+  const isStranger  = rel === 'stranger';
 
   const glowColor     = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_TEAL;
-  const relLabel      = isFriend ? 'Friend' : isConnected ? 'Connected' : REL_LABEL[user.relationship] ?? 'Nearby';
+  const relLabel      = REL_LABEL[rel] ?? 'Nearby';
   const relBadgeColor = isFriend ? '#1e3a5f' : isConnected ? '#3d1f0a' : '#0d1f1e';
   const relTextColor  = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_TEAL;
   const avatarBg      = avatarBgColor(user.username);
 
   function sendHi() {
-    api.post('/api/proximity/wave/', { target_id: user.id }).catch(() => {});
+    const url = '/api/friends/hi/';
+    console.log('[Hi] sending to URL:', url, 'body:', { receiver_id: user.id });
+    api.post(url, { receiver_id: user.id })
+      .then(() => onFriendChange())
+      .catch((e) => console.log('[Hi] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
     onDismiss();
   }
 
@@ -281,6 +296,11 @@ function UserSheet({ user, sheetY, onDismiss, friendIds, connectionIds }: SheetP
               <Text style={styles.btnPrimaryText}>👋  Send Hi</Text>
             </TouchableOpacity>
           )}
+          {isHiSent && (
+            <TouchableOpacity style={[styles.btnPrimary, styles.btnSent]} activeOpacity={1} disabled>
+              <Text style={styles.btnSentText}>Hi Sent ✓</Text>
+            </TouchableOpacity>
+          )}
           {(isFriend || isConnected) && (
             <TouchableOpacity style={styles.btnPrimary} activeOpacity={0.8} onPress={goToMessages}>
               <Text style={styles.btnPrimaryText}>💬  Message</Text>
@@ -307,25 +327,41 @@ export default function MapScreen() {
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [friendsReady, setFriendsReady] = useState(false);
   const [activeZone, setActiveZone]   = useState<{ username: string } | null>(null);
+  const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
   const [refreshing, setRefreshing]   = useState(false);
+  const [hiToast, setHiToast]         = useState(false);
 
-  const coordsRef = useRef(coords);
+  const coordsRef      = useRef(coords);
+  const hiToastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   coordsRef.current = coords;
 
   const sheetY = useSharedValue(SHEET_H);
+
+  const fetchFriends = useCallback(async () => {
+    try {
+      const r = await api.get<{ friends: { id: number }[]; connections: { id: number }[] }>('/api/friends/list/');
+      setFriendIds(new Set(r.data.friends.map((u) => Number(u.id))));
+      setConnectionIds(new Set(r.data.connections.map((u) => Number(u.id))));
+    } catch {}
+  }, []);
+
+  function handleHiSent() {
+    fetchFriends();
+    setHiToast(true);
+    if (hiToastTimer.current) clearTimeout(hiToastTimer.current);
+    hiToastTimer.current = setTimeout(() => setHiToast(false), 1500);
+  }
 
   useEffect(() => {
     api.get<{ id: number; username: string }>('/api/users/me/')
       .then((r) => setCurrentUserId(r.data.id))
       .catch(() => {});
 
-    api.get<{ friends: { id: number }[]; connections: { id: number }[] }>('/api/friends/list/')
-      .then((r) => {
-        setFriendIds(new Set(r.data.friends.map((u) => Number(u.id))));
-        setConnectionIds(new Set(r.data.connections.map((u) => Number(u.id))));
-        setFriendsReady(true);
-      })
-      .catch(() => setFriendsReady(true));
+    api.get<SelfZone>('/api/users/zone/')
+      .then((r) => setSelfZone(r.data))
+      .catch(() => {});
+
+    fetchFriends().finally(() => setFriendsReady(true));
   }, []);
 
   useEffect(() => {
@@ -359,10 +395,17 @@ export default function MapScreen() {
     ]);
 
     if (nearbyResult.status === 'fulfilled') {
-      setNearby(nearbyResult.value.data);
+      const users = nearbyResult.value.data;
+      users.forEach((u) => {
+        if (u.zone_active || u.zone_radius) {
+          console.log('[Map] zone data:', u.username, u.zone_active, u.zone_radius, u.zone_audio_url);
+        }
+      });
+      setNearby(users);
     }
+    await fetchFriends();
     setRefreshing(false);
-  }, []);
+  }, [fetchFriends]);
 
   useEffect(() => {
     if (!coords) return;
@@ -370,6 +413,18 @@ export default function MapScreen() {
     const id = setInterval(tick, POLL_MS);
     return () => clearInterval(id);
   }, [!!coords]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Register tick as the global refresh so other screens can trigger it
+  useEffect(() => {
+    registerNearbyRefresh(tick);
+  }, [tick]);
+
+  // Keep the open sheet in sync with the latest nearby fetch
+  useEffect(() => {
+    if (!selectedUser) return;
+    const fresh = nearby.find((u) => u.id === selectedUser.id);
+    if (fresh) setSelectedUser(fresh);
+  }, [nearby]);
 
   function openSheet(user: NearbyUser) {
     setSelectedUser(user);
@@ -409,6 +464,31 @@ export default function MapScreen() {
           rotateEnabled={false}
           pitchEnabled={false}
         >
+          {/* Zone circles for nearby users */}
+          {visibleNearby
+            .filter((u) => u.zone_active && (u.zone_radius ?? 0) > 0)
+            .map((u) => (
+              <Circle
+                key={`zone-${u.id}`}
+                center={{ latitude: u.latitude, longitude: u.longitude }}
+                radius={u.zone_radius!}
+                fillColor="rgba(0,180,166,0.07)"
+                strokeColor="rgba(0,180,166,0.35)"
+                strokeWidth={1.5}
+              />
+            ))}
+
+          {/* Zone circle for self */}
+          {selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
+            <Circle
+              center={coords}
+              radius={selfZone.zone_radius}
+              fillColor="rgba(139,92,246,0.07)"
+              strokeColor="rgba(139,92,246,0.35)"
+              strokeWidth={1.5}
+            />
+          )}
+
           {visibleNearby.map((user) => {
             const uid = Number(user.id);
             const color = friendIds.has(uid) ? COLOR_FRIEND : connectionIds.has(uid) ? COLOR_CONNECTED : COLOR_STRANGER;
@@ -468,9 +548,15 @@ export default function MapScreen() {
           user={selectedUser}
           sheetY={sheetY}
           onDismiss={closeSheet}
-          friendIds={friendIds}
-          connectionIds={connectionIds}
+          onFriendChange={handleHiSent}
         />
+      )}
+
+      {/* Hi sent toast */}
+      {hiToast && (
+        <View style={styles.hiToast} pointerEvents="none">
+          <Text style={styles.hiToastText}>Hi sent! 👋</Text>
+        </View>
       )}
 
       <Speedometer />
@@ -737,4 +823,21 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
   },
   btnSecondaryText: { color: '#888', fontSize: 14, fontWeight: '600' },
+  btnSent: { backgroundColor: '#0d1f1e', borderWidth: 1, borderColor: `${COLOR_TEAL}40` },
+  btnSentText: { color: COLOR_TEAL, fontSize: 15, fontWeight: '600', opacity: 0.7 },
+
+  // ── Hi toast ──
+  hiToast: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: '46%',
+    backgroundColor: '#071a19',
+    borderWidth: 1,
+    borderColor: `${COLOR_TEAL}55`,
+    borderRadius: 24,
+    paddingHorizontal: 22,
+    paddingVertical: 11,
+    zIndex: 200,
+  },
+  hiToastText: { color: COLOR_TEAL, fontSize: 15, fontWeight: '600' },
 });

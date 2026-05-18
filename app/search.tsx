@@ -64,12 +64,13 @@ function sharedCount(user: SearchUser): number {
 interface CardProps {
   user: SearchUser;
   hiSent: boolean;
+  hiSuccess: boolean;
   onSendHi: () => void;
   onMessage: () => void;
   onPress: () => void;
 }
 
-function UserCard({ user, hiSent, onSendHi, onMessage, onPress }: CardProps) {
+function UserCard({ user, hiSent, hiSuccess, onSendHi, onMessage, onPress }: CardProps) {
   const bg    = avatarBg(user.username);
   const rel   = user.relationship ?? 'stranger';
   const count = sharedCount(user);
@@ -111,7 +112,7 @@ function UserCard({ user, hiSent, onSendHi, onMessage, onPress }: CardProps) {
           hitSlop={4}
         >
           <Text style={[styles.actionText, hiSent && styles.actionTextDone]}>
-            {hiSent ? 'Sent ✓' : '👋 Hi'}
+            {hiSuccess ? 'Hi sent! 👋' : hiSent ? 'Sent ✓' : '👋 Hi'}
           </Text>
         </TouchableOpacity>
       ) : (
@@ -138,6 +139,7 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [sentHiIds, setSentHiIds] = useState<Set<number>>(new Set());
+  const [hiSuccessId, setHiSuccessId] = useState<number | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef    = useRef<TextInput>(null);
@@ -176,10 +178,16 @@ export default function SearchScreen() {
   }
 
   async function sendHi(user: SearchUser) {
+    const url = `/api/friends/hi/${user.id}/`;
+    console.log('[Hi] sending to URL:', url);
     try {
-      await api.post('/api/proximity/wave/', { target_id: user.id });
+      await api.post(url);
       setSentHiIds((prev) => new Set(prev).add(user.id));
-    } catch {}
+      setHiSuccessId(user.id);
+      setTimeout(() => setHiSuccessId(null), 1000);
+    } catch (e: any) {
+      console.log('[Hi] error:', e?.response?.status, JSON.stringify(e?.response?.data));
+    }
   }
 
   function goToProfile(user: SearchUser) {
@@ -237,6 +245,7 @@ export default function SearchScreen() {
           <UserCard
             user={item}
             hiSent={sentHiIds.has(item.id)}
+            hiSuccess={hiSuccessId === item.id}
             onSendHi={() => sendHi(item)}
             onMessage={() => goToMessages(item)}
             onPress={() => goToProfile(item)}

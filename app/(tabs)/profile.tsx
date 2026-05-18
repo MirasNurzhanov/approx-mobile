@@ -95,6 +95,7 @@ export default function ProfileScreen() {
   const [friendCount, setFriendCount] = useState(0);
   const [connectionCount, setConnectionCount] = useState(0);
   const [questCount, setQuestCount] = useState(0);
+  const [auraPoints, setAuraPoints] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -123,11 +124,12 @@ export default function ProfileScreen() {
     }
 
     if (questsRes.status === 'fulfilled') {
-      const data = questsRes.value.data;
+      const data = questsRes.value.data as any;
       if (Array.isArray(data)) {
         setQuestCount(data.filter((q: any) => q.completed || q.status === 'completed').length);
-      } else if (data && typeof data === 'object' && 'completed' in data) {
-        setQuestCount(Number((data as any).completed) || 0);
+      } else if (data && typeof data === 'object') {
+        if ('completed' in data) setQuestCount(Number(data.completed) || 0);
+        if (typeof data.total_points === 'number') setAuraPoints(data.total_points);
       }
     }
   }
@@ -277,7 +279,7 @@ export default function ProfileScreen() {
           {/* Aura Points */}
           <View style={styles.auraRow}>
             <Text style={styles.auraIcon}>◉</Text>
-            <Text style={styles.auraValue}>{(profile?.aura_points ?? 0).toLocaleString()}</Text>
+            <Text style={styles.auraValue}>{(auraPoints || profile?.aura_points || 0).toLocaleString()}</Text>
             <Text style={styles.auraLabel}>Aura Points</Text>
           </View>
 

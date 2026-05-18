@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,11 +12,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
 import { api } from '@/services/api';
+import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,7 +38,8 @@ interface FriendList {
 
 interface PendingRequest {
   id: number;
-  from_user: UserSummary;
+  from_user?: UserSummary;
+  sender?: UserSummary;
   message?: string;
   created_at?: string;
 }
@@ -82,15 +85,18 @@ interface PendingCardProps {
 }
 
 function PendingCard({ request, onAccept, onDecline }: PendingCardProps) {
+  const user = request.sender ?? request.from_user;
+  console.log('[Chat] PendingCard request:', JSON.stringify(request));
+  if (!user) return null;
   return (
     <View style={[styles.card, styles.cardPending]}>
       <Avatar
-        name={request.from_user.username}
+        name={user.username}
         borderColor={ACCENT.pending}
-        profilePicture={request.from_user.profile_picture}
+        profilePicture={user.profile_picture}
       />
       <View style={styles.cardBody}>
-        <Text style={styles.cardName}>{request.from_user.username}</Text>
+        <Text style={styles.cardName}>{user.username}</Text>
         <Text style={styles.cardSub}>Sent you a Hi 👋</Text>
         <View style={styles.cardActions}>
           <TouchableOpacity
@@ -117,12 +123,13 @@ function PendingCard({ request, onAccept, onDecline }: PendingCardProps) {
 interface UserCardProps {
   user: UserSummary;
   type: 'connected' | 'friend';
+  requestSent?: boolean;
   onMessage: (user: UserSummary) => void;
   onAddFriend?: (user: UserSummary) => void;
   onMenu: (user: UserSummary, type: 'connected' | 'friend') => void;
 }
 
-function UserCard({ user, type, onMessage, onAddFriend, onMenu }: UserCardProps) {
+function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: UserCardProps) {
   const borderColor = type === 'connected' ? ACCENT.connected : ACCENT.friend;
   const hasMessage = !!user.last_message;
 
@@ -140,11 +147,18 @@ function UserCard({ user, type, onMessage, onAddFriend, onMenu }: UserCardProps)
         {type === 'connected' && onAddFriend && (
           <View style={styles.cardActions}>
             <TouchableOpacity
-              style={[styles.btn, styles.btnGhost]}
-              onPress={() => onAddFriend(user)}
-              activeOpacity={0.8}
+              style={[styles.btn, requestSent ? styles.btnSent : styles.btnGhost]}
+              onPress={() => {
+                if (requestSent) return;
+                console.log('[Add Friend] button pressed for user:', user.id, user.username);
+                onAddFriend(user);
+              }}
+              activeOpacity={requestSent ? 1 : 0.8}
+              disabled={requestSent}
             >
-              <Text style={styles.btnGhostText}>Add Friend</Text>
+              <Text style={requestSent ? styles.btnSentText : styles.btnGhostText}>
+                {requestSent ? 'Request Sent ✓' : 'Add Friend'}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -198,8 +212,9 @@ export default function ChatScreen() {
   const [blocked, setBlocked] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     const [listRes, pendingRes, blockedRes] = await Promise.allSettled([
       api.get<FriendList>('/api/friends/list/'),
       api.get<PendingRequest[]>('/api/friends/requests/'),
@@ -213,22 +228,37 @@ export default function ChatScreen() {
       });
     }
     if (pendingRes.status === 'fulfilled') {
-      setPending(Array.isArray(pendingRes.value.data) ? pendingRes.value.data : []);
+      const raw = pendingRes.value.data;
+      console.log('[Chat] pending requests raw:', JSON.stringify(raw));
+      setPending(Array.isArray(raw) ? raw : []);
     }
     if (blockedRes.status === 'fulfilled') {
       setBlocked(Array.isArray(blockedRes.value.data) ? blockedRes.value.data : []);
     }
-  }
-
-  useEffect(() => {
-    fetchAll().finally(() => setLoading(false));
   }, []);
+
+  // Initial load
+  useEffect(() => {
+    AsyncStorage.setItem('chat_last_seen', new Date().toISOString());
+    fetchAll().finally(() => setLoading(false));
+  }, [fetchAll]);
+
+  // Poll every 15 seconds
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    fetchAll();
+    pollRef.current = setInterval(fetchAll, 5_000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchAll]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchAll();
     setRefreshing(false);
-  }, []);
+  }, [fetchAll]);
 
   // ── Connections tab shows only users NOT already in friends list ──
   const friendIds = new Set(friendList.friends.map((f) => f.id));
@@ -236,8 +266,11 @@ export default function ChatScreen() {
 
   // ── Pending ───────────────────────────────────────────────────────
   function handleAccept(id: number) {
+    const url = `/api/friends/hi/${id}/accept/`;
+    console.log('[Accept Hi] request id:', id);
+    console.log('[Accept Hi] calling URL:', url);
     setPending((prev) => prev.filter((r) => r.id !== id));
-    api.post(`/api/friends/requests/${id}/accept/`)
+    api.post(url)
       .then(() =>
         api.get<FriendList>('/api/friends/list/').then((r) =>
           setFriendList({
@@ -246,12 +279,17 @@ export default function ChatScreen() {
           }),
         ),
       )
-      .catch(() => {});
+      .catch((e) => console.log('[Accept Hi] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
   }
 
-  function handleDecline(id: number) {
-    setPending((prev) => prev.filter((r) => r.id !== id));
-    api.post(`/api/friends/requests/${id}/decline/`).catch(() => {});
+  function handleDecline(requestId: number) {
+    const url = `/api/friends/hi/${requestId}/decline/`;
+    console.log('[Decline] request id:', requestId, 'url:', url);
+    setPending((prev) => prev.filter((r) => r.id !== requestId));
+    api.post(url)
+      .then((res) => console.log('[Decline] success:', res.status))
+      .catch((e) => console.log('[Decline] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
+    triggerNearbyRefresh();
   }
 
   // ── Block / remove ───────────────────────────────────────────────
@@ -290,7 +328,15 @@ export default function ChatScreen() {
   }
 
   function handleAddFriend(user: UserSummary) {
-    api.post('/api/friends/add/', { user_id: user.id }).catch(() => {});
+    const url = `/api/friends/request/${user.id}/`;
+    console.log('[Friend Request] sending to user:', user.id);
+    console.log('[Friend Request] calling URL:', url);
+    api.post(url)
+      .then((res) => {
+        console.log('[Friend Request] success:', res.status);
+        setSentRequestIds((prev) => new Set(prev).add(user.id));
+      })
+      .catch((e) => console.log('[Friend Request] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
   }
 
   // ── ⋮ menu ───────────────────────────────────────────────────────
@@ -397,6 +443,7 @@ export default function ChatScreen() {
             <UserCard
               user={item}
               type="connected"
+              requestSent={sentRequestIds.has(item.id)}
               onMessage={handleMessage}
               onAddFriend={handleAddFriend}
               onMenu={openMenu}
@@ -555,6 +602,12 @@ const styles = StyleSheet.create({
     borderColor: '#252525',
   },
   btnGhostText: { color: '#666', fontSize: 12, fontWeight: '600' },
+  btnSent: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#1e1e1e',
+  },
+  btnSentText: { color: '#2e2e2e', fontSize: 12, fontWeight: '600' },
 
   // Empty state
   empty: { alignItems: 'center', paddingTop: 64 },

@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Relationship = 'stranger' | 'connected' | 'friend';
+type Relationship = 'stranger' | 'hi_sent' | 'hi_received' | 'connected' | 'friend';
 
 interface Interest {
   icon: string;
@@ -38,15 +38,19 @@ interface UserProfile {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const REL_COLOR: Record<Relationship, string> = {
-  stranger:  '#FFFFFF',
-  connected: '#FF9500',
-  friend:    '#007AFF',
+  stranger:    '#FFFFFF',
+  hi_sent:     '#00b4a6',
+  hi_received: '#00b4a6',
+  connected:   '#FF9500',
+  friend:      '#007AFF',
 };
 
 const REL_LABEL: Record<Relationship, string> = {
-  stranger:  'Nearby',
-  connected: 'Connected',
-  friend:    'Friend',
+  stranger:    'Nearby',
+  hi_sent:     'Hi Sent',
+  hi_received: 'Hi Received',
+  connected:   'Connected',
+  friend:      'Friend',
 };
 
 const AVATAR_COLORS = ['#7c3aed', '#0891b2', '#059669', '#d97706', '#be185d', '#0284c7'];
@@ -79,35 +83,53 @@ export default function UserProfileScreen() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log('[UserProfile] id from params:', id, typeof id);
-    const url = `/api/users/profile/${id}/`;
-    console.log('[UserProfile] fetching:', url);
+    const numId = Number(id);
+    console.log('[UserProfile] fetching profile + relationship for id:', numId);
 
     Promise.allSettled([
-      api.get<UserProfile>(url),
+      api.get<UserProfile>(`/api/users/profile/${numId}/`),
       api.get<{ friends: { id: number }[]; connections: { id: number }[] }>('/api/friends/list/'),
-    ]).then(([profileRes, friendsRes]) => {
+      api.get<{ id: number; sender?: { id: number }; from_user?: { id: number } }[]>('/api/friends/requests/'),
+      api.get<{ id: number; relationship?: string }[]>('/api/proximity/nearby/'),
+    ]).then(([profileRes, friendsRes, requestsRes, nearbyRes]) => {
       if (profileRes.status === 'fulfilled') {
-        console.log('[UserProfile] response:', JSON.stringify(profileRes.value.data).slice(0, 300));
+        console.log('[UserProfile] profile:', JSON.stringify(profileRes.value.data).slice(0, 300));
         setProfile(profileRes.value.data);
+
+        // If the profile endpoint already returns relationship, trust it and stop
+        if (profileRes.value.data.relationship) {
+          setRelationship(profileRes.value.data.relationship);
+          return;
+        }
       } else {
-        console.log('[UserProfile] fetch error:', profileRes.reason?.response?.status, JSON.stringify(profileRes.reason?.response?.data));
+        console.log('[UserProfile] profile error:', profileRes.reason?.response?.status);
       }
+
+      // Derive relationship from other sources, in priority order
+      let rel: Relationship = 'stranger';
 
       if (friendsRes.status === 'fulfilled') {
         const { friends, connections } = friendsRes.value.data;
-        const numId = Number(id);
-        console.log('[UserProfile] friends ids:', friends.map((u) => Number(u.id)));
-        console.log('[UserProfile] connection ids:', connections.map((u) => Number(u.id)));
-        console.log('[UserProfile] looking for id:', numId);
         if (friends.some((u) => Number(u.id) === numId)) {
-          setRelationship('friend');
+          rel = 'friend';
         } else if (connections.some((u) => Number(u.id) === numId)) {
-          setRelationship('connected');
-        } else {
-          setRelationship('stranger');
+          rel = 'connected';
         }
       }
+
+      if (rel === 'stranger' && requestsRes.status === 'fulfilled') {
+        const reqs = Array.isArray(requestsRes.value.data) ? requestsRes.value.data : [];
+        const received = reqs.some((r) => Number(r.sender?.id ?? r.from_user?.id) === numId);
+        if (received) rel = 'hi_received';
+      }
+
+      if (rel === 'stranger' && nearbyRes.status === 'fulfilled') {
+        const found = (nearbyRes.value.data ?? []).find((u) => Number(u.id) === numId);
+        if (found?.relationship) rel = found.relationship as Relationship;
+      }
+
+      console.log('[UserProfile] derived relationship:', rel);
+      setRelationship(rel);
     }).finally(() => setLoading(false));
   }, [id]);
 
@@ -115,22 +137,24 @@ export default function UserProfileScreen() {
   async function sendHi() {
     setActionLoading('hi');
     try {
-      await api.post('/api/proximity/wave/', { target_id: Number(id) });
-      Alert.alert('Wave sent!', `You waved at ${profile?.username} 👋`);
+      await api.post('/api/friends/hi/', { receiver_id: Number(id) });
+      setRelationship('hi_sent');
     } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not send wave.');
+      console.log('[UserProfile] sendHi error:', e?.response?.status, JSON.stringify(e?.response?.data));
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not send Hi.');
     } finally {
       setActionLoading(null);
     }
   }
 
-  async function sendFriendRequest() {
-    setActionLoading('friend');
+  async function acceptHi() {
+    setActionLoading('accept');
     try {
-      await api.post('/api/friends/add/', { user_id: Number(id) });
-      Alert.alert('Request sent!', `Friend request sent to ${profile?.username}`);
+      await api.post('/api/friends/hi/accept/', { sender_id: Number(id) });
+      setRelationship('connected');
     } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not send friend request.');
+      console.log('[UserProfile] acceptHi error:', e?.response?.status, JSON.stringify(e?.response?.data));
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not accept Hi.');
     } finally {
       setActionLoading(null);
     }
@@ -228,7 +252,7 @@ export default function UserProfileScreen() {
     );
   }
 
-  const rel: Relationship = relationship;
+  const rel = relationship;
   const relColor = REL_COLOR[rel];
   const bg = avatarBg(profile.username);
   const initial = profile.username.charAt(0).toUpperCase();
@@ -323,31 +347,32 @@ export default function UserProfileScreen() {
             </TouchableOpacity>
           )}
 
-          {rel === 'connected' && (
-            <View style={styles.btnRow}>
-              <TouchableOpacity
-                style={[styles.btnPrimary, { flex: 1 }]}
-                onPress={goToMessages}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.btnPrimaryText}>Message 💬</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btnSecondary, { flex: 1 }, actionLoading === 'friend' && styles.btnOff]}
-                onPress={sendFriendRequest}
-                disabled={actionLoading !== null}
-                activeOpacity={0.8}
-              >
-                {actionLoading === 'friend' ? (
-                  <ActivityIndicator color="#aaa" size="small" />
-                ) : (
-                  <Text style={styles.btnSecondaryText}>Add Friend</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+          {rel === 'hi_sent' && (
+            <TouchableOpacity
+              style={[styles.btnPrimary, styles.btnOff]}
+              disabled
+              activeOpacity={1}
+            >
+              <Text style={styles.btnPrimaryText}>Hi Sent ✓</Text>
+            </TouchableOpacity>
           )}
 
-          {rel === 'friend' && (
+          {rel === 'hi_received' && (
+            <TouchableOpacity
+              style={[styles.btnPrimary, actionLoading === 'accept' && styles.btnOff]}
+              onPress={acceptHi}
+              disabled={actionLoading !== null}
+              activeOpacity={0.8}
+            >
+              {actionLoading === 'accept' ? (
+                <ActivityIndicator color="#0a0a0a" size="small" />
+              ) : (
+                <Text style={styles.btnPrimaryText}>Accept Hi 👋</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {(rel === 'connected' || rel === 'friend') && (
             <TouchableOpacity
               style={styles.btnPrimary}
               onPress={goToMessages}

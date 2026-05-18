@@ -10,12 +10,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { useScrollNav } from '@/context/ScrollNavContext';
+import { api } from '@/services/api';
 
 // ─── Animated SVG primitives ──────────────────────────────────────────────────
 const AnimatedLine   = Animated.createAnimatedComponent(Line);
@@ -35,6 +36,10 @@ const SLIM_H = 56; // slim tab bar row height
 
 const SPRING = { damping: 18, stiffness: 150, mass: 0.9 };
 const FADE   = { duration: 200, easing: Easing.out(Easing.cubic) };
+
+// ─── Badge indices ────────────────────────────────────────────────────────────
+const CHAT_IDX  = 2; // 'Chat'   is index 2
+const NOTIF_IDX = 3; // 'Alerts' is index 3
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -107,6 +112,61 @@ export function Speedometer() {
   const { collapsed }     = useScrollNav();
 
   const [activeIdx, setActiveIdx] = useState(() => matchSection(pathname));
+  const [chatBadge,  setChatBadge]  = useState(0);
+  const [notifBadge, setNotifBadge] = useState(0);
+
+  // ── Chat badge: pending Hi requests + unread messages ────────────────────────
+  const fetchChatBadge = useCallback(async () => {
+    try {
+      const [pendingRes, unreadRes] = await Promise.allSettled([
+        api.get<unknown>('/api/friends/requests/'),
+        api.get<unknown>('/api/friends/messages/unread/'),
+      ]);
+      let count = 0;
+      if (pendingRes.status === 'fulfilled') {
+        const d = pendingRes.value.data;
+        if (Array.isArray(d)) count += d.length;
+        else if (d && typeof d === 'object' && 'count' in d) count += Number((d as any).count);
+      }
+      if (unreadRes.status === 'fulfilled') {
+        const d = unreadRes.value.data;
+        if (typeof d === 'number') count += d;
+        else if (Array.isArray(d)) count += d.length;
+        else if (d && typeof d === 'object') count += Number((d as any).unread_count ?? (d as any).count ?? 0);
+      }
+      setChatBadge(count);
+    } catch {}
+  }, []);
+
+  // ── Notifications badge: incoming friend requests ─────────────────────────────
+  const fetchNotifBadge = useCallback(async () => {
+    try {
+      const res = await api.get<unknown>('/api/friends/requests/incoming/');
+      const d = res.data;
+      let count = 0;
+      if (Array.isArray(d)) count = d.length;
+      else if (d && typeof d === 'object' && 'count' in d) count = Number((d as any).count);
+      setNotifBadge(count);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchChatBadge();
+    const id = setInterval(fetchChatBadge, 10_000);
+    return () => clearInterval(id);
+  }, [fetchChatBadge]);
+
+  useEffect(() => {
+    fetchNotifBadge();
+    const id = setInterval(fetchNotifBadge, 5_000);
+    return () => clearInterval(id);
+  }, [fetchNotifBadge]);
+
+  // Re-fetch on tab focus
+  useEffect(() => {
+    if (pathname.includes('chat'))          fetchChatBadge();
+    if (pathname.includes('notification')) fetchNotifBadge();
+  }, [pathname]);
 
   const needleAngle      = useSharedValue(SECTIONS[matchSection(pathname)].mid);
   const containerH       = useSharedValue(SVG_H + safeBottom);
@@ -227,6 +287,16 @@ export function Speedometer() {
                 <Text style={[styles.label, { color: isActive ? '#0a0a0a' : '#444' }]}>
                   {s.label}
                 </Text>
+                {i === CHAT_IDX && chatBadge > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{chatBadge > 99 ? '99+' : String(chatBadge)}</Text>
+                  </View>
+                )}
+                {i === NOTIF_IDX && notifBadge > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{notifBadge > 99 ? '99+' : String(notifBadge)}</Text>
+                  </View>
+                )}
               </Pressable>
             );
           })}
@@ -252,11 +322,23 @@ export function Speedometer() {
                   style={styles.slimBtn}
                   hitSlop={10}
                 >
-                  <Ionicons
-                    name={isActive ? s.activeIcon : s.icon}
-                    size={22}
-                    color={isActive ? '#00b4a6' : '#444'}
-                  />
+                  <View style={{ position: 'relative' }}>
+                    <Ionicons
+                      name={isActive ? s.activeIcon : s.icon}
+                      size={22}
+                      color={isActive ? '#00b4a6' : '#444'}
+                    />
+                    {i === CHAT_IDX && chatBadge > 0 && (
+                      <View style={styles.badgeSlim}>
+                        <Text style={styles.badgeText}>{chatBadge > 99 ? '99+' : String(chatBadge)}</Text>
+                      </View>
+                    )}
+                    {i === NOTIF_IDX && notifBadge > 0 && (
+                      <View style={styles.badgeSlim}>
+                        <Text style={styles.badgeText}>{notifBadge > 99 ? '99+' : String(notifBadge)}</Text>
+                      </View>
+                    )}
+                  </View>
                 </Pressable>
               );
             })}
@@ -326,4 +408,29 @@ const styles = StyleSheet.create({
     marginTop: 1,
     letterSpacing: 0.2,
   },
+  badge: {
+    position: 'absolute',
+    top: -5,
+    right: -6,
+    minWidth: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  badgeSlim: {
+    position: 'absolute',
+    top: -4,
+    right: -7,
+    minWidth: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  badgeText: { color: '#fff', fontSize: 8, fontWeight: '800' },
 });

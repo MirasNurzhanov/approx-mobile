@@ -116,6 +116,15 @@ export default function MessagesScreen() {
       .catch(() => {});
   }, [id]);
 
+  // ── Mark conversation as read (clears badge) ────────────────────────────
+  useEffect(() => {
+    AsyncStorage.setItem('chat_last_seen', new Date().toISOString());
+    const timer = setTimeout(() => {
+      api.post(`/api/friends/messages/${id}/read/`).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [id]);
+
   // ── Fetch message history ────────────────────────────────────────────────
   useEffect(() => {
     api.get<RawMessage[]>(`/api/friends/messages/${id}/`)

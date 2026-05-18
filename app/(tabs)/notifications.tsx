@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -18,7 +19,8 @@ import { useScrollHandler } from '@/hooks/useScrollHandler';
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FriendRequest {
   id: number;
-  from_user: { id: number; username: string };
+  from_user?: { id: number; username: string };
+  sender?:    { id: number; username: string };
   created_at?: string;
 }
 
@@ -78,7 +80,7 @@ export default function NotificationsScreen() {
   // Per-request action state: 'accept' | 'decline' | null
   const [actioning, setActioning] = useState<Record<number, 'accept' | 'decline'>>({});
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     const [reqRes, notifRes] = await Promise.allSettled([
       api.get<FriendRequest[]>('/api/friends/requests/incoming/'),
       api.get<unknown>('/api/notifications/'),
@@ -86,6 +88,7 @@ export default function NotificationsScreen() {
 
     if (reqRes.status === 'fulfilled') {
       const data = reqRes.value.data;
+      console.log('[Notifications] incoming friend requests:', JSON.stringify(data));
       setRequests(Array.isArray(data) ? data : []);
     } else {
       console.log('[Notifications] requests error:', reqRes.reason?.response?.status);
@@ -104,17 +107,29 @@ export default function NotificationsScreen() {
     } else {
       console.log('[Notifications] notifications error:', notifRes.reason?.response?.status);
     }
-  }
+  }, []);
 
+  // Initial load
   useEffect(() => {
     fetchAll().finally(() => setLoading(false));
-  }, []);
+  }, [fetchAll]);
+
+  // Re-fetch on focus + poll every 10 seconds while tab is active
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    fetchAll();
+    pollRef.current = setInterval(fetchAll, 5_000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchAll]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchAll();
     setRefreshing(false);
-  }, []);
+  }, [fetchAll]);
 
   async function handleRequest(requestId: number, action: 'accept' | 'decline') {
     setActioning((prev) => ({ ...prev, [requestId]: action }));
@@ -134,11 +149,14 @@ export default function NotificationsScreen() {
 
   async function markAllRead() {
     setMarkingRead(true);
+    const url = '/api/notifications/mark-all-read/';
+    console.log('[Notifications] markAllRead calling:', url);
     try {
-      await api.post('/api/notifications/mark-all-read/');
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true, read: true })));
-    } catch {
-      // Silently ignore — optimistic update already applied
+      const res = await api.post(url);
+      console.log('[Notifications] markAllRead response:', res.status, JSON.stringify(res.data));
+      await fetchAll();
+    } catch (e: any) {
+      console.log('[Notifications] markAllRead error:', e?.response?.status, JSON.stringify(e?.response?.data));
     } finally {
       setMarkingRead(false);
     }
@@ -213,16 +231,18 @@ export default function NotificationsScreen() {
             <View style={styles.cardList}>
               {requests.map((req) => {
                 const pending = actioning[req.id];
+                const user = req.from_user ?? req.sender;
+                if (!user) return null;
                 return (
                   <View key={req.id} style={styles.requestCard}>
                     <View style={styles.requestLeft}>
                       <View style={styles.requestAvatar}>
                         <Text style={styles.requestAvatarText}>
-                          {req.from_user.username.charAt(0).toUpperCase()}
+                          {user.username.charAt(0).toUpperCase()}
                         </Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.requestName}>{req.from_user.username}</Text>
+                        <Text style={styles.requestName}>{user.username}</Text>
                         <Text style={styles.requestSub}>
                           Wants to connect{req.created_at ? `  ·  ${fmtTime(req.created_at)}` : ''}
                         </Text>

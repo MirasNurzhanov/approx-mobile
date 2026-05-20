@@ -170,11 +170,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0a0a',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 52,
+    gap: 48,
   },
   stage: {
-    width:           RING_BASE,
-    height:          RING_BASE,
+    // Must cover the full visual footprint: particles travel DISTANCE px,
+    // rings scale to 3.4× RING_BASE — so use 2×DISTANCE as the stage size.
+    width:           DISTANCE * 2,
+    height:          DISTANCE * 2,
     alignItems:      'center',
     justifyContent:  'center',
   },
@@ -207,6 +209,10 @@ const styles = StyleSheet.create({
     color:         '#ffffff',
     fontSize:      26,
     fontWeight:    '800',
-    letterSpacing: 10,
+    letterSpacing: 8,
+    textAlign:     'center',
+    alignSelf:     'center',
+    width:         '100%',
+    paddingLeft:   8,
   },
 });

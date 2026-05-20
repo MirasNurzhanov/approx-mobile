@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import { Audio } from 'expo-av';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
@@ -9,7 +10,6 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  withTiming,
 } from 'react-native-reanimated';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
@@ -40,6 +40,7 @@ interface NearbyUser {
   longitude: number;
   relationship: Relationship;
   distance?: number;
+  distance_km?: number;
   shared_interests?: string[];
   profile_picture?: string;
   zone_active?: boolean;
@@ -107,15 +108,6 @@ function UserDot({ color, size = 14 }: { color: string; size?: number }) {
   );
 }
 
-function LegendItem({ color, label }: { color: string; label: string }) {
-  return (
-    <View style={styles.legendItem}>
-      <View style={[styles.legendDot, { backgroundColor: color, borderColor: color + '66' }]} />
-      <Text style={styles.legendLabel}>{label}</Text>
-    </View>
-  );
-}
-
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
 function TopBar({ nearby, onPrivacy, onSearch }: { nearby: number; onPrivacy: () => void; onSearch: () => void }) {
   const { top } = useSafeAreaInsets();
@@ -149,7 +141,17 @@ function TopBar({ nearby, onPrivacy, onSearch }: { nearby: number; onPrivacy: ()
 }
 
 // ─── Zone Banner ──────────────────────────────────────────────────────────────
-function ZoneBanner({ username }: { username: string }) {
+function ZoneBanner({
+  username,
+  isPlaying,
+  onTap,
+  onMute,
+}: {
+  username: string;
+  isPlaying: boolean;
+  onTap: () => void;
+  onMute: () => void;
+}) {
   const { top } = useSafeAreaInsets();
   return (
     <Animated.View
@@ -158,29 +160,23 @@ function ZoneBanner({ username }: { username: string }) {
       style={[styles.zoneBanner, { top: top + 64 }]}
     >
       <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-      <Text style={styles.zoneBannerText}>🎵 You're in @{username}'s zone</Text>
+      <TouchableOpacity
+        style={styles.zoneBannerInner}
+        onPress={onTap}
+        activeOpacity={0.75}
+      >
+        <Text style={styles.zoneBannerText}>
+          {isPlaying
+            ? `🎵 Playing @${username}'s zone`
+            : `🎵 You're in @${username}'s zone · Tap to listen`}
+        </Text>
+      </TouchableOpacity>
+      {isPlaying && (
+        <TouchableOpacity onPress={onMute} hitSlop={12} style={styles.zoneMuteBtn}>
+          <Ionicons name="volume-mute" size={18} color={COLOR_TEAL} />
+        </TouchableOpacity>
+      )}
     </Animated.View>
-  );
-}
-
-// ─── Refresh Button ───────────────────────────────────────────────────────────
-function RefreshButton({ onPress, spinning }: { onPress: () => void; spinning: boolean }) {
-  const rotation = useSharedValue(0);
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  function handlePress() {
-    rotation.value = withTiming(rotation.value + 360, { duration: 600 });
-    onPress();
-  }
-
-  return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={0.85} style={styles.refreshBtn}>
-      <Animated.View style={animStyle}>
-        <Ionicons name="refresh" size={22} color="#0a0a0a" />
-      </Animated.View>
-    </TouchableOpacity>
   );
 }
 
@@ -326,13 +322,14 @@ export default function MapScreen() {
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [friendsReady, setFriendsReady] = useState(false);
-  const [activeZone, setActiveZone]   = useState<{ username: string } | null>(null);
+  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl?: string } | null>(null);
+  const [isPlaying, setIsPlaying]     = useState(false);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
-  const [refreshing, setRefreshing]   = useState(false);
   const [hiToast, setHiToast]         = useState(false);
 
   const coordsRef      = useRef(coords);
   const hiToastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const soundRef       = useRef<Audio.Sound | null>(null);
   coordsRef.current = coords;
 
   const sheetY = useSharedValue(SHEET_H);
@@ -343,6 +340,60 @@ export default function MapScreen() {
       setFriendIds(new Set(r.data.friends.map((u) => Number(u.id))));
       setConnectionIds(new Set(r.data.connections.map((u) => Number(u.id))));
     } catch {}
+  }, []);
+
+  async function stopZone() {
+    if (soundRef.current) {
+      await soundRef.current.stopAsync().catch(() => {});
+      await soundRef.current.unloadAsync().catch(() => {});
+      soundRef.current = null;
+    }
+    setIsPlaying(false);
+  }
+
+  async function playZone(url: string) {
+    await stopZone();
+    try {
+      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: url },
+        { shouldPlay: true, isLooping: true },
+      );
+      soundRef.current = sound;
+      setIsPlaying(true);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded) setIsPlaying(false);
+      });
+    } catch (e) {
+      console.log('[Zone] audio playback error:', e);
+      setIsPlaying(false);
+    }
+  }
+
+  // Detect when current user enters or leaves a zone
+  useEffect(() => {
+    const nearbyUsers = nearby.filter((u) => currentUserId === null || Number(u.id) !== currentUserId);
+    console.log('[Zone] checking nearby:', nearbyUsers.map((u) => ({
+      username: u.username,
+      zone_active: u.zone_active,
+      zone_audio_url: u.zone_audio_url,
+      distance_km: u.distance_km,
+      zone_radius: u.zone_radius,
+    })));
+    const entered = nearbyUsers.find((u) =>
+      u.zone_active && u.zone_audio_url && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
+    );
+    if (entered) {
+      setActiveZone({ username: entered.username, audioUrl: entered.zone_audio_url });
+    } else {
+      setActiveZone(null);
+      stopZone();
+    }
+  }, [nearby, currentUserId]);
+
+  // Stop audio on unmount
+  useEffect(() => {
+    return () => { stopZone(); };
   }, []);
 
   function handleHiSent() {
@@ -388,7 +439,6 @@ export default function MapScreen() {
     const c = coordsRef.current;
     if (!c) return;
 
-    setRefreshing(true);
     const [, nearbyResult] = await Promise.allSettled([
       api.patch('/api/proximity/location/', { latitude: c.latitude, longitude: c.longitude }),
       api.get<NearbyUser[]>('/api/proximity/nearby/'),
@@ -404,7 +454,6 @@ export default function MapScreen() {
       setNearby(users);
     }
     await fetchFriends();
-    setRefreshing(false);
   }, [fetchFriends]);
 
   useEffect(() => {
@@ -467,16 +516,19 @@ export default function MapScreen() {
           {/* Zone circles for nearby users */}
           {visibleNearby
             .filter((u) => u.zone_active && (u.zone_radius ?? 0) > 0)
-            .map((u) => (
-              <Circle
-                key={`zone-${u.id}`}
-                center={{ latitude: u.latitude, longitude: u.longitude }}
-                radius={u.zone_radius!}
-                fillColor="rgba(0,180,166,0.07)"
-                strokeColor="rgba(0,180,166,0.35)"
-                strokeWidth={1.5}
-              />
-            ))}
+            .map((u) => {
+              console.log('[Map] drawing zone for:', u.username, 'active:', u.zone_active, 'lat:', u.latitude, 'lng:', u.longitude, 'radius:', u.zone_radius);
+              return (
+                <Circle
+                  key={`zone-${u.id}`}
+                  center={{ latitude: u.latitude, longitude: u.longitude }}
+                  radius={u.zone_radius!}
+                  fillColor="rgba(0,180,166,0.2)"
+                  strokeColor="rgba(0,180,166,0.35)"
+                  strokeWidth={1.5}
+                />
+              );
+            })}
 
           {/* Zone circle for self */}
           {selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
@@ -525,22 +577,15 @@ export default function MapScreen() {
       />
 
       {/* Zone banner */}
-      {activeZone && <ZoneBanner username={activeZone.username} />}
-
-      {/* Legend (bottom-left) */}
-      <View style={styles.legend}>
-        <LegendItem color={COLOR_SELF}      label="You" />
-        <LegendItem color={COLOR_STRANGER}  label="Nearby" />
-        <LegendItem color={COLOR_CONNECTED} label="Connected" />
-        <LegendItem color={COLOR_FRIEND}    label="Friend" />
-      </View>
-
-      {/* Refresh button (bottom-right) */}
-      {coords && (
-        <View style={styles.refreshWrap}>
-          <RefreshButton onPress={tick} spinning={refreshing} />
-        </View>
+      {activeZone && (
+        <ZoneBanner
+          username={activeZone.username}
+          isPlaying={isPlaying}
+          onTap={() => activeZone.audioUrl && playZone(activeZone.audioUrl)}
+          onMute={stopZone}
+        />
       )}
+
 
       {/* User detail sheet */}
       {selectedUser && (
@@ -649,8 +694,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0,180,166,0.25)',
     zIndex: 90,
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingRight: 8,
+  },
+  zoneBannerInner: {
+    flex: 1,
     paddingVertical: 10,
+    paddingHorizontal: 14,
   },
   zoneBannerText: {
     color: COLOR_TEAL,
@@ -658,44 +709,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.2,
   },
-
-  // ── Refresh ──
-  refreshWrap: {
-    position: 'absolute',
-    bottom: 90,
-    right: 16,
-    zIndex: 80,
-  },
-  refreshBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: COLOR_TEAL,
+  zoneMuteBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,180,166,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,180,166,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: COLOR_TEAL,
-    shadowRadius: 12,
-    shadowOpacity: 0.5,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 10,
   },
 
-  // ── Legend ──
-  legend: {
-    position: 'absolute',
-    bottom: 90,
-    left: 16,
-    backgroundColor: 'rgba(10,10,10,0.8)',
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    zIndex: 80,
-  },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  legendDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1 },
-  legendLabel: { color: '#aaa', fontSize: 11, fontWeight: '500' },
 
   // ── Sheet ──
   backdrop: { backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 150 },

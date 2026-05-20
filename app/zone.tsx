@@ -20,8 +20,6 @@ import { api } from '@/services/api';
 interface ZoneSettings {
   zone_preset?: string;
   preset?: string;
-  radius?: number;
-  zone_radius?: number;
   active?: boolean;
   zone_active?: boolean;
   custom_audio_url?: string;
@@ -43,12 +41,6 @@ const FALLBACK_PRESETS: Preset[] = [
   { id: 'lofi',      emoji: '🎵', name: 'Lo-fi'     },
 ];
 
-const RADIUS_OPTIONS: { label: string; value: number }[] = [
-  { label: '100 m', value: 100  },
-  { label: '500 m', value: 500  },
-  { label: '1 km',  value: 1000 },
-];
-
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneScreen() {
   const router = useRouter();
@@ -56,7 +48,6 @@ export default function ZoneScreen() {
 
   const [presets, setPresets] = useState<Preset[]>(FALLBACK_PRESETS);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
-  const [radius, setRadius] = useState<number>(500);
   const [active, setActive] = useState(true);
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
   const [customAudioUri, setCustomAudioUri] = useState<string | null>(null);
@@ -76,7 +67,6 @@ export default function ZoneScreen() {
       if (zoneRes.status === 'fulfilled') {
         const d = zoneRes.value.data;
         setSelectedPreset(d.zone_preset ?? d.preset ?? null);
-        setRadius(d.zone_radius ?? d.radius ?? 500);
         setActive(d.zone_active ?? d.active ?? true);
         if (d.custom_audio_url) setCustomAudioName('Current custom audio');
       } else {
@@ -110,6 +100,17 @@ export default function ZoneScreen() {
     }
   }
 
+  // ── Clear preset ──────────────────────────────────────────────────────────
+  async function handleClearPreset() {
+    if (selectedPreset === null) return;
+    setSelectedPreset(null);
+    try {
+      await api.patch('/api/users/zone/', { zone_preset: '' });
+    } catch (e: any) {
+      console.log('[Zone] clear preset error:', e?.response?.status, JSON.stringify(e?.response?.data));
+    }
+  }
+
   // ── Custom audio upload ───────────────────────────────────────────────────
   async function handleCustomAudio() {
     let result: DocumentPicker.DocumentPickerResult;
@@ -127,11 +128,10 @@ export default function ZoneScreen() {
     const asset = result.assets[0];
     setCustomAudioName(asset.name);
     setCustomAudioUri(asset.uri);
-    setSelectedPreset(null);
 
     setUploading(true);
     const formData = new FormData();
-    formData.append('custom_audio', {
+    formData.append('zone_audio', {
       uri:  asset.uri,
       type: asset.mimeType ?? 'audio/mpeg',
       name: asset.name,
@@ -156,7 +156,7 @@ export default function ZoneScreen() {
     setSaving(true);
     try {
       await api.patch('/api/users/zone/', {
-        zone_radius: radius,
+        zone_radius: 500,
         zone_active: active,
       });
       router.back();
@@ -215,6 +215,23 @@ export default function ZoneScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Sound Preset</Text>
           <View style={styles.presetGrid}>
+            {/* None / Clear option */}
+            <TouchableOpacity
+              style={[styles.presetCard, selectedPreset === null && styles.presetCardNone]}
+              onPress={handleClearPreset}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="ban-outline" size={28} color={selectedPreset === null ? '#ff4d4d' : '#333'} />
+              <Text style={[styles.presetName, selectedPreset === null && styles.presetNameNone]}>
+                None
+              </Text>
+              {selectedPreset === null && (
+                <View style={styles.presetCheckNone}>
+                  <Ionicons name="checkmark" size={10} color="#fff" />
+                </View>
+              )}
+            </TouchableOpacity>
+
             {presets.map((p) => {
               const selected = selectedPreset === p.id;
               return (
@@ -272,31 +289,6 @@ export default function ZoneScreen() {
               <Ionicons name="chevron-forward" size={16} color="#2e2e2e" />
             )}
           </TouchableOpacity>
-        </View>
-
-        {/* ── Zone radius ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Zone Radius</Text>
-          <View style={styles.radiusRow}>
-            {RADIUS_OPTIONS.map((opt) => {
-              const selected = radius === opt.value;
-              return (
-                <TouchableOpacity
-                  key={opt.value}
-                  style={[styles.radiusBtn, selected && styles.radiusBtnSelected]}
-                  onPress={() => setRadius(opt.value)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.radiusLabel, selected && styles.radiusLabelSelected]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <Text style={styles.radiusHint}>
-            People within this distance will hear your zone
-          </Text>
         </View>
 
         {/* ── Save ── */}
@@ -403,6 +395,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  presetCardNone: {
+    borderColor: '#ff4d4d',
+    backgroundColor: '#1a0a0a',
+    shadowColor: '#ff4d4d',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  presetNameNone: { color: '#ff4d4d' },
+  presetCheckNone: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ff4d4d',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // ── Custom audio ──
   uploadCard: {
@@ -425,25 +438,6 @@ const styles = StyleSheet.create({
   uploadLabel: { color: '#444', fontSize: 14, fontWeight: '500' },
   uploadLabelActive: { color: '#00b4a6' },
   uploadSub: { color: '#2e2e2e', fontSize: 11, marginTop: 2 },
-
-  // ── Radius selector ──
-  radiusRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  radiusBtn: {
-    flex: 1,
-    paddingVertical: 13,
-    borderRadius: 12,
-    backgroundColor: '#111111',
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    alignItems: 'center',
-  },
-  radiusBtnSelected: {
-    borderColor: '#00b4a6',
-    backgroundColor: '#0d1f1e',
-  },
-  radiusLabel: { color: '#555', fontSize: 14, fontWeight: '600' },
-  radiusLabelSelected: { color: '#00b4a6' },
-  radiusHint: { color: '#2e2e2e', fontSize: 12 },
 
   // ── Save button ──
   saveBtn: {

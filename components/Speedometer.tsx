@@ -276,7 +276,7 @@ export function Speedometer() {
               <Pressable
                 key={i}
                 onPress={() => handlePress(i)}
-                style={[styles.iconBtn, { left: pos.x - 22, top: pos.y - 24 }]}
+                style={[styles.iconBtn, { left: pos.x - 26, top: pos.y - 24 }]}
                 hitSlop={10}
               >
                 <Ionicons
@@ -284,7 +284,10 @@ export function Speedometer() {
                   size={18}
                   color={isActive ? '#0a0a0a' : '#555'}
                 />
-                <Text style={[styles.label, { color: isActive ? '#0a0a0a' : '#444' }]}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.label, { color: isActive ? '#0a0a0a' : '#444' }]}
+                >
                   {s.label}
                 </Text>
                 {i === CHAT_IDX && chatBadge > 0 && (
@@ -397,16 +400,19 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     position: 'absolute',
-    width: 44,
+    width: 52,
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 10,
   },
   label: {
     fontSize: 8,
     fontWeight: '700',
     marginTop: 1,
     letterSpacing: 0.2,
+    textAlign: 'center',
+    width: 52,
   },
   badge: {
     position: 'absolute',

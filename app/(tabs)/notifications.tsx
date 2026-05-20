@@ -152,7 +152,7 @@ export default function NotificationsScreen() {
     const url = '/api/notifications/mark-all-read/';
     console.log('[Notifications] markAllRead calling:', url);
     try {
-      const res = await api.post(url);
+      const res = await api.patch(url);
       console.log('[Notifications] markAllRead response:', res.status, JSON.stringify(res.data));
       await fetchAll();
     } catch (e: any) {

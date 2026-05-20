@@ -17,7 +17,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    getAccessToken().then((token) => {
+    Promise.all([
+      getAccessToken(),
+      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+    ]).then(([token]) => {
       setIsAuthenticated(!!token);
       setIsLoading(false);
     });

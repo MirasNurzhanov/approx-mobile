@@ -2,15 +2,23 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import { useEffect } from 'react';
 
 import { AuraLoader } from '@/components/AuraLoader';
 import { AuthProvider } from '@/context/AuthContext';
 import { ScrollNavProvider } from '@/context/ScrollNavContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { registerForPushNotifications } from '@/services/notifications';
 
 function AppShell() {
-  const { isLoading } = useAuth();
+  const { isLoading, isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      registerForPushNotifications();
+    }
+  }, [isAuthenticated]);
 
   if (isLoading) {
     return <AuraLoader />;
@@ -30,6 +38,7 @@ function AppShell() {
       <Stack.Screen name="leaderboard"     options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="register"        options={{ headerShown: false }} />
       <Stack.Screen name="interests-setup" options={{ headerShown: false }} />
+      <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="modal"           options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
   );

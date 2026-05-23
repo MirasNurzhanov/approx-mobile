@@ -13,9 +13,10 @@
       "config": {
         "googleMapsApiKey": "AIzaSyB6YKoTOr3yNCMLyzeHBZmqspts7p-2zHw"
       },
-      "bundleIdentifier": "com.aura.app",
+      "bundleIdentifier": "com.arcanix.aura",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["remote-notification"]
       }
     },
     "android": {

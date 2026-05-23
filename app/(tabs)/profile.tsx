@@ -338,7 +338,7 @@ export default function ProfileScreen() {
               icon="heart-outline"
               label="Edit Interests"
               sub="Update what you care about"
-              onPress={() => router.push('/edit-profile')}
+              onPress={() => router.push('/interests')}
             />
             <ActionCard
               icon="settings-outline"

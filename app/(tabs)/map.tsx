@@ -23,7 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import MapView, { Circle, Marker, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
+import MapView, { Circle, Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
@@ -69,6 +69,23 @@ const REL_LABEL: Record<Relationship, string> = {
 };
 
 const POLL_MS   = 10_000;
+
+const DARK_MAP_STYLE = [
+  { elementType: 'geometry',                    stylers: [{ color: '#0a0a0a' }] },
+  { elementType: 'labels.text.fill',            stylers: [{ color: '#00b4a6' }] },
+  { elementType: 'labels.text.stroke',          stylers: [{ color: '#0a0a0a' }] },
+  { featureType: 'road', elementType: 'geometry',              stylers: [{ color: '#1a1a1a' }] },
+  { featureType: 'road', elementType: 'geometry.stroke',       stylers: [{ color: '#212121' }] },
+  { featureType: 'road', elementType: 'labels.text.fill',      stylers: [{ color: '#00b4a6' }] },
+  { featureType: 'road.highway', elementType: 'geometry',      stylers: [{ color: '#1a1a1a' }] },
+  { featureType: 'water', elementType: 'geometry',             stylers: [{ color: '#050505' }] },
+  { featureType: 'water', elementType: 'labels.text.fill',     stylers: [{ color: '#00b4a6' }] },
+  { featureType: 'poi', elementType: 'geometry',               stylers: [{ color: '#0d0d0d' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill',       stylers: [{ color: '#00b4a6' }] },
+  { featureType: 'transit', elementType: 'geometry',           stylers: [{ color: '#121212' }] },
+  { featureType: 'administrative', elementType: 'geometry',         stylers: [{ color: '#1a1a1a' }] },
+  { featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{ color: '#00b4a6' }] },
+];
 const SHEET_H   = 400;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
@@ -506,7 +523,8 @@ export default function MapScreen() {
       ) : (
         <MapView
           style={styles.map}
-          provider={PROVIDER_DEFAULT}
+          provider={PROVIDER_GOOGLE}
+          customMapStyle={DARK_MAP_STYLE}
           initialRegion={region}
           showsUserLocation={false}
           showsMyLocationButton={false}

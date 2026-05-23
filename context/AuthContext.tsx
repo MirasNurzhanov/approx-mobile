@@ -34,8 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     setIsAuthenticated(false);
-    await AsyncStorage.clear();
-    router.replace('/welcome');
+    await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+    router.replace('/');
   }
 
   return (

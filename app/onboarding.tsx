@@ -18,37 +18,37 @@ const COLOR_TEAL = '#00b4a6';
 const CARDS = [
   {
     id: '1',
-    emoji: '📍',
-    title: 'Proximity Discovery',
-    body: 'See who\'s around you in real time. Connect with people in your orbit before the moment passes.',
+    emoji: '🗺️',
+    title: 'Discover nearby people',
+    body: 'Find people with shared interests right around you — no algorithms, just proximity.',
   },
   {
     id: '2',
     emoji: '🎵',
-    title: 'Zone Music',
-    body: 'Create your zone. Set the vibe. Let your music speak for you — before you even say a word.',
+    title: "Enter someone's Zone",
+    body: 'Walk near someone and hear their music. Let your vibe speak before you say a word.',
   },
   {
     id: '3',
-    emoji: '🎯',
-    title: 'Quests',
-    body: 'Complete challenges, earn badges, and climb the leaderboard. Every connection unlocks something new.',
+    emoji: '⚔️',
+    title: 'Complete Quests',
+    body: 'Earn Aura Points by completing challenges and climb to the top of the leaderboard.',
   },
   {
     id: '4',
-    emoji: '✨',
-    title: 'Real Connections',
-    body: 'Send a Hi, start a conversation. No swiping, no algorithms — just real people, right around you.',
+    emoji: '👥',
+    title: 'Make real connections',
+    body: 'Go from stranger to friend in real life. Every connection starts with being in the same place.',
   },
 ];
 
 async function finish() {
-  await AsyncStorage.setItem('onboarding_completed', 'true');
-  router.replace('/login');
+  await AsyncStorage.setItem('onboarding_seen', 'true');
+  router.replace('/welcome');
 }
 
 export default function OnboardingScreen() {
-  const { bottom } = useSafeAreaInsets();
+  const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const flatRef = useRef<FlatList>(null);
 
@@ -69,6 +69,17 @@ export default function OnboardingScreen() {
 
   return (
     <View style={styles.root}>
+      {/* Skip — top right, hidden on last slide */}
+      {!isLast && (
+        <TouchableOpacity
+          onPress={finish}
+          activeOpacity={0.7}
+          style={[styles.skipBtn, { top: top + 12 }]}
+        >
+          <Text style={styles.skipText}>Skip</Text>
+        </TouchableOpacity>
+      )}
+
       <FlatList
         ref={flatRef}
         data={CARDS}
@@ -81,13 +92,11 @@ export default function OnboardingScreen() {
         getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
         renderItem={({ item }) => (
           <View style={styles.card}>
-            {/* Icon ring */}
             <View style={styles.iconRing}>
               <View style={styles.iconInner}>
                 <Text style={styles.emoji}>{item.emoji}</Text>
               </View>
             </View>
-
             <Text style={styles.cardTitle}>{item.title}</Text>
             <Text style={styles.cardBody}>{item.body}</Text>
           </View>
@@ -101,18 +110,9 @@ export default function OnboardingScreen() {
         ))}
       </View>
 
-      {/* Footer buttons */}
+      {/* Footer — full-width Next / Get Started */}
       <View style={[styles.footer, { paddingBottom: bottom + 24 }]}>
-        {!isLast && (
-          <TouchableOpacity onPress={finish} activeOpacity={0.7} style={styles.skipBtn}>
-            <Text style={styles.skipText}>Skip</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          onPress={goNext}
-          activeOpacity={0.85}
-          style={[styles.nextBtn, isLast && styles.nextBtnFull]}
-        >
+        <TouchableOpacity onPress={goNext} activeOpacity={0.85} style={styles.nextBtn}>
           <Text style={styles.nextText}>{isLast ? 'Get Started' : 'Next'}</Text>
         </TouchableOpacity>
       </View>
@@ -122,6 +122,16 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
+
+  // ── Skip ──
+  skipBtn: {
+    position: 'absolute',
+    right: 24,
+    zIndex: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  skipText: { color: '#555', fontSize: 15, fontWeight: '500' },
 
   // ── Card ──
   card: {
@@ -180,35 +190,12 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 32,
   },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#2a2a2a',
-  },
-  dotActive: {
-    width: 22,
-    backgroundColor: COLOR_TEAL,
-  },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2a2a2a' },
+  dotActive: { width: 22, backgroundColor: COLOR_TEAL },
 
   // ── Footer ──
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  skipBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-  },
-  skipText: {
-    color: '#555',
-    fontSize: 15,
-    fontWeight: '500',
-  },
+  footer: { paddingHorizontal: 24 },
   nextBtn: {
-    flex: 1,
     backgroundColor: COLOR_TEAL,
     paddingVertical: 16,
     borderRadius: 16,
@@ -219,6 +206,5 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 6,
   },
-  nextBtnFull: { flex: 1 },
   nextText: { color: '#0a0a0a', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
 });

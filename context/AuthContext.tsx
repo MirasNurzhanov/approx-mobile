@@ -33,8 +33,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    setIsAuthenticated(false);
     await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+    setIsAuthenticated(false);
+    setIsLoading(false);
+    console.log('[Auth] router.replace called, current route should change');
+    console.log('[Auth] router state:', router);
+    router.dismissAll();
     router.replace('/');
   }
 

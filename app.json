@@ -16,7 +16,10 @@
       "bundleIdentifier": "com.arcanix.aura",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": ["location", "audio", "fetch", "remote-notification"],
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Aura uses your location to show nearby people and zones, even in the background.",
+        "NSLocationAlwaysUsageDescription": "Aura uses your location in the background to keep your position updated for nearby people and zones.",
+        "NSLocationWhenInUseUsageDescription": "Aura uses your location to show nearby people and zones."
       }
     },
     "android": {
@@ -38,6 +41,15 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Aura to use your location to find nearby people and zones.",
+          "locationAlwaysPermission": "Allow Aura to use your location in the background to find nearby people and zones.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
       [
         "expo-splash-screen",
         {

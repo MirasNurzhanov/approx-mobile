@@ -34,9 +34,15 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 
   const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
-  const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+  const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
 
-  await api.patch('/api/users/profile/', { push_token: token });
+  console.log('[Push] sending token to backend:', tokenResponse.data);
+  try {
+    await api.patch('/api/users/profile/', { push_token: tokenResponse.data });
+    console.log('[Push] token saved to backend successfully');
+  } catch (e) {
+    console.warn('[Push] failed to save token to backend:', e);
+  }
 
-  return token;
+  return tokenResponse.data;
 }

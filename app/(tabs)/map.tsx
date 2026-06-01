@@ -1,5 +1,6 @@
 import * as Location from 'expo-location';
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS } from 'expo-av';
+import MusicControl from 'react-native-music-control';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
@@ -34,6 +35,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
 import { api } from '@/services/api';
+import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { registerNearbyRefresh } from '@/services/nearbyRefresh';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -60,7 +62,7 @@ interface SelfZone {
   zone_audio_url?: string;
 }
 
-type ReactionType = 'thumbs_up' | 'smile' | 'lightbulb' | 'star';
+type ReactionType = 'like' | 'funny' | 'helpful' | 'interesting';
 
 interface StoryAuthor {
   id: number;
@@ -79,7 +81,7 @@ interface Story {
   longitude: number;
   created_at: string;
   expires_at: string;
-  reactions: { thumbs_up: number; smile: number; lightbulb: number; star: number };
+  reactions: { like: number; funny: number; helpful: number; interesting: number };
   user_reaction?: ReactionType | null;
 }
 
@@ -98,7 +100,7 @@ const REL_LABEL: Record<Relationship, string> = {
 };
 
 const POLL_MS       = 10_000;
-const STORY_POLL_MS = 30_000;
+const STORY_POLL_MS = 10_000;
 const STORY_SHEET_H = 480;
 
 const DARK_MAP_STYLE = [
@@ -284,10 +286,10 @@ function ZoneBanner({
 
 // ─── Story Sheet ──────────────────────────────────────────────────────────────
 const REACTIONS: { type: ReactionType; emoji: string }[] = [
-  { type: 'thumbs_up', emoji: '👍' },
-  { type: 'smile',     emoji: '😄' },
-  { type: 'lightbulb', emoji: '💡' },
-  { type: 'star',      emoji: '⭐' },
+  { type: 'like',        emoji: '👍' },
+  { type: 'funny',       emoji: '😄' },
+  { type: 'helpful',     emoji: '💡' },
+  { type: 'interesting', emoji: '⭐' },
 ];
 
 interface StorySheetProps {
@@ -337,6 +339,15 @@ function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps)
           {story.photo ? (
             <Image source={{ uri: story.photo }} style={styles.storyPhoto} resizeMode="cover" />
           ) : null}
+          {REACTIONS.some(({ type }) => (story.reactions?.[type] ?? 0) > 0) && (
+            <View style={styles.reactionSummaryRow}>
+              {REACTIONS.filter(({ type }) => (story.reactions?.[type] ?? 0) > 0).map(({ type, emoji }) => (
+                <Text key={type} style={styles.reactionSummaryText}>
+                  {emoji} {story.reactions[type]}
+                </Text>
+              ))}
+            </View>
+          )}
           <View style={styles.reactionsRow}>
             {REACTIONS.map(({ type, emoji }) => {
               const reactions = story.reactions ?? {};
@@ -348,7 +359,7 @@ function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps)
                   style={[styles.reactionBtn, isActive && styles.reactionBtnActive]}
                   activeOpacity={0.75}
                   onPress={() => {
-                    console.log('[Story] reacting with:', type, 'to story:', story.id);
+                    console.log('[Reaction] button pressed, type:', type, 'story id:', story.id);
                     onReact(type);
                   }}
                 >
@@ -594,6 +605,7 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MapScreen() {
+  useEffect(() => { console.log('[Map] step 1: component mounted'); }, []);
   const router = useRouter();
   const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
   const [nearby, setNearby]           = useState<NearbyUser[]>([]);
@@ -633,13 +645,19 @@ export default function MapScreen() {
       await soundRef.current.unloadAsync().catch(() => {});
       soundRef.current = null;
     }
+    MusicControl.resetNowPlaying();
     setIsPlaying(false);
   }
 
-  async function playZone(url: string) {
+  async function playZone(url: string, username: string) {
     await stopZone();
     try {
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+      await Audio.setAudioModeAsync({
+        staysActiveInBackground: true,
+        playsInSilentModeIOS: true,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        shouldDuckAndroid: true,
+      });
       const { sound } = await Audio.Sound.createAsync(
         { uri: url },
         { shouldPlay: true, isLooping: true },
@@ -649,6 +667,13 @@ export default function MapScreen() {
       sound.setOnPlaybackStatusUpdate((status) => {
         if (!status.isLoaded) setIsPlaying(false);
       });
+      MusicControl.setNowPlaying({
+        title: `@${username}'s Zone 🎵`,
+        appName: 'Aura',
+        artist: 'Aura',
+      });
+      MusicControl.updatePlayback({ state: MusicControl.STATE_PLAYING });
+      MusicControl.enableControl('stop', true);
     } catch (e) {
       console.log('[Zone] audio playback error:', e);
       setIsPlaying(false);
@@ -665,6 +690,15 @@ export default function MapScreen() {
       distance_km: u.distance_km,
       zone_radius: u.zone_radius,
     })));
+    console.log('[Zone] active zones check:', nearbyUsers
+      .filter(u => u.zone_active)
+      .map(u => ({
+        username: u.username,
+        audio: u.zone_audio_url,
+        distance_m: ((u.distance_km ?? 0) * 1000).toFixed(0),
+        radius: u.zone_radius,
+        inZone: (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
+      })));
     const entered = nearbyUsers.find((u) =>
       u.zone_active && u.zone_audio_url && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
     );
@@ -695,6 +729,7 @@ export default function MapScreen() {
       const data = r.data;
       console.log('[Stories] received:', data.length, 'stories');
       console.log('[Stories] first story coords:', data[0]?.latitude, data[0]?.longitude);
+      console.log('[Stories] after reaction fetch:', JSON.stringify(data.map(s => ({ id: s.id, reactions: s.reactions }))));
       setStories(data);
     } catch {}
   }, []);
@@ -714,19 +749,23 @@ export default function MapScreen() {
 
   async function reactToStory(storyId: number, reaction: ReactionType) {
     try {
-      const response = await api.post(`/api/stories/${storyId}/react/`, { reaction_type: reaction });
-      console.log('[Story] reaction success:', response.data);
-      setSelectedStory((prev) => {
-        if (!prev || prev.id !== storyId) return prev;
-        const wasActive = prev.user_reaction === reaction;
-        const updated = { ...prev.reactions };
-        if (prev.user_reaction) updated[prev.user_reaction] = Math.max(0, updated[prev.user_reaction] - 1);
+      const response = await api.post(`/api/stories/${storyId}/react/`, { reaction: reaction });
+      console.log('[Reaction] success:', response.data);
+      console.log('[Reaction] response data:', JSON.stringify(response.data));
+      const applyReaction = <T extends Story>(s: T): T => {
+        if (s.id !== storyId) return s;
+        const wasActive = s.user_reaction === reaction;
+        const updated = { ...s.reactions };
+        if (s.user_reaction) updated[s.user_reaction] = Math.max(0, updated[s.user_reaction] - 1);
         if (!wasActive) updated[reaction] = (updated[reaction] ?? 0) + 1;
-        return { ...prev, reactions: updated, user_reaction: wasActive ? null : reaction };
-      });
-      fetchStories();
+        return { ...s, reactions: updated, user_reaction: wasActive ? null : reaction };
+      };
+      setSelectedStory((prev) => prev ? applyReaction(prev) : prev);
+      setStories((prev) => prev.map(applyReaction));
+      console.log('[Reaction] story after update:', JSON.stringify(selectedStory));
+      await fetchStories();
     } catch (error: any) {
-      console.log('[Story] reaction error:', error.response?.status, JSON.stringify(error.response?.data));
+      console.log('[Reaction] error:', error.response?.status, JSON.stringify(error.response?.data));
     }
   }
 
@@ -756,6 +795,7 @@ export default function MapScreen() {
   }
 
   useEffect(() => {
+    console.log('[Map] step 4: first API calls made');
     api.get<{ id: number; username: string }>('/api/users/me/')
       .then((r) => setCurrentUserId(r.data.id))
       .catch(() => {});
@@ -771,12 +811,17 @@ export default function MapScreen() {
     let sub: Location.LocationSubscription | null = null;
 
     (async () => {
+      console.log('[Map] step 2: location permission requested');
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setPermError('Location permission is required to find nearby people.');
         return;
       }
+      const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+      console.log('[Location] background permission status:', bgStatus);
+      await startBackgroundLocationUpdates();
       const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
       setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
@@ -792,7 +837,10 @@ export default function MapScreen() {
     if (!c) return;
 
     const [, nearbyResult] = await Promise.allSettled([
-      api.patch('/api/proximity/location/', { latitude: c.latitude, longitude: c.longitude }),
+      api.patch('/api/proximity/location/', {
+        latitude: parseFloat(c.latitude.toFixed(6)),
+        longitude: parseFloat(c.longitude.toFixed(6)),
+      }),
       api.get<NearbyUser[]>('/api/proximity/nearby/'),
     ]);
 
@@ -834,6 +882,13 @@ export default function MapScreen() {
     if (fresh) setSelectedUser(fresh);
   }, [nearby]);
 
+  // Keep the open story sheet in sync with the latest stories fetch
+  useEffect(() => {
+    if (!selectedStory) return;
+    const fresh = stories.find((s) => s.id === selectedStory.id);
+    if (fresh) setSelectedStory(fresh);
+  }, [stories]);
+
   function openSheet(user: NearbyUser) {
     storySheetY.value = STORY_SHEET_H;
     setSelectedStory(null);
@@ -866,6 +921,7 @@ export default function MapScreen() {
         </View>
       ) : (
         <MapView
+          onLayout={() => console.log('[Map] step 5: map rendering')}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
           customMapStyle={DARK_MAP_STYLE}
@@ -878,7 +934,7 @@ export default function MapScreen() {
         >
           {/* Zone circles for nearby users */}
           {visibleNearby
-            .filter((u) => u.zone_active && (u.zone_radius ?? 0) > 0)
+            .filter((u) => u.zone_active && (u.zone_radius ?? 0) > 0 && u.latitude != null && u.longitude != null)
             .map((u) => {
               console.log('[Map] drawing zone for:', u.username, 'active:', u.zone_active, 'lat:', u.latitude, 'lng:', u.longitude, 'radius:', u.zone_radius);
               return (
@@ -904,7 +960,7 @@ export default function MapScreen() {
             />
           )}
 
-          {visibleNearby.map((user) => {
+          {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
             const uid = Number(user.id);
             const color = friendIds.has(uid) ? COLOR_FRIEND : connectionIds.has(uid) ? COLOR_CONNECTED : COLOR_STRANGER;
             return (
@@ -956,7 +1012,7 @@ export default function MapScreen() {
         <ZoneBanner
           username={activeZone.username}
           isPlaying={isPlaying}
-          onTap={() => activeZone.audioUrl && playZone(activeZone.audioUrl)}
+          onTap={() => activeZone.audioUrl && playZone(activeZone.audioUrl, activeZone.username)}
           onMute={stopZone}
         />
       )}
@@ -1385,6 +1441,14 @@ const styles = StyleSheet.create({
   },
   reactionEmoji: { fontSize: 18 },
   reactionCount: { color: '#666', fontSize: 12, fontWeight: '600' },
+  reactionSummaryRow: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    marginBottom: 4,
+  },
+  reactionSummaryText: { color: '#aaa', fontSize: 14, fontWeight: '600' },
 
   // ─── Create story modal ───
   createModalBackdrop: {

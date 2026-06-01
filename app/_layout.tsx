@@ -5,11 +5,13 @@ import 'react-native-reanimated';
 import { useEffect } from 'react';
 
 import { AuraLoader } from '@/components/AuraLoader';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/context/AuthContext';
 import { ScrollNavProvider } from '@/context/ScrollNavContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
+import '@/services/backgroundLocation';
 
 function AppShell() {
   const { isLoading, isAuthenticated } = useAuth();
@@ -46,16 +48,22 @@ function AppShell() {
 }
 
 export default function RootLayout() {
+  ErrorUtils.setGlobalHandler((error, isFatal) => {
+    console.error('[FATAL]', error.message, error.stack);
+  });
+
   const colorScheme = useColorScheme();
 
   return (
-    <ScrollNavProvider>
-      <AuthProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <AppShell />
-          <StatusBar style="light" />
-        </ThemeProvider>
-      </AuthProvider>
-    </ScrollNavProvider>
+    <ErrorBoundary>
+      <ScrollNavProvider>
+        <AuthProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <AppShell />
+            <StatusBar style="light" />
+          </ThemeProvider>
+        </AuthProvider>
+      </ScrollNavProvider>
+    </ErrorBoundary>
   );
 }

@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
-import { Audio, InterruptionModeIOS } from 'expo-av';
-import MusicControl from 'react-native-music-control';
+import { Audio } from 'expo-av';
+import Constants from 'expo-constants';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
@@ -645,18 +645,16 @@ export default function MapScreen() {
       await soundRef.current.unloadAsync().catch(() => {});
       soundRef.current = null;
     }
-    MusicControl.resetNowPlaying();
     setIsPlaying(false);
   }
 
   async function playZone(url: string, username: string) {
     await stopZone();
+    console.log('[Zone] attempting to play audio:', url);
     try {
       await Audio.setAudioModeAsync({
         staysActiveInBackground: true,
         playsInSilentModeIOS: true,
-        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-        shouldDuckAndroid: true,
       });
       const { sound } = await Audio.Sound.createAsync(
         { uri: url },
@@ -664,18 +662,12 @@ export default function MapScreen() {
       );
       soundRef.current = sound;
       setIsPlaying(true);
+      console.log('[Zone] audio playing successfully');
       sound.setOnPlaybackStatusUpdate((status) => {
         if (!status.isLoaded) setIsPlaying(false);
       });
-      MusicControl.setNowPlaying({
-        title: `@${username}'s Zone 🎵`,
-        appName: 'Aura',
-        artist: 'Aura',
-      });
-      MusicControl.updatePlayback({ state: MusicControl.STATE_PLAYING });
-      MusicControl.enableControl('stop', true);
-    } catch (e) {
-      console.log('[Zone] audio playback error:', e);
+    } catch (e: any) {
+      console.log('[Zone] audio play error:', e.message);
       setIsPlaying(false);
     }
   }
@@ -704,6 +696,7 @@ export default function MapScreen() {
     );
     if (entered) {
       setActiveZone({ username: entered.username, audioUrl: entered.zone_audio_url });
+      playZone(entered.zone_audio_url!, entered.username);
     } else {
       setActiveZone(null);
       stopZone();
@@ -817,8 +810,11 @@ export default function MapScreen() {
         setPermError('Location permission is required to find nearby people.');
         return;
       }
-      const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-      console.log('[Location] background permission status:', bgStatus);
+      const isExpoGo = Constants.appOwnership === 'expo';
+      if (!isExpoGo) {
+        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+        console.log('[Location] background permission status:', bgStatus);
+      }
       await startBackgroundLocationUpdates();
       const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);

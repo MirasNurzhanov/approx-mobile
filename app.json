@@ -17,9 +17,9 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": ["location", "audio", "fetch", "remote-notification"],
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Aura uses your location to show nearby people and zones, even in the background.",
-        "NSLocationAlwaysUsageDescription": "Aura uses your location in the background to keep your position updated for nearby people and zones.",
-        "NSLocationWhenInUseUsageDescription": "Aura uses your location to show nearby people and zones."
+        "NSLocationWhenInUseUsageDescription": "Aura uses your location to find nearby people with shared interests.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Aura uses your location in the background to notify you when you enter someone's zone.",
+        "NSLocationAlwaysUsageDescription": "Aura uses your location in the background to notify you when you enter someone's zone."
       }
     },
     "android": {
@@ -44,8 +44,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow Aura to use your location to find nearby people and zones.",
-          "locationAlwaysPermission": "Allow Aura to use your location in the background to find nearby people and zones.",
+          "locationAlwaysAndWhenInUsePermission": "Aura uses your location to find nearby people and detect zones.",
+          "locationAlwaysPermission": "Aura uses your location in the background for zone detection.",
+          "locationWhenInUsePermission": "Aura uses your location to find nearby people.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true
         }

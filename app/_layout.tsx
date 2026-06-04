@@ -17,6 +17,8 @@ function AppShell() {
   const { isLoading, isAuthenticated } = useAuth();
 
   useEffect(() => {
+    console.log('[Push] registerPushToken called');
+    console.log('[Push] isAuthenticated:', isAuthenticated);
     if (isAuthenticated) {
       registerForPushNotifications();
     }

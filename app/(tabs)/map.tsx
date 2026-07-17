@@ -185,10 +185,10 @@ function StoryBubble({ story }: { story: Story }) {
   const avatarBg = avatarBgColor(story.author.username);
 
   const reactions = story.reactions ?? {};
-  const topReaction = REACTIONS.reduce<{ type: ReactionType; emoji: string; count: number } | null>(
-    (best, { type, emoji }) => {
+  const topReaction = REACTIONS.reduce<{ type: ReactionType; icon: IoniconsName; count: number } | null>(
+    (best, { type, icon }) => {
       const count = reactions[type] ?? 0;
-      return count > 0 && (!best || count > best.count) ? { type, emoji, count } : best;
+      return count > 0 && (!best || count > best.count) ? { type, icon, count } : best;
     },
     null,
   );
@@ -208,7 +208,8 @@ function StoryBubble({ story }: { story: Story }) {
       <View style={styles.storyBubbleTail} />
       {topReaction && (
         <View style={styles.storyBubbleReactionPill}>
-          <Text style={styles.storyBubbleReactionText}>{topReaction.emoji} {topReaction.count}</Text>
+          <Ionicons name={topReaction.icon} size={11} color="#000" />
+          <Text style={styles.storyBubbleReactionText}> {topReaction.count}</Text>
         </View>
       )}
     </View>
@@ -1282,6 +1283,8 @@ const styles = StyleSheet.create({
   },
   storyBubbleReactionPill: {
     marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFD700',
     borderRadius: 10,
     paddingHorizontal: 7,

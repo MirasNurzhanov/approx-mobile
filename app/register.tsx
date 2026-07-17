@@ -78,8 +78,6 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
           onSelect(c);
         }}
       />
-      {/* selection band */}
-      <View pointerEvents="none" style={wheel.band} />
     </View>
   );
 }
@@ -97,17 +95,6 @@ const wheel = StyleSheet.create({
     color: colors.t1,
     fontWeight: '600',
     fontSize: 16,
-  },
-  band: {
-    position: 'absolute',
-    top: ITEM_H * 2,
-    left: 0,
-    right: 0,
-    height: ITEM_H,
-    backgroundColor: colors.surface2,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
   },
 });
 
@@ -165,6 +152,8 @@ function DatePickerField({ value, onChange, error }: DatePickerFieldProps) {
           <View style={dp.sheet}>
             <Text style={dp.sheetTitle}>Date of birth</Text>
             <View style={dp.wheelRow}>
+              {/* selection band — rendered first so the wheel labels stay visible above it */}
+              <View pointerEvents="none" style={dp.band} />
               <Wheel items={DAYS} selectedIdx={dayIdx} onSelect={setDayIdx} />
               <Wheel items={MONTH_KEYS} labels={MONTH_LABELS} selectedIdx={monthIdx} onSelect={setMonthIdx} />
               <Wheel items={YEARS} selectedIdx={yearIdx} onSelect={setYearIdx} />
@@ -225,6 +214,15 @@ const dp = StyleSheet.create({
     marginBottom: 16,
   },
   wheelRow: { flexDirection: 'row', gap: 4 },
+  band: {
+    position: 'absolute',
+    top: ITEM_H * 2,
+    left: 0,
+    right: 0,
+    height: ITEM_H,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.s,
+  },
   sheetBtns: {
     flexDirection: 'row',
     gap: 12,

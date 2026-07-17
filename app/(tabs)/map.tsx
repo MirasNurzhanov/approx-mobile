@@ -1,8 +1,6 @@
 import * as Location from 'expo-location';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
-import { BlurView } from 'expo-blur';
-import { Ionicons } from '@expo/vector-icons';
 import Animated, {
   FadeIn,
   FadeOut,
@@ -36,6 +34,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Speedometer } from '@/components/Speedometer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
+import {
+  IconClose,
+  IconFunny,
+  IconHi,
+  IconImage,
+  IconInsight,
+  IconLike,
+  IconMute,
+  IconPeople,
+  IconPin,
+  IconSearch,
+  IconShield,
+  IconSound,
+  IconStar,
+  type IconComponent,
+} from '@/components/ui/icons';
 import { api } from '@/services/api';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { registerNearbyRefresh } from '@/services/nearbyRefresh';
@@ -89,11 +103,9 @@ interface Story {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const COLOR_FRIEND    = '#3b82f6';
-const COLOR_CONNECTED = '#f97316';
-const COLOR_STRANGER  = '#ffffff';
-const COLOR_SELF      = '#8b5cf6';
-const COLOR_TEAL      = '#00b4a6';
+const COLOR_FRIEND    = colors.blue;
+const COLOR_CONNECTED = colors.orange;
+const COLOR_STRANGER  = colors.t1;
 
 const REL_LABEL: Record<Relationship, string> = {
   stranger:  'Nearby',
@@ -106,26 +118,28 @@ const POLL_MS       = 10_000;
 const STORY_POLL_MS = 10_000;
 const STORY_SHEET_H = 480;
 
+// Neutral dark map per the redesign: tonal grays only, muted labels, no accent color.
 const DARK_MAP_STYLE = [
-  { elementType: 'geometry',                    stylers: [{ color: '#0a0a0a' }] },
-  { elementType: 'labels.text.fill',            stylers: [{ color: '#00b4a6' }] },
-  { elementType: 'labels.text.stroke',          stylers: [{ color: '#0a0a0a' }] },
-  { featureType: 'road', elementType: 'geometry',              stylers: [{ color: '#1a1a1a' }] },
-  { featureType: 'road', elementType: 'geometry.stroke',       stylers: [{ color: '#212121' }] },
-  { featureType: 'road', elementType: 'labels.text.fill',      stylers: [{ color: '#00b4a6' }] },
-  { featureType: 'road.highway', elementType: 'geometry',      stylers: [{ color: '#1a1a1a' }] },
-  { featureType: 'water', elementType: 'geometry',             stylers: [{ color: '#050505' }] },
-  { featureType: 'water', elementType: 'labels.text.fill',     stylers: [{ color: '#00b4a6' }] },
-  { featureType: 'poi', elementType: 'geometry',               stylers: [{ color: '#0d0d0d' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill',       stylers: [{ color: '#00b4a6' }] },
-  { featureType: 'transit', elementType: 'geometry',           stylers: [{ color: '#121212' }] },
-  { featureType: 'administrative', elementType: 'geometry',         stylers: [{ color: '#1a1a1a' }] },
-  { featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{ color: '#00b4a6' }] },
+  { elementType: 'geometry',                    stylers: [{ color: '#0E0E11' }] },
+  { elementType: 'labels.text.fill',            stylers: [{ color: '#5E5E68' }] },
+  { elementType: 'labels.text.stroke',          stylers: [{ color: '#0A0A0B' }] },
+  { featureType: 'road', elementType: 'geometry',              stylers: [{ color: '#1A1A20' }] },
+  { featureType: 'road', elementType: 'geometry.stroke',       stylers: [{ color: '#16161B' }] },
+  { featureType: 'road', elementType: 'labels.text.fill',      stylers: [{ color: '#5E5E68' }] },
+  { featureType: 'road.highway', elementType: 'geometry',      stylers: [{ color: '#1A1A20' }] },
+  { featureType: 'water', elementType: 'geometry',             stylers: [{ color: '#0A0A0D' }] },
+  { featureType: 'water', elementType: 'labels.text.fill',     stylers: [{ color: '#5E5E68' }] },
+  { featureType: 'poi', elementType: 'geometry',               stylers: [{ color: '#101312' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill',       stylers: [{ color: '#5E5E68' }] },
+  { featureType: 'transit', elementType: 'geometry',           stylers: [{ color: '#16161B' }] },
+  { featureType: 'administrative', elementType: 'geometry',         stylers: [{ color: '#1A1A20' }] },
+  { featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{ color: '#5E5E68' }] },
 ];
 const SHEET_H   = 400;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
-const AVATAR_COLORS = ['#7c3aed', '#0891b2', '#059669', '#d97706', '#be185d', '#0284c7'];
+// Muted avatar hues from the redesign (hue1–hue6), dark text on top.
+const AVATAR_COLORS = ['#7FB8A4', '#A48FD1', '#C9A06B', '#8FA9D1', '#C98A8A', '#9BBF7F'];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function avatarBgColor(username: string): string {
@@ -167,49 +181,41 @@ function UserDot({ color, size = 14 }: { color: string; size?: number }) {
         height: size,
         borderRadius: size / 2,
         backgroundColor: color,
-        borderWidth: 2.5,
-        borderColor: '#ffffff',
-        shadowColor: color,
-        shadowRadius: 8,
-        shadowOpacity: 0.95,
-        shadowOffset: { width: 0, height: 0 },
-        elevation: 8,
+        borderWidth: 2,
+        borderColor: colors.bg,
       }}
     />
   );
 }
 
 function StoryBubble({ story }: { story: Story }) {
-  const body = story.content ?? story.text ?? '';
-  const preview = body.length > 20 ? body.slice(0, 20) + '…' : body;
   const avatarBg = avatarBgColor(story.author.username);
 
   const reactions = story.reactions ?? {};
-  const topReaction = REACTIONS.reduce<{ type: ReactionType; icon: IoniconsName; count: number } | null>(
-    (best, { type, icon }) => {
+  const topReaction = REACTIONS.reduce<{ type: ReactionType; Icon: IconComponent; count: number } | null>(
+    (best, { type, Icon }) => {
       const count = reactions[type] ?? 0;
-      return count > 0 && (!best || count > best.count) ? { type, icon, count } : best;
+      return count > 0 && (!best || count > best.count) ? { type, Icon, count } : best;
     },
     null,
   );
 
   return (
     <View style={{ alignItems: 'center' }}>
-      <View style={[styles.storyBubbleAvatar, { backgroundColor: avatarBg }]}>
+      <View style={styles.storyCard}>
         {story.author.profile_picture ? (
-          <Image source={{ uri: story.author.profile_picture }} style={styles.storyBubbleAvatarImg} />
+          <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
         ) : (
-          <Text style={styles.storyBubbleAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
+          <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
+            <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
+          </View>
         )}
       </View>
-      <View style={styles.storyBubble}>
-        <Text style={styles.storyBubbleText} numberOfLines={1}>{preview}</Text>
-      </View>
-      <View style={styles.storyBubbleTail} />
+      <View style={styles.storyCardTail} />
       {topReaction && (
-        <View style={styles.storyBubbleReactionPill}>
-          <Ionicons name={topReaction.icon} size={11} color="#000" />
-          <Text style={styles.storyBubbleReactionText}> {topReaction.count}</Text>
+        <View style={styles.storyReactionPill}>
+          <topReaction.Icon size={11} color={colors.t2} />
+          <Text style={styles.storyReactionText}>{topReaction.count}</Text>
         </View>
       )}
     </View>
@@ -220,29 +226,22 @@ function StoryBubble({ story }: { story: Story }) {
 function TopBar({ nearby, onPrivacy, onSearch }: { nearby: number; onPrivacy: () => void; onSearch: () => void }) {
   const { top } = useSafeAreaInsets();
   return (
-    <View style={[styles.topBar, { paddingTop: top + 10 }]}>
-      <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
-      {/* AURA logo */}
-      <View style={styles.topLogo}>
-        <Text style={styles.topLogoText}>AURA</Text>
-        <View style={styles.topLogoDot} />
-      </View>
+    <View style={[styles.topBar, { paddingTop: top + 6 }]}>
+      <Text style={styles.topLogoText}>AURA</Text>
 
-      {/* Nearby badge */}
       <View style={styles.nearbyBadge}>
-        <View style={styles.nearbyBadgeInner}>
-          <Text style={styles.nearbyBadgeText}>👥 {nearby} nearby</Text>
-        </View>
+        <IconPeople size={16} color={colors.t2} />
+        <Text style={styles.nearbyBadgeText}>{nearby} nearby</Text>
       </View>
 
-      {/* Search icon */}
-      <TouchableOpacity onPress={onSearch} activeOpacity={0.7} style={styles.privacyBtn} hitSlop={10}>
-        <Ionicons name="search-outline" size={22} color={COLOR_TEAL} />
+      <View style={styles.topSpacer} />
+
+      <TouchableOpacity onPress={onSearch} activeOpacity={0.7} style={styles.iconBtn} hitSlop={6}>
+        <IconSearch size={20} color={colors.t2} />
       </TouchableOpacity>
 
-      {/* Privacy icon */}
-      <TouchableOpacity onPress={onPrivacy} activeOpacity={0.7} style={styles.privacyBtn} hitSlop={10}>
-        <Ionicons name="shield-checkmark-outline" size={22} color={COLOR_TEAL} />
+      <TouchableOpacity onPress={onPrivacy} activeOpacity={0.7} style={styles.iconBtn} hitSlop={6}>
+        <IconShield size={20} color={colors.t2} />
       </TouchableOpacity>
     </View>
   );
@@ -263,25 +262,23 @@ function ZoneBanner({
   const { top } = useSafeAreaInsets();
   return (
     <Animated.View
-      entering={FadeIn.duration(350)}
-      exiting={FadeOut.duration(250)}
-      style={[styles.zoneBanner, { top: top + 64 }]}
+      entering={FadeIn.duration(200)}
+      exiting={FadeOut.duration(200)}
+      style={[styles.zoneBanner, { top: top + 62 }]}
     >
-      <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-      <TouchableOpacity
-        style={styles.zoneBannerInner}
-        onPress={onTap}
-        activeOpacity={0.75}
-      >
-        <Text style={styles.zoneBannerText}>
-          {isPlaying
-            ? `🎵 Playing @${username}'s zone`
-            : `🎵 You're in @${username}'s zone · Tap to listen`}
-        </Text>
-      </TouchableOpacity>
-      {isPlaying && (
-        <TouchableOpacity onPress={onMute} hitSlop={12} style={styles.zoneMuteBtn}>
-          <Ionicons name="volume-mute" size={18} color={COLOR_TEAL} />
+      <IconSound size={20} color={colors.teal} />
+      <Text style={styles.zoneBannerText} numberOfLines={1}>
+        {isPlaying ? 'Playing ' : "You're in "}
+        <Text style={styles.zoneBannerUser}>@{username}</Text>
+        {"'s zone"}
+      </Text>
+      {isPlaying ? (
+        <TouchableOpacity onPress={onMute} hitSlop={12}>
+          <IconMute size={20} color={colors.teal} />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity onPress={onTap} hitSlop={12}>
+          <Text style={styles.zoneBannerAction}>Listen</Text>
         </TouchableOpacity>
       )}
     </Animated.View>
@@ -289,13 +286,11 @@ function ZoneBanner({
 }
 
 // ─── Story Sheet ──────────────────────────────────────────────────────────────
-type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
-
-const REACTIONS: { type: ReactionType; icon: IoniconsName }[] = [
-  { type: 'like',        icon: 'heart-outline' },
-  { type: 'funny',       icon: 'happy-outline' },
-  { type: 'helpful',     icon: 'bulb-outline' },
-  { type: 'interesting', icon: 'star-outline' },
+const REACTIONS: { type: ReactionType; Icon: IconComponent }[] = [
+  { type: 'like',        Icon: IconLike },
+  { type: 'funny',       Icon: IconFunny },
+  { type: 'helpful',     Icon: IconInsight },
+  { type: 'interesting', Icon: IconStar },
 ];
 
 interface StorySheetProps {
@@ -318,7 +313,7 @@ function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps)
         <View style={styles.sheetHandle} />
 
         <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-          <Ionicons name="close" size={16} color={colors.t3} />
+          <IconClose size={16} color={colors.t3} />
         </Pressable>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyScroll}>
@@ -328,7 +323,10 @@ function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps)
             <View style={styles.storyAuthorInfo}>
               <Text style={styles.storyAuthorName}>{story.author.username}</Text>
               {story.place_name ? (
-                <Text style={styles.storyMeta} numberOfLines={1}>📍 {story.place_name}</Text>
+                <View style={styles.storyMetaRow}>
+                  <IconPin size={13} color={colors.t3} />
+                  <Text style={styles.storyMeta} numberOfLines={1}>{story.place_name}</Text>
+                </View>
               ) : null}
             </View>
             <View style={styles.storyExpiryBadge}>
@@ -348,7 +346,7 @@ function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps)
 
           {/* Reaction row */}
           <View style={styles.reactionsRow}>
-            {REACTIONS.map(({ type, icon }) => {
+            {REACTIONS.map(({ type, Icon }) => {
               const count = story.reactions?.[type] ?? 0;
               const isActive = story.user_reaction === type;
               return (
@@ -357,11 +355,7 @@ function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps)
                   style={[styles.reactionBtn, isActive && styles.reactionBtnActive]}
                   onPress={() => onReact(type)}
                 >
-                  <Ionicons
-                    name={isActive ? (icon.replace('-outline', '') as IoniconsName) : icon}
-                    size={20}
-                    color={isActive ? colors.teal : colors.t3}
-                  />
+                  <Icon size={20} color={isActive ? colors.teal : colors.t3} />
                   {count > 0 && (
                     <Text style={[styles.reactionCount, isActive && styles.reactionCountActive]}>
                       {count}
@@ -421,12 +415,11 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
       <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={styles.createModalBackdrop} onPress={onClose} />
         <View style={[styles.createModalSheet, { paddingBottom: bottom + 20 }]}>
-          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
           <View style={styles.sheetHandle} />
           <View style={styles.createModalHeader}>
             <Text style={styles.createModalTitle}>Drop a Story</Text>
             <TouchableOpacity onPress={onClose} hitSlop={12}>
-              <Ionicons name="close" size={22} color="#666" />
+              <IconClose size={20} color={colors.t3} />
             </TouchableOpacity>
           </View>
           <TextInput
@@ -444,13 +437,13 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
             <View style={styles.photoPreviewContainer}>
               <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
               <TouchableOpacity style={styles.removePhotoBtn} onPress={() => setPhotoUri(null)} hitSlop={8}>
-                <Ionicons name="close-circle" size={22} color="#ff4d4d" />
+                <IconClose size={14} color={colors.t1} />
               </TouchableOpacity>
             </View>
           ) : null}
           <View style={styles.createModalActions}>
             <TouchableOpacity style={styles.photoPickBtn} onPress={pickPhoto} activeOpacity={0.75}>
-              <Ionicons name="image-outline" size={20} color={COLOR_TEAL} />
+              <IconImage size={20} color={colors.t2} />
               <Text style={styles.photoPickText}>Photo</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -521,7 +514,7 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
         <View style={styles.sheetHandle} />
 
         <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-          <Ionicons name="close" size={16} color={colors.t3} />
+          <IconClose size={16} color={colors.t3} />
         </Pressable>
 
         <View style={styles.sheetHero}>
@@ -588,6 +581,7 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
 export default function MapScreen() {
   useEffect(() => { console.log('[Map] step 1: component mounted'); }, []);
   const router = useRouter();
+  const { top: topInset } = useSafeAreaInsets();
   const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
   const [nearby, setNearby]           = useState<NearbyUser[]>([]);
   const [permError, setPermError]     = useState('');
@@ -893,7 +887,7 @@ export default function MapScreen() {
         </View>
       ) : !coords ? (
         <View style={styles.center}>
-          <ActivityIndicator color={COLOR_TEAL} size="large" />
+          <ActivityIndicator color={colors.teal} size="large" />
           <Text style={styles.loadingText}>Locating you…</Text>
         </View>
       ) : (
@@ -919,8 +913,8 @@ export default function MapScreen() {
                   key={`zone-${u.id}`}
                   center={{ latitude: u.latitude, longitude: u.longitude }}
                   radius={u.zone_radius!}
-                  fillColor="rgba(0,180,166,0.2)"
-                  strokeColor="rgba(0,180,166,0.35)"
+                  fillColor="rgba(31,199,182,0.08)"
+                  strokeColor="rgba(31,199,182,0.35)"
                   strokeWidth={1.5}
                 />
               );
@@ -959,7 +953,7 @@ export default function MapScreen() {
             tracksViewChanges={false}
           >
             <View style={styles.selfRing}>
-              <UserDot color={COLOR_SELF} size={18} />
+              <View style={styles.selfDot} />
             </View>
           </Marker>
 
@@ -1023,8 +1017,9 @@ export default function MapScreen() {
 
       {/* Hi sent toast */}
       {hiToast && (
-        <View style={styles.hiToast} pointerEvents="none">
-          <Text style={styles.hiToastText}>Hi sent! 👋</Text>
+        <View style={[styles.hiToast, { top: topInset + 104 }]} pointerEvents="none">
+          <IconHi size={16} color={colors.teal} />
+          <Text style={styles.hiToastText}>Hi sent</Text>
         </View>
       )}
 
@@ -1035,24 +1030,31 @@ export default function MapScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a' },
-  map: { flex: 1, backgroundColor: '#0a0a0a' },
-  center: { flex: 1, backgroundColor: '#0a0a0a', alignItems: 'center', justifyContent: 'center', gap: 16 },
-  loadingText: { color: '#555', fontSize: 14 },
-  errorText: { color: '#ff4d4d', fontSize: 15, textAlign: 'center', padding: 24 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  map: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: 16 },
+  loadingText: { fontFamily: fonts.body, color: colors.t3, fontSize: 14 },
+  errorText: { fontFamily: fonts.body, color: colors.red, fontSize: 15, textAlign: 'center', padding: 24 },
 
-  // ── Self marker ──
+  // ── Self marker: purple core, bg gap, thin purple ring — no glow ──
   selfRing: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#8b5cf640',
+    width: 25,
+    height: 25,
+    borderRadius: 12.5,
+    borderWidth: 1.5,
+    borderColor: colors.purple,
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  selfDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.purple,
+  },
 
-  // ── Top bar ──
+  // ── Top bar (flat, no blur) ──
   topBar: {
     position: 'absolute',
     top: 0,
@@ -1060,88 +1062,75 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    overflow: 'hidden',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 6,
     zIndex: 100,
   },
-  topLogo: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   topLogoText: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 3,
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
+    letterSpacing: 17 * 0.22,
   },
-  topLogoDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLOR_TEAL,
-  },
+  topSpacer: { flex: 1 },
   nearbyBadge: {
-    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-  },
-  nearbyBadgeInner: {
-    backgroundColor: 'rgba(0, 180, 166, 0.15)',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    gap: 6,
+    height: 24,
+    paddingHorizontal: 10,
+    borderRadius: 100,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(0, 180, 166, 0.3)',
+    borderColor: colors.border,
   },
   nearbyBadgeText: {
-    color: COLOR_TEAL,
-    fontSize: 13,
+    fontFamily: fonts.body,
+    fontSize: 11,
     fontWeight: '600',
+    color: colors.t2,
   },
-  privacyBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,180,166,0.1)',
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(0,180,166,0.25)',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  // ── Zone banner ──
+  // ── Zone banner (solid card) ──
   zoneBanner: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    borderRadius: 14,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,180,166,0.25)',
-    zIndex: 90,
+    left: 20,
+    right: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: 8,
-  },
-  zoneBannerInner: {
-    flex: 1,
-    paddingVertical: 10,
+    gap: 10,
+    paddingVertical: 11,
     paddingHorizontal: 14,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    zIndex: 90,
   },
   zoneBannerText: {
-    color: COLOR_TEAL,
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t1,
+  },
+  zoneBannerUser: { fontWeight: '600' },
+  zoneBannerAction: {
+    fontFamily: fonts.body,
     fontSize: 13,
     fontWeight: '600',
-    letterSpacing: 0.2,
-  },
-  zoneMuteBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(0,180,166,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,180,166,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: colors.teal,
   },
 
 
@@ -1238,67 +1227,55 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 10 },
   actionBtn: { flex: 1 },
 
-  // ─── Story bubble marker ───
-  storyBubbleAvatar: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  // ─── Story marker: surface card + tail + reaction pill (no gold, no shadows) ───
+  storyCard: {
+    padding: 5,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  storyCardAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#FFD700',
-    marginBottom: -8,
-    zIndex: 1,
   },
-  storyBubbleAvatarImg: { width: 26, height: 26, borderRadius: 13 },
-  storyBubbleAvatarText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  storyBubble: {
-    backgroundColor: '#FFD700',
-    borderRadius: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    maxWidth: 140,
-    shadowColor: '#000',
-    shadowRadius: 6,
-    shadowOpacity: 0.35,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
-  },
-  storyBubbleText: {
-    color: '#000',
-    fontSize: 11,
+  storyCardAvatarImg: { width: 40, height: 40, borderRadius: 20 },
+  storyCardAvatarText: {
+    fontFamily: fonts.display,
     fontWeight: '600',
+    fontSize: 14,
+    color: colors.bg,
   },
-  storyBubbleTail: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 7,
-    borderRightWidth: 7,
-    borderTopWidth: 8,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderTopColor: '#FFD700',
-    marginTop: -1,
+  storyCardTail: {
+    width: 10,
+    height: 10,
+    backgroundColor: colors.surface,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    transform: [{ rotate: '45deg' }],
+    marginTop: -6,
   },
-  storyBubbleReactionPill: {
-    marginTop: 4,
+  storyReactionPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFD700',
-    borderRadius: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    shadowColor: '#000',
-    shadowRadius: 3,
-    shadowOpacity: 0.25,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 3,
+    gap: 4,
+    marginTop: 4,
+    height: 20,
+    paddingHorizontal: 8,
+    borderRadius: 100,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  storyBubbleReactionText: {
+  storyReactionText: {
+    fontFamily: fonts.body,
     fontSize: 11,
-    fontWeight: '700',
-    color: '#000',
+    fontWeight: '600',
+    color: colors.t2,
   },
 
   // ─── Story sheet ───
@@ -1334,6 +1311,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.t1,
   },
+  storyMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   storyMeta: { fontFamily: fonts.body, color: colors.t3, fontSize: 12 },
   storyExpiryBadge: {
     backgroundColor: colors.surface2,
@@ -1388,15 +1366,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.7)',
   },
   createModalSheet: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: radius.l,
+    borderTopRightRadius: radius.l,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: `${COLOR_TEAL}30`,
+    borderColor: colors.border,
     paddingHorizontal: 20,
     paddingTop: 10,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(8,18,18,0.98)',
+    backgroundColor: colors.surface,
   },
   createModalHeader: {
     flexDirection: 'row',
@@ -1405,22 +1382,29 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     marginTop: 6,
   },
-  createModalTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  createModalTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
+  },
   storyInput: {
-    color: '#fff',
+    fontFamily: fonts.body,
+    color: colors.t1,
     fontSize: 15,
     lineHeight: 22,
     minHeight: 100,
     textAlignVertical: 'top',
     marginBottom: 4,
     padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderColor: `${COLOR_TEAL}35`,
-    borderRadius: 12,
+    borderColor: colors.border,
+    borderRadius: radius.m,
   },
   charCount: {
-    color: '#444',
+    fontFamily: fonts.body,
+    color: colors.t3,
     fontSize: 12,
     textAlign: 'right',
     marginBottom: 12,
@@ -1432,12 +1416,20 @@ const styles = StyleSheet.create({
   photoPreview: {
     width: '100%',
     height: 160,
-    borderRadius: 14,
+    borderRadius: radius.m,
   },
   removePhotoBtn: {
     position: 'absolute',
     top: 8,
     right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   createModalActions: {
     flexDirection: 'row',
@@ -1450,33 +1442,35 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,180,166,0.1)',
+    borderRadius: radius.m,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: `${COLOR_TEAL}30`,
+    borderColor: colors.border,
   },
-  photoPickText: { color: COLOR_TEAL, fontSize: 14, fontWeight: '600' },
+  photoPickText: { fontFamily: fonts.body, color: colors.t1, fontSize: 14, fontWeight: '600' },
   postBtn: {
     flex: 1,
-    backgroundColor: COLOR_TEAL,
-    borderRadius: 14,
+    backgroundColor: colors.teal,
+    borderRadius: radius.m,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  postBtnText: { color: '#0a0a0a', fontSize: 15, fontWeight: '700' },
+  postBtnText: { fontFamily: fonts.body, color: colors.bg, fontSize: 15, fontWeight: '600' },
 
-  // ── Hi toast ──
+  // ── Hi toast (design toast: surface2 pill, icon + label) ──
   hiToast: {
     position: 'absolute',
     alignSelf: 'center',
-    top: '46%',
-    backgroundColor: '#071a19',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderColor: `${COLOR_TEAL}55`,
-    borderRadius: 24,
-    paddingHorizontal: 22,
-    paddingVertical: 11,
+    borderColor: colors.border,
+    borderRadius: 100,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     zIndex: 200,
   },
-  hiToastText: { color: COLOR_TEAL, fontSize: 15, fontWeight: '600' },
+  hiToastText: { fontFamily: fonts.body, color: colors.t1, fontSize: 13, fontWeight: '500' },
 });

@@ -4,19 +4,25 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
 interface ZoneSettings {
   zone_preset?: string;
   preset?: string;
@@ -28,18 +34,30 @@ interface ZoneSettings {
 interface Preset {
   id: string;
   name: string;
-  emoji: string;
 }
 
-// ─── Fallback presets (used if API returns empty) ─────────────────────────────
+// ─── Preset icon mapping ──────────────────────────────────────────────────────
+const PRESET_ICONS: Record<string, IoniconsName> = {
+  rain:      'rainy-outline',
+  cafe:      'cafe-outline',
+  forest:    'leaf-outline',
+  ocean:     'water-outline',
+  fireplace: 'flame-outline',
+  lofi:      'musical-notes-outline',
+};
+
 const FALLBACK_PRESETS: Preset[] = [
-  { id: 'rain',      emoji: '🌧️', name: 'Rain'      },
-  { id: 'cafe',      emoji: '☕',  name: 'Café'      },
-  { id: 'forest',    emoji: '🌲', name: 'Forest'    },
-  { id: 'ocean',     emoji: '🌊', name: 'Ocean'     },
-  { id: 'fireplace', emoji: '🔥', name: 'Fireplace' },
-  { id: 'lofi',      emoji: '🎵', name: 'Lo-fi'     },
+  { id: 'rain',      name: 'Rain'      },
+  { id: 'cafe',      name: 'Café'      },
+  { id: 'forest',    name: 'Forest'    },
+  { id: 'ocean',     name: 'Ocean'     },
+  { id: 'fireplace', name: 'Fireplace' },
+  { id: 'lofi',      name: 'Lo-fi'     },
 ];
+
+// ─── Card width for 2-column grid ────────────────────────────────────────────
+const SCREEN_W = Dimensions.get('window').width;
+const CARD_W = (SCREEN_W - 40 - 10) / 2; // 20px side padding each side, 10px gap
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneScreen() {
@@ -50,13 +68,11 @@ export default function ZoneScreen() {
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [active, setActive] = useState(true);
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [customAudioUri, setCustomAudioUri] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // ── Fetch zone settings + presets ─────────────────────────────────────────
   useEffect(() => {
     async function init() {
       const [zoneRes, presetsRes] = await Promise.allSettled([
@@ -69,8 +85,6 @@ export default function ZoneScreen() {
         setSelectedPreset(d.zone_preset ?? d.preset ?? null);
         setActive(d.zone_active ?? d.active ?? true);
         if (d.custom_audio_url) setCustomAudioName('Current custom audio');
-      } else {
-        console.log('[Zone] settings fetch error:', zoneRes.reason?.response?.status);
       }
 
       if (presetsRes.status === 'fulfilled') {
@@ -87,223 +101,171 @@ export default function ZoneScreen() {
     init().finally(() => setLoading(false));
   }, []);
 
-  // ── Select preset ─────────────────────────────────────────────────────────
-  async function handlePresetSelect(id: string) {
-    if (id === selectedPreset) return;
+  async function selectPreset(id: string | null) {
+    const prev = selectedPreset;
     setSelectedPreset(id);
-    setCustomAudioName(null);
-    setCustomAudioUri(null);
     try {
-      await api.patch('/api/users/zone/', { zone_preset: id });
-    } catch (e: any) {
-      console.log('[Zone] preset PATCH error:', e?.response?.status, JSON.stringify(e?.response?.data));
+      await api.patch('/api/users/zone/', { zone_preset: id ?? '' });
+    } catch {
+      setSelectedPreset(prev);
     }
   }
 
-  // ── Clear preset ──────────────────────────────────────────────────────────
-  async function handleClearPreset() {
-    if (selectedPreset === null) return;
-    setSelectedPreset(null);
-    try {
-      await api.patch('/api/users/zone/', { zone_preset: '' });
-    } catch (e: any) {
-      console.log('[Zone] clear preset error:', e?.response?.status, JSON.stringify(e?.response?.data));
-    }
-  }
-
-  // ── Custom audio upload ───────────────────────────────────────────────────
   async function handleCustomAudio() {
     let result: DocumentPicker.DocumentPickerResult;
     try {
-      result = await DocumentPicker.getDocumentAsync({
-        type: 'audio/*',
-        copyToCacheDirectory: true,
-      });
-    } catch {
-      return;
-    }
-
+      result = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true });
+    } catch { return; }
     if (result.canceled) return;
 
     const asset = result.assets[0];
     setCustomAudioName(asset.name);
-    setCustomAudioUri(asset.uri);
-
     setUploading(true);
+
     const formData = new FormData();
-    formData.append('zone_audio', {
-      uri:  asset.uri,
-      type: asset.mimeType ?? 'audio/mpeg',
-      name: asset.name,
-    } as any);
+    formData.append('zone_audio', { uri: asset.uri, type: asset.mimeType ?? 'audio/mpeg', name: asset.name } as any);
 
     try {
-      await api.patch('/api/users/zone/', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      await api.patch('/api/users/zone/', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
     } catch (e: any) {
-      console.log('[Zone] audio upload error:', e?.response?.status, JSON.stringify(e?.response?.data));
       Alert.alert('Upload Failed', e?.response?.data?.detail ?? 'Could not upload audio file.');
       setCustomAudioName(null);
-      setCustomAudioUri(null);
     } finally {
       setUploading(false);
     }
   }
 
-  // ── Save (radius + active toggle) ─────────────────────────────────────────
   async function handleSave() {
     setSaving(true);
     try {
-      await api.patch('/api/users/zone/', {
-        zone_radius: 500,
-        zone_active: active,
-      });
+      await api.patch('/api/users/zone/', { zone_radius: 500, zone_active: active });
       router.back();
     } catch (e: any) {
-      console.log('[Zone] save error:', e?.response?.status, JSON.stringify(e?.response?.data));
       Alert.alert('Save Failed', e?.response?.data?.detail ?? 'Could not save zone settings.');
     } finally {
       setSaving(false);
     }
   }
 
-  // ─── Render ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <View style={[styles.root, styles.center]}>
-        <ActivityIndicator color="#00b4a6" size="large" />
+        <ActivityIndicator color={colors.teal} size="large" />
       </View>
     );
   }
 
+  // All options: presets + None at end
+  const allOptions = [...presets, null]; // null = None
+
   return (
     <View style={styles.root}>
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={26} color="#00b4a6" />
-        </TouchableOpacity>
+        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={colors.t1} />
+        </Pressable>
         <Text style={styles.headerTitle}>Zone Setup</Text>
-        <View style={{ width: 34 }} />
+        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 32 }]}
+        contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Zone active toggle ── */}
-        <View style={styles.section}>
+        {/* Zone active toggle */}
+        <Card style={styles.toggleCard}>
           <View style={styles.toggleRow}>
-            <View style={{ flex: 1 }}>
+            <View style={styles.toggleText}>
               <Text style={styles.toggleLabel}>Zone Active</Text>
-              <Text style={styles.toggleSub}>
-                Broadcast ambient sound to nearby Aura users
-              </Text>
+              <Text style={styles.toggleSub}>People nearby will hear your audio</Text>
             </View>
             <Switch
               value={active}
               onValueChange={setActive}
-              trackColor={{ false: '#1e1e1e', true: '#00b4a640' }}
-              thumbColor={active ? '#00b4a6' : '#333'}
-              ios_backgroundColor="#1e1e1e"
+              trackColor={{ false: colors.surface2, true: colors.teal }}
+              thumbColor={colors.t1}
+              ios_backgroundColor={colors.surface2}
             />
           </View>
-        </View>
+        </Card>
 
-        {/* ── Sound Presets ── */}
+        {/* Sound presets */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Sound Preset</Text>
+          <Text style={styles.sectionLabel}>PRESET SOUNDS</Text>
           <View style={styles.presetGrid}>
-            {/* None / Clear option */}
-            <TouchableOpacity
-              style={[styles.presetCard, selectedPreset === null && styles.presetCardNone]}
-              onPress={handleClearPreset}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="ban-outline" size={28} color={selectedPreset === null ? '#ff4d4d' : '#333'} />
-              <Text style={[styles.presetName, selectedPreset === null && styles.presetNameNone]}>
-                None
-              </Text>
-              {selectedPreset === null && (
-                <View style={styles.presetCheckNone}>
-                  <Ionicons name="checkmark" size={10} color="#fff" />
-                </View>
-              )}
-            </TouchableOpacity>
+            {allOptions.map((p, i) => {
+              const isNone = p === null;
+              const id = isNone ? null : p!.id;
+              const name = isNone ? 'None' : p!.name;
+              const icon: IoniconsName = isNone
+                ? 'ban-outline'
+                : (PRESET_ICONS[p!.id] ?? 'musical-notes-outline');
+              const selected = selectedPreset === id;
 
-            {presets.map((p) => {
-              const selected = selectedPreset === p.id;
               return (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[styles.presetCard, selected && styles.presetCardSelected]}
-                  onPress={() => handlePresetSelect(p.id)}
-                  activeOpacity={0.75}
+                <Pressable
+                  key={isNone ? '__none__' : p!.id}
+                  style={({ pressed }) => [
+                    styles.presetCard,
+                    selected ? styles.presetCardSelected : null,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => selectPreset(id)}
                 >
-                  <Text style={styles.presetEmoji}>{p.emoji}</Text>
+                  <Ionicons
+                    name={icon}
+                    size={26}
+                    color={selected ? colors.teal : colors.t3}
+                  />
                   <Text style={[styles.presetName, selected && styles.presetNameSelected]}>
-                    {p.name}
+                    {name}
                   </Text>
-                  {selected && (
-                    <View style={styles.presetCheck}>
-                      <Ionicons name="checkmark" size={10} color="#0a0a0a" />
-                    </View>
-                  )}
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </View>
         </View>
 
-        {/* ── Custom audio ── */}
+        {/* Custom audio */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Custom Audio</Text>
-          <TouchableOpacity
-            style={[
+          <Text style={styles.sectionLabel}>CUSTOM AUDIO</Text>
+          <Pressable
+            style={({ pressed }) => [
               styles.uploadCard,
-              customAudioName != null && styles.uploadCardActive,
+              customAudioName ? styles.uploadCardActive : null,
+              pressed && styles.pressed,
             ]}
             onPress={handleCustomAudio}
             disabled={uploading}
-            activeOpacity={0.75}
           >
             {uploading ? (
-              <ActivityIndicator color="#00b4a6" size="small" />
+              <ActivityIndicator color={colors.teal} size="small" />
             ) : (
               <Ionicons
                 name={customAudioName ? 'musical-notes' : 'cloud-upload-outline'}
                 size={22}
-                color={customAudioName ? '#00b4a6' : '#444'}
+                color={customAudioName ? colors.teal : colors.t3}
               />
             )}
-            <View style={{ flex: 1 }}>
+            <View style={styles.uploadText}>
               <Text style={[styles.uploadLabel, customAudioName && styles.uploadLabelActive]}>
-                {uploading
-                  ? 'Uploading…'
-                  : customAudioName ?? 'Upload audio file'}
+                {uploading ? 'Uploading…' : customAudioName ?? 'Upload audio'}
               </Text>
-              <Text style={styles.uploadSub}>MP3, AAC, WAV · max 20 MB</Text>
+              <Text style={styles.uploadHint}>MP3, M4A, WAV</Text>
             </View>
-            {!uploading && (
-              <Ionicons name="chevron-forward" size={16} color="#2e2e2e" />
-            )}
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
-        {/* ── Save ── */}
-        <TouchableOpacity
-          style={[styles.saveBtn, saving && styles.saveBtnOff]}
+        {/* Save */}
+        <Button
+          label="Save"
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={saving}
           onPress={handleSave}
-          disabled={saving}
-          activeOpacity={0.85}
-        >
-          {saving ? (
-            <ActivityIndicator color="#0a0a0a" size="small" />
-          ) : (
-            <Text style={styles.saveBtnText}>Save Zone</Text>
-          )}
-        </TouchableOpacity>
+        />
       </ScrollView>
     </View>
   );
@@ -311,142 +273,120 @@ export default function ZoneScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
 
-  // ── Header ──
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#141414',
-    backgroundColor: '#0a0a0a',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
   },
   backBtn: { padding: 4 },
-  headerTitle: { color: '#ffffff', fontSize: 17, fontWeight: '700' },
+  headerTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
+  },
+  headerSpacer: { width: 32 },
 
   scroll: { paddingHorizontal: 20, paddingTop: 24 },
 
-  // ── Section ──
+  // Toggle card
+  toggleCard: { marginBottom: 28 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  toggleText: { flex: 1, gap: 4 },
+  toggleLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.t1,
+  },
+  toggleSub: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+    lineHeight: 18,
+  },
+
+  // Section
   section: { marginBottom: 28 },
-  sectionTitle: {
-    color: '#444',
+  sectionLabel: {
+    fontFamily: fonts.body,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
+    color: colors.t3,
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
-  // ── Toggle ──
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    padding: 16,
-    gap: 12,
-  },
-  toggleLabel: { color: '#e0e0e0', fontSize: 15, fontWeight: '600' },
-  toggleSub: { color: '#444', fontSize: 12, marginTop: 3, lineHeight: 17 },
-
-  // ── Preset grid ──
+  // Preset grid
   presetGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
   presetCard: {
-    width: '30.5%',
-    aspectRatio: 1,
-    backgroundColor: '#111111',
-    borderRadius: 16,
+    width: CARD_W,
+    paddingVertical: 20,
+    backgroundColor: colors.surface,
+    borderRadius: radius.m,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 10,
   },
   presetCardSelected: {
-    borderColor: '#00b4a6',
-    backgroundColor: '#0d1f1e',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
   },
-  presetEmoji: { fontSize: 28 },
-  presetName: { color: '#666', fontSize: 12, fontWeight: '500' },
-  presetNameSelected: { color: '#00b4a6' },
-  presetCheck: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#00b4a6',
-    alignItems: 'center',
-    justifyContent: 'center',
+  presetName: {
+    fontFamily: fonts.body,
+    fontWeight: '500',
+    fontSize: 13,
+    color: colors.t3,
   },
-  presetCardNone: {
-    borderColor: '#ff4d4d',
-    backgroundColor: '#1a0a0a',
-    shadowColor: '#ff4d4d',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  presetNameNone: { color: '#ff4d4d' },
-  presetCheckNone: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#ff4d4d',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  presetNameSelected: { color: colors.teal },
 
-  // ── Custom audio ──
+  // Upload card
   uploadCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    borderStyle: 'dashed',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
     gap: 14,
+    paddingVertical: 20,
+    paddingHorizontal: 18,
+    backgroundColor: colors.surface,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
   },
   uploadCardActive: {
-    borderColor: '#00b4a650',
     borderStyle: 'solid',
-    backgroundColor: '#0d1f1e',
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
   },
-  uploadLabel: { color: '#444', fontSize: 14, fontWeight: '500' },
-  uploadLabelActive: { color: '#00b4a6' },
-  uploadSub: { color: '#2e2e2e', fontSize: 11, marginTop: 2 },
+  uploadText: { flex: 1, gap: 4 },
+  uploadLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '500',
+    fontSize: 14,
+    color: colors.t2,
+  },
+  uploadLabelActive: { color: colors.teal },
+  uploadHint: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: colors.t3,
+  },
 
-  // ── Save button ──
-  saveBtn: {
-    backgroundColor: '#00b4a6',
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  saveBtnOff: { opacity: 0.6 },
-  saveBtnText: { color: '#0a0a0a', fontSize: 16, fontWeight: '700' },
+  pressed: { opacity: 0.6 },
 });

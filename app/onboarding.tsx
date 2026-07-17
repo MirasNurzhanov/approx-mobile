@@ -1,43 +1,48 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
+  Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
   type ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width } = Dimensions.get('window');
-const COLOR_TEAL = '#00b4a6';
+import { Button } from '@/components/ui/Button';
+import { colors, fonts, radius } from '@/constants/theme';
 
-const CARDS = [
+const { width } = Dimensions.get('window');
+
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
+const SLIDES: { id: string; icon: IoniconsName; title: string; body: string }[] = [
   {
     id: '1',
-    emoji: '🗺️',
-    title: 'Discover nearby people',
+    icon: 'map-outline',
+    title: 'Discover Nearby',
     body: 'Find people with shared interests right around you — no algorithms, just proximity.',
   },
   {
     id: '2',
-    emoji: '🎵',
-    title: "Enter someone's Zone",
+    icon: 'musical-notes-outline',
+    title: "Enter Someone's Zone",
     body: 'Walk near someone and hear their music. Let your vibe speak before you say a word.',
   },
   {
     id: '3',
-    emoji: '⚔️',
+    icon: 'trophy-outline',
     title: 'Complete Quests',
     body: 'Earn Aura Points by completing challenges and climb to the top of the leaderboard.',
   },
   {
     id: '4',
-    emoji: '👥',
-    title: 'Make real connections',
+    icon: 'people-outline',
+    title: 'Make Real Connections',
     body: 'Go from stranger to friend in real life. Every connection starts with being in the same place.',
   },
 ];
@@ -58,31 +63,30 @@ export default function OnboardingScreen() {
   }).current;
 
   function goNext() {
-    if (index < CARDS.length - 1) {
+    if (index < SLIDES.length - 1) {
       flatRef.current?.scrollToIndex({ index: index + 1, animated: true });
     } else {
       finish();
     }
   }
 
-  const isLast = index === CARDS.length - 1;
+  const isLast = index === SLIDES.length - 1;
 
   return (
     <View style={styles.root}>
-      {/* Skip — top right, hidden on last slide */}
       {!isLast && (
-        <TouchableOpacity
+        <Pressable
           onPress={finish}
-          activeOpacity={0.7}
           style={[styles.skipBtn, { top: top + 12 }]}
+          hitSlop={12}
         >
           <Text style={styles.skipText}>Skip</Text>
-        </TouchableOpacity>
+        </Pressable>
       )}
 
       <FlatList
         ref={flatRef}
-        data={CARDS}
+        data={SLIDES}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
@@ -91,50 +95,57 @@ export default function OnboardingScreen() {
         viewabilityConfig={{ viewAreaCoveragePercentThreshold: 50 }}
         getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
         renderItem={({ item }) => (
-          <View style={styles.card}>
+          <View style={styles.slide}>
             <View style={styles.iconRing}>
               <View style={styles.iconInner}>
-                <Text style={styles.emoji}>{item.emoji}</Text>
+                <Ionicons name={item.icon} size={52} color={colors.teal} />
               </View>
             </View>
-            <Text style={styles.cardTitle}>{item.title}</Text>
-            <Text style={styles.cardBody}>{item.body}</Text>
+            <Text style={styles.title}>{item.title}</Text>
+            <Text style={styles.body}>{item.body}</Text>
           </View>
         )}
       />
 
-      {/* Dot indicators */}
       <View style={styles.dots}>
-        {CARDS.map((_, i) => (
+        {SLIDES.map((_, i) => (
           <View key={i} style={[styles.dot, i === index && styles.dotActive]} />
         ))}
       </View>
 
-      {/* Footer — full-width Next / Get Started */}
-      <View style={[styles.footer, { paddingBottom: bottom + 24 }]}>
-        <TouchableOpacity onPress={goNext} activeOpacity={0.85} style={styles.nextBtn}>
-          <Text style={styles.nextText}>{isLast ? 'Get Started' : 'Next'}</Text>
-        </TouchableOpacity>
+      <View style={[styles.footer, { paddingBottom: bottom + 16 }]}>
+        <Button
+          label={isLast ? 'Get Started' : 'Next'}
+          variant="primary"
+          size="lg"
+          fullWidth
+          onPress={goNext}
+        />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
 
-  // ── Skip ──
   skipBtn: {
     position: 'absolute',
     right: 24,
     zIndex: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
-  skipText: { color: '#555', fontSize: 15, fontWeight: '500' },
+  skipText: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t3,
+  },
 
-  // ── Card ──
-  card: {
+  slide: {
     width,
     flex: 1,
     alignItems: 'center',
@@ -142,69 +153,63 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   iconRing: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 136,
+    height: 136,
+    borderRadius: 68,
     borderWidth: 1.5,
-    borderColor: `${COLOR_TEAL}40`,
+    borderColor: colors.tealLine,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 40,
-    shadowColor: COLOR_TEAL,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 24,
-    elevation: 10,
+    marginBottom: 44,
   },
   iconInner: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: `${COLOR_TEAL}12`,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: colors.tealTint,
     borderWidth: 1,
-    borderColor: `${COLOR_TEAL}30`,
+    borderColor: colors.tealLine,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emoji: { fontSize: 38 },
-  cardTitle: {
-    color: '#ffffff',
-    fontSize: 26,
-    fontWeight: '800',
+  title: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 28,
+    color: colors.t1,
     textAlign: 'center',
     marginBottom: 16,
-    letterSpacing: 0.3,
-  },
-  cardBody: {
-    color: '#666',
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 24,
     letterSpacing: 0.2,
   },
+  body: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t2,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
 
-  // ── Dots ──
   dots: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
-    marginBottom: 32,
-  },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2a2a2a' },
-  dotActive: { width: 22, backgroundColor: COLOR_TEAL },
-
-  // ── Footer ──
-  footer: { paddingHorizontal: 24 },
-  nextBtn: {
-    backgroundColor: COLOR_TEAL,
-    paddingVertical: 16,
-    borderRadius: 16,
     alignItems: 'center',
-    shadowColor: COLOR_TEAL,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
+    gap: 6,
+    marginBottom: 28,
   },
-  nextText: { color: '#0a0a0a', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.surface2,
+  },
+  dotActive: {
+    width: 24,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.teal,
+  },
+
+  footer: {
+    paddingHorizontal: 24,
+  },
 });

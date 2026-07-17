@@ -34,9 +34,12 @@ import MapView, { Circle, Marker, PROVIDER_GOOGLE, type Region } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
+import { Avatar } from '@/components/ui/Avatar';
+import { Button } from '@/components/ui/Button';
 import { api } from '@/services/api';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { registerNearbyRefresh } from '@/services/nearbyRefresh';
+import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'connected' | 'friend';
@@ -285,11 +288,13 @@ function ZoneBanner({
 }
 
 // ─── Story Sheet ──────────────────────────────────────────────────────────────
-const REACTIONS: { type: ReactionType; emoji: string }[] = [
-  { type: 'like',        emoji: '👍' },
-  { type: 'funny',       emoji: '😄' },
-  { type: 'helpful',     emoji: '💡' },
-  { type: 'interesting', emoji: '⭐' },
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
+const REACTIONS: { type: ReactionType; icon: IoniconsName }[] = [
+  { type: 'like',        icon: 'heart-outline' },
+  { type: 'funny',       icon: 'happy-outline' },
+  { type: 'helpful',     icon: 'bulb-outline' },
+  { type: 'interesting', icon: 'star-outline' },
 ];
 
 interface StorySheetProps {
@@ -304,70 +309,64 @@ function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps)
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: storySheetY.value }],
   }));
-  const avatarBg = avatarBgColor(story.author.username);
 
   return (
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
       <Animated.View style={[styles.storySheet, { paddingBottom: bottom + 20 }, animStyle]}>
-        <BlurView intensity={40} tint="dark" style={[StyleSheet.absoluteFill, styles.sheetBlur]} />
         <View style={styles.sheetHandle} />
+
         <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-          <Ionicons name="close" size={16} color="#666" />
+          <Ionicons name="close" size={16} color={colors.t3} />
         </Pressable>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyScroll}>
+          {/* Header row */}
           <View style={styles.storyAuthorRow}>
-            <View style={[styles.storyAvatar, { backgroundColor: avatarBg }]}>
-              {story.author.profile_picture ? (
-                <Image source={{ uri: story.author.profile_picture }} style={styles.storyAvatarImg} />
-              ) : (
-                <Text style={styles.storyAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
-              )}
-            </View>
-            <View style={{ flex: 1 }}>
+            <Avatar uri={story.author.profile_picture} name={story.author.username} size="sm" />
+            <View style={styles.storyAuthorInfo}>
               <Text style={styles.storyAuthorName}>{story.author.username}</Text>
-              <View style={styles.storyMetaRow}>
-                {story.place_name ? <Text style={styles.storyMeta}>📍 {story.place_name}</Text> : null}
-                <Text style={styles.storyMeta}>{timeAgo(story.created_at)}</Text>
-              </View>
+              {story.place_name ? (
+                <Text style={styles.storyMeta} numberOfLines={1}>📍 {story.place_name}</Text>
+              ) : null}
             </View>
             <View style={styles.storyExpiryBadge}>
               <Text style={styles.storyExpiryText}>{timeLeft(story.expires_at)}</Text>
             </View>
           </View>
+
+          {/* Content */}
           <Text style={styles.storyText}>{story.content ?? story.text}</Text>
+
           {story.photo ? (
             <Image source={{ uri: story.photo }} style={styles.storyPhoto} resizeMode="cover" />
           ) : null}
-          {REACTIONS.some(({ type }) => (story.reactions?.[type] ?? 0) > 0) && (
-            <View style={styles.reactionSummaryRow}>
-              {REACTIONS.filter(({ type }) => (story.reactions?.[type] ?? 0) > 0).map(({ type, emoji }) => (
-                <Text key={type} style={styles.reactionSummaryText}>
-                  {emoji} {story.reactions[type]}
-                </Text>
-              ))}
-            </View>
-          )}
+
+          {/* Divider */}
+          <View style={styles.storyDivider} />
+
+          {/* Reaction row */}
           <View style={styles.reactionsRow}>
-            {REACTIONS.map(({ type, emoji }) => {
-              const reactions = story.reactions ?? {};
-              const count = reactions[type] ?? 0;
+            {REACTIONS.map(({ type, icon }) => {
+              const count = story.reactions?.[type] ?? 0;
               const isActive = story.user_reaction === type;
               return (
-                <TouchableOpacity
+                <Pressable
                   key={type}
                   style={[styles.reactionBtn, isActive && styles.reactionBtnActive]}
-                  activeOpacity={0.75}
-                  onPress={() => {
-                    console.log('[Reaction] button pressed, type:', type, 'story id:', story.id);
-                    onReact(type);
-                  }}
+                  onPress={() => onReact(type)}
                 >
-                  <Text style={styles.reactionEmoji}>{emoji}</Text>
+                  <Ionicons
+                    name={isActive ? (icon.replace('-outline', '') as IoniconsName) : icon}
+                    size={20}
+                    color={isActive ? colors.teal : colors.t3}
+                  />
                   {count > 0 && (
-                    <Text style={[styles.reactionCount, isActive && { color: COLOR_TEAL }]}>{count}</Text>
+                    <Text style={[styles.reactionCount, isActive && styles.reactionCountActive]}>
+                      {count}
+                    </Text>
                   )}
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </View>
@@ -486,7 +485,6 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetY.value }],
   }));
-  const dist = fmtDistance(user.distance);
 
   const rel         = user.relationship ?? 'stranger';
   const isFriend    = rel === 'friend';
@@ -494,16 +492,12 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
   const isHiSent    = rel === 'hi_sent';
   const isStranger  = rel === 'stranger';
 
-  const glowColor     = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_TEAL;
-  const relLabel      = REL_LABEL[rel] ?? 'Nearby';
-  const relBadgeColor = isFriend ? '#1e3a5f' : isConnected ? '#3d1f0a' : '#0d1f1e';
-  const relTextColor  = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_TEAL;
-  const avatarBg      = avatarBgColor(user.username);
+  const relRingColor  = isFriend ? colors.blue : isConnected ? colors.orange : colors.t3;
+  const relLabelColor = isFriend ? colors.blue : isConnected ? colors.orange : colors.t2;
+  const dist          = fmtDistance(user.distance);
 
   function sendHi() {
-    const url = '/api/friends/hi/';
-    console.log('[Hi] sending to URL:', url, 'body:', { receiver_id: user.id });
-    api.post(url, { receiver_id: user.id })
+    api.post('/api/friends/hi/', { receiver_id: user.id })
       .then(() => onFriendChange())
       .catch((e) => console.log('[Hi] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
     onDismiss();
@@ -523,43 +517,34 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
       <Animated.View style={[styles.sheet, { paddingBottom: bottom + 20 }, animStyle]}>
-        {/* Glassmorphism background */}
-        <BlurView intensity={40} tint="dark" style={[StyleSheet.absoluteFill, styles.sheetBlur]} />
-
         <View style={styles.sheetHandle} />
 
-        {/* Dismiss button — absolute so it doesn't affect hero centering */}
         <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-          <Ionicons name="close" size={16} color="#666" />
+          <Ionicons name="close" size={16} color={colors.t3} />
         </Pressable>
 
-        {/* Hero: avatar centered, name + badge below */}
         <View style={styles.sheetHero}>
-          <View style={[styles.sheetAvatarGlow, { shadowColor: glowColor }]}>
-            <View style={[styles.sheetAvatarRing, { borderColor: glowColor }]}>
-              <View style={[styles.sheetAvatar, { backgroundColor: avatarBg }]}>
-                {user.profile_picture ? (
-                  <Image source={{ uri: user.profile_picture }} style={styles.sheetAvatarImage} />
-                ) : (
-                  <Text style={styles.sheetAvatarText}>
-                    {user.username.charAt(0).toUpperCase()}
-                  </Text>
-                )}
-              </View>
-            </View>
-          </View>
-
+          <Avatar
+            uri={user.profile_picture}
+            name={user.username}
+            size="lg"
+            ringColor={relRingColor}
+          />
           <Text style={styles.sheetName}>{user.username}</Text>
-
           <View style={styles.sheetMetaRow}>
-            <View style={[styles.relBadge, { backgroundColor: relBadgeColor }]}>
-              <Text style={[styles.relBadgeText, { color: relTextColor }]}>{relLabel}</Text>
+            <View style={styles.relBadge}>
+              <Text style={[styles.relBadgeText, { color: relLabelColor }]}>
+                {REL_LABEL[rel] ?? 'Nearby'}
+              </Text>
             </View>
-            {dist && <Text style={styles.sheetDist}>{dist}</Text>}
+            {dist && (
+              <View style={styles.relBadge}>
+                <Text style={styles.relBadgeText}>{dist}</Text>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* Shared interests */}
         {user.shared_interests && user.shared_interests.length > 0 && (
           <View style={styles.interestsSection}>
             <Text style={styles.sectionLabel}>Shared Interests</Text>
@@ -577,26 +562,21 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
           </View>
         )}
 
-        {/* Actions */}
         <View style={styles.actions}>
-          {isStranger && (
-            <TouchableOpacity style={styles.btnPrimary} activeOpacity={0.8} onPress={sendHi}>
-              <Text style={styles.btnPrimaryText}>👋  Send Hi</Text>
-            </TouchableOpacity>
-          )}
-          {isHiSent && (
-            <TouchableOpacity style={[styles.btnPrimary, styles.btnSent]} activeOpacity={1} disabled>
-              <Text style={styles.btnSentText}>Hi Sent ✓</Text>
-            </TouchableOpacity>
-          )}
-          {(isFriend || isConnected) && (
-            <TouchableOpacity style={styles.btnPrimary} activeOpacity={0.8} onPress={goToMessages}>
-              <Text style={styles.btnPrimaryText}>💬  Message</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity style={styles.btnSecondary} activeOpacity={0.8} onPress={goToProfile}>
-            <Text style={styles.btnSecondaryText}>👤  View Profile</Text>
-          </TouchableOpacity>
+          <View style={styles.actionBtn}>
+            {isStranger && (
+              <Button label="Send Hi" variant="primary" size="md" fullWidth onPress={sendHi} />
+            )}
+            {isHiSent && (
+              <Button label="Hi Sent ✓" variant="secondary" size="md" fullWidth disabled />
+            )}
+            {(isFriend || isConnected) && (
+              <Button label="Message" variant="primary" size="md" fullWidth onPress={goToMessages} />
+            )}
+          </View>
+          <View style={styles.actionBtn}>
+            <Button label="View Profile" variant="ghost" size="md" fullWidth onPress={goToProfile} />
+          </View>
         </View>
       </Animated.View>
     </>
@@ -1172,90 +1152,67 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: SHEET_H,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.border,
     paddingHorizontal: 20,
     paddingTop: 10,
     zIndex: 200,
     elevation: 20,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(12,12,12,0.7)',
-  },
-  sheetBlur: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: colors.surface,
   },
   sheetHandle: {
-    width: 40,
+    width: 36,
     height: 4,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: colors.border,
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 20,
   },
-  // Centered hero block
   sheetHero: {
     alignItems: 'center',
+    gap: 10,
     marginBottom: 20,
   },
-
-  // Avatar glow system — 64px inner / 78px outer ring
-  sheetAvatarGlow: {
-    shadowRadius: 22,
-    shadowOpacity: 0.75,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 14,
-    marginBottom: 14,
+  sheetName: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
   },
-  sheetAvatarRing: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    borderWidth: 2.5,
-    padding: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sheetAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  sheetAvatarText: { color: '#fff', fontSize: 26, fontWeight: '700' },
-  sheetAvatarImage: { width: 64, height: 64, borderRadius: 32 },
-
-  sheetName: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 8 },
   sheetMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   relBadge: {
-    borderRadius: 8,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.s,
     paddingHorizontal: 8,
     paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  relBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
-  sheetDist: { color: '#555', fontSize: 12 },
-
+  relBadgeText: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.t2,
+  },
   closeBtn: {
     position: 'absolute',
     top: 14,
     right: 20,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.surface2,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
   },
-
   interestsSection: { marginBottom: 20 },
   sectionLabel: {
-    color: '#444',
+    fontFamily: fonts.body,
+    color: colors.t3,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
@@ -1264,34 +1221,21 @@ const styles = StyleSheet.create({
   },
   chipRow: { gap: 8 },
   chip: {
-    backgroundColor: '#0d1f1e',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.m,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderWidth: 1,
-    borderColor: `${COLOR_TEAL}30`,
+    borderColor: colors.border,
   },
-  chipText: { color: COLOR_TEAL, fontSize: 12, fontWeight: '500' },
-
-  actions: { gap: 10 },
-  btnPrimary: {
-    backgroundColor: COLOR_TEAL,
-    borderRadius: 16,
-    paddingVertical: 15,
-    alignItems: 'center',
+  chipText: {
+    fontFamily: fonts.body,
+    color: colors.t2,
+    fontSize: 12,
+    fontWeight: '500',
   },
-  btnPrimaryText: { color: '#0a0a0a', fontSize: 15, fontWeight: '700' },
-  btnSecondary: {
-    borderRadius: 16,
-    paddingVertical: 13,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  btnSecondaryText: { color: '#888', fontSize: 14, fontWeight: '600' },
-  btnSent: { backgroundColor: '#0d1f1e', borderWidth: 1, borderColor: `${COLOR_TEAL}40` },
-  btnSentText: { color: COLOR_TEAL, fontSize: 15, fontWeight: '600', opacity: 0.7 },
+  actions: { flexDirection: 'row', gap: 10 },
+  actionBtn: { flex: 1 },
 
   // ─── Story bubble marker ───
   storyBubbleAvatar: {
@@ -1361,90 +1305,79 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: STORY_SHEET_H,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: `${COLOR_TEAL}30`,
+    borderColor: colors.border,
     paddingHorizontal: 20,
     paddingTop: 10,
     zIndex: 200,
     elevation: 20,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(10,20,19,0.85)',
+    backgroundColor: colors.surface,
   },
+  storyScroll: { paddingBottom: 8 },
   storyAuthorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 14,
+    gap: 10,
+    marginBottom: 16,
     marginTop: 4,
   },
-  storyAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+  storyAuthorInfo: { flex: 1, gap: 2 },
+  storyAuthorName: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.t1,
   },
-  storyAvatarImg: { width: 42, height: 42, borderRadius: 21 },
-  storyAvatarText: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  storyAuthorName: { color: '#fff', fontSize: 15, fontWeight: '700', marginBottom: 2 },
-  storyMetaRow: { flexDirection: 'row', gap: 8 },
-  storyMeta: { color: '#555', fontSize: 12 },
+  storyMeta: { fontFamily: fonts.body, color: colors.t3, fontSize: 12 },
   storyExpiryBadge: {
-    backgroundColor: 'rgba(0,180,166,0.1)',
-    borderRadius: 8,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.s,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: `${COLOR_TEAL}30`,
+    borderColor: colors.border,
   },
-  storyExpiryText: { color: COLOR_TEAL, fontSize: 11, fontWeight: '600' },
+  storyExpiryText: { fontFamily: fonts.body, color: colors.t3, fontSize: 11, fontWeight: '500' },
   storyText: {
-    color: '#ddd',
+    fontFamily: fonts.body,
+    color: colors.t1,
     fontSize: 15,
     lineHeight: 22,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   storyPhoto: {
     width: '100%',
-    height: 180,
-    borderRadius: 14,
+    height: 200,
+    borderRadius: radius.m,
     marginBottom: 16,
   },
-  reactionsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 4,
+  storyDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginBottom: 14,
   },
+  reactionsRow: { flexDirection: 'row', gap: 8 },
   reactionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    gap: 6,
+    paddingVertical: 11,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.border,
   },
   reactionBtnActive: {
-    backgroundColor: `${COLOR_TEAL}15`,
-    borderColor: `${COLOR_TEAL}40`,
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
   },
-  reactionEmoji: { fontSize: 18 },
-  reactionCount: { color: '#666', fontSize: 12, fontWeight: '600' },
-  reactionSummaryRow: {
-    flexDirection: 'row',
-    gap: 14,
-    paddingVertical: 6,
-    paddingHorizontal: 2,
-    marginBottom: 4,
-  },
-  reactionSummaryText: { color: '#aaa', fontSize: 14, fontWeight: '600' },
+  reactionCount: { fontFamily: fonts.body, color: colors.t3, fontSize: 13, fontWeight: '500' },
+  reactionCountActive: { color: colors.teal },
 
   // ─── Create story modal ───
   createModalBackdrop: {

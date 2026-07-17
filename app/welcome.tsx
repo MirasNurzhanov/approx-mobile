@@ -1,66 +1,69 @@
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ParticleBackground } from '@/components/ParticleBackground';
+import { Button } from '@/components/ui/Button';
+import { colors, fonts } from '@/constants/theme';
 
 export default function WelcomeScreen() {
   return (
-    <View style={styles.root}>
-      <ParticleBackground />
-
+    <SafeAreaView style={styles.root}>
       <View style={styles.content}>
-        <Image source={require('../assets/images/icon.png')} style={styles.logo} />
+        <View style={styles.hero}>
+          <Text style={styles.wordmark}>AURA</Text>
+          <Text style={styles.tagline}>Find your people nearby</Text>
+        </View>
 
         <View style={styles.buttons}>
-          <TouchableOpacity style={styles.loginBtn} onPress={() => router.push('/login')} activeOpacity={0.85}>
-            <Text style={styles.loginText}>Login</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.registerBtn} onPress={() => router.push('/register')} activeOpacity={0.85}>
-            <Text style={styles.registerText}>Register</Text>
-          </TouchableOpacity>
+          <Button
+            label="Get Started"
+            variant="primary"
+            size="lg"
+            fullWidth
+            onPress={() => router.push('/onboarding')}
+          />
+          <Button
+            label="Sign In"
+            variant="ghost"
+            size="lg"
+            fullWidth
+            onPress={() => router.push('/login')}
+          />
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
   content: {
     flex: 1,
+    paddingHorizontal: 28,
+    justifyContent: 'space-between',
+    paddingTop: 80,
+    paddingBottom: 32,
+  },
+  hero: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
+    gap: 12,
   },
-
-  logo: {
-    width: 220,
-    height: 220,
-    borderRadius: 48,
-    marginBottom: 56,
+  wordmark: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 52,
+    color: colors.teal,
+    letterSpacing: 52 * 0.34,
   },
-
-  buttons: { width: '100%', gap: 14 },
-  loginBtn: {
-    width: '100%',
-    backgroundColor: '#00b4a6',
-    paddingVertical: 17,
-    borderRadius: 16,
-    alignItems: 'center',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+  tagline: {
+    fontFamily: fonts.body,
+    fontSize: 16,
+    color: colors.t2,
   },
-  loginText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
-  registerBtn: {
-    width: '100%',
-    paddingVertical: 17,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#00b4a6',
+  buttons: {
+    gap: 12,
   },
-  registerText: { color: '#00b4a6', fontSize: 16, fontWeight: '600', letterSpacing: 0.5 },
 });

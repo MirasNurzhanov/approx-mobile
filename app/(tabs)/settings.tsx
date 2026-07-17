@@ -2,23 +2,27 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
+  Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 
 import { api } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
+import { Card } from '@/components/ui/Card';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
+import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PrivacyMode = 'active' | 'ghost' | 'invisible';
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface Profile {
   privacy_mode?: PrivacyMode;
@@ -29,63 +33,68 @@ interface Profile {
 // ─── Privacy mode definitions ─────────────────────────────────────────────────
 const PRIVACY_MODES: {
   key: PrivacyMode;
-  emoji: string;
+  icon: IoniconsName;
+  ghosted: boolean;
   label: string;
   desc: string;
-  dot: string;
 }[] = [
   {
     key: 'active',
-    emoji: '🟢',
+    icon: 'eye-outline',
+    ghosted: false,
     label: 'Active',
     desc: 'Visible on the map. Others can find and connect with you.',
-    dot: '#22c55e',
   },
   {
     key: 'ghost',
-    emoji: '👻',
+    icon: 'eye-off-outline',
+    ghosted: true,
     label: 'Ghost',
-    desc: 'Hidden on the map but still appear in nearby lists. You can see others.',
-    dot: '#f59e0b',
+    desc: 'Hidden on the map but still appear in nearby lists.',
   },
   {
     key: 'invisible',
-    emoji: '🔴',
+    icon: 'eye-off-outline',
+    ghosted: false,
     label: 'Invisible',
     desc: 'Completely hidden. You cannot be seen or found by anyone.',
-    dot: '#ef4444',
   },
 ];
 
-// ─── NavCard ──────────────────────────────────────────────────────────────────
-function NavCard({
-  icon,
+// ─── SettingsRow ──────────────────────────────────────────────────────────────
+function SettingsRow({
   label,
-  sub,
+  right,
   onPress,
+  last = false,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
   label: string;
-  sub: string;
-  onPress: () => void;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  last?: boolean;
 }) {
-  return (
-    <TouchableOpacity style={styles.navCard} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.navIconWrap}>
-        <Ionicons name={icon} size={20} color="#00b4a6" />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.navLabel}>{label}</Text>
-        <Text style={styles.navSub}>{sub}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={16} color="#2e2e2e" />
-    </TouchableOpacity>
+  const inner = (
+    <View style={[styles.settingsRow, !last && styles.settingsRowBorder]}>
+      <Text style={styles.settingsLabel}>{label}</Text>
+      <View style={styles.settingsRight}>{right}</View>
+    </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        {inner}
+      </Pressable>
+    );
+  }
+  return inner;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
-  const router = useRouter();
   const { logout } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
@@ -93,6 +102,7 @@ export default function SettingsScreen() {
   const [privacy, setPrivacy] = useState<PrivacyMode>('active');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   useEffect(() => {
     api.get<Profile>('/api/users/profile/')
@@ -100,31 +110,9 @@ export default function SettingsScreen() {
         const mode = r.data.privacy_mode ?? r.data.privacy ?? r.data.status ?? 'active';
         setPrivacy(mode as PrivacyMode);
       })
-      .catch((e) => console.log('[Settings] profile fetch error:', e?.response?.status))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
-
-  function confirmDeleteAccount() {
-    Alert.alert(
-      'Delete Account',
-      'Are you sure? This action cannot be undone. All your data will be permanently deleted.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete('/api/users/delete/');
-            } catch {
-              // Proceed with local cleanup even if the request fails
-            }
-            await logout();
-          },
-        },
-      ],
-    );
-  }
 
   async function selectPrivacy(mode: PrivacyMode) {
     if (mode === privacy || saving) return;
@@ -133,12 +121,29 @@ export default function SettingsScreen() {
     setSaving(true);
     try {
       await api.patch('/api/users/privacy/', { privacy_mode: mode });
-    } catch (e: any) {
-      console.log('[Settings] privacy PATCH error:', e?.response?.status, JSON.stringify(e?.response?.data));
+    } catch {
       setPrivacy(prev);
     } finally {
       setSaving(false);
     }
+  }
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Delete Account',
+      'This cannot be undone. All your data will be permanently deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try { await api.delete('/api/users/delete/'); } catch {}
+            await logout();
+          },
+        },
+      ],
+    );
   }
 
   return (
@@ -148,111 +153,86 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
         {...scrollProps}
       >
-        {/* ── Header ── */}
-        <View style={styles.pageHeader}>
-          <Text style={styles.pageTitle}>Settings</Text>
-          {saving && <ActivityIndicator color="#00b4a6" size="small" />}
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Settings</Text>
+          {saving && <ActivityIndicator color={colors.teal} size="small" />}
         </View>
 
-        {/* ── Privacy Mode ── */}
+        {/* Privacy mode */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Privacy Mode</Text>
+          <Text style={styles.sectionLabel}>PRIVACY MODE</Text>
           {loading ? (
             <View style={styles.loadingWrap}>
-              <ActivityIndicator color="#00b4a6" />
+              <ActivityIndicator color={colors.teal} />
             </View>
           ) : (
             <View style={styles.privacyList}>
               {PRIVACY_MODES.map((mode) => {
                 const selected = privacy === mode.key;
                 return (
-                  <TouchableOpacity
+                  <Card
                     key={mode.key}
-                    style={[styles.privacyCard, selected && styles.privacyCardSelected]}
                     onPress={() => selectPrivacy(mode.key)}
-                    activeOpacity={0.75}
-                    disabled={saving}
+                    style={selected ? styles.privacyCardSelected : undefined}
                   >
-                    <View style={styles.privacyCardTop}>
-                      <Text style={styles.privacyEmoji}>{mode.emoji}</Text>
-                      <View style={{ flex: 1 }}>
+                    <View style={styles.privacyCardInner}>
+                      <Ionicons
+                        name={mode.icon}
+                        size={22}
+                        color={selected ? colors.teal : colors.t3}
+                        style={mode.ghosted && !selected ? styles.iconGhosted : undefined}
+                      />
+                      <View style={styles.privacyText}>
                         <Text style={[styles.privacyLabel, selected && styles.privacyLabelSelected]}>
                           {mode.label}
                         </Text>
+                        <Text style={styles.privacyDesc}>{mode.desc}</Text>
                       </View>
-                      {selected && (
-                        <View style={styles.selectedCheck}>
-                          <Ionicons name="checkmark" size={14} color="#0a0a0a" />
-                        </View>
-                      )}
                     </View>
-                    <Text style={[styles.privacyDesc, selected && styles.privacyDescSelected]}>
-                      {mode.desc}
-                    </Text>
-                  </TouchableOpacity>
+                  </Card>
                 );
               })}
             </View>
           )}
         </View>
 
-        {/* ── Account ── */}
+        {/* Other settings */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          <View style={styles.navList}>
-            <NavCard
-              icon="create-outline"
-              label="Edit Profile"
-              sub="Update your username, bio and photo"
-              onPress={() => router.push('/edit-profile')}
-            />
-            <NavCard
-              icon="location-outline"
-              label="Zone Setup"
-              sub="Configure your activity zones"
-              onPress={() => router.push('/zone')}
-            />
-          </View>
-        </View>
-
-        {/* ── App ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>App</Text>
-          <View style={styles.navList}>
-            <NavCard
-              icon="notifications-outline"
+          <Text style={styles.sectionLabel}>PREFERENCES</Text>
+          <Card style={styles.rowsCard}>
+            <SettingsRow
               label="Notifications"
-              sub="Manage push notification preferences"
-              onPress={() => router.push('/(tabs)/notifications')}
+              right={
+                <Switch
+                  value={notificationsEnabled}
+                  onValueChange={setNotificationsEnabled}
+                  trackColor={{ false: colors.surface2, true: colors.teal }}
+                  thumbColor={colors.t1}
+                  ios_backgroundColor={colors.surface2}
+                />
+              }
             />
-            <NavCard
-              icon="shield-outline"
-              label="Privacy & Safety"
-              sub="Blocked users and data settings"
-              onPress={() => router.push('/(tabs)/notifications')}
+            <SettingsRow
+              label="Privacy Policy"
+              last
+              onPress={() => Linking.openURL('https://aura-app.com/privacy')}
+              right={<Ionicons name="chevron-forward" size={16} color={colors.t3} />}
             />
-          </View>
+          </Card>
         </View>
 
-        {/* ── Logout ── */}
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={() => { console.log('[Settings] Sign Out pressed'); logout(); }}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="log-out-outline" size={18} color="#ff4d4d" />
-          <Text style={styles.logoutText}>Sign Out</Text>
-        </TouchableOpacity>
-
-        {/* ── Delete Account ── */}
-        <TouchableOpacity
-          style={styles.deleteBtn}
-          onPress={confirmDeleteAccount}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="trash-outline" size={18} color="#ff4d4d" />
-          <Text style={styles.deleteText}>Delete Account</Text>
-        </TouchableOpacity>
+        {/* Danger zone */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>DANGER ZONE</Text>
+          <Pressable
+            style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressed]}
+            onPress={confirmDeleteAccount}
+          >
+            <Ionicons name="trash-outline" size={17} color={colors.red} />
+            <Text style={styles.deleteText}>Delete Account</Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       <Speedometer />
@@ -262,117 +242,102 @@ export default function SettingsScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 20 },
 
-  // ── Header ──
-  pageHeader: {
+  // Header
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 28,
   },
-  pageTitle: { color: '#ffffff', fontSize: 26, fontWeight: '700' },
+  headerTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 26,
+    color: colors.t1,
+  },
 
-  // ── Section ──
+  // Section
   section: { marginBottom: 28 },
-  sectionTitle: {
-    color: '#444',
+  sectionLabel: {
+    fontFamily: fonts.body,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
+    color: colors.t3,
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   loadingWrap: { paddingVertical: 24, alignItems: 'center' },
 
-  // ── Privacy cards ──
-  privacyList: { gap: 10 },
-  privacyCard: {
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    padding: 16,
-    gap: 8,
-  },
+  // Privacy cards
+  privacyList: { gap: 8 },
   privacyCardSelected: {
-    borderColor: '#00b4a6',
-    backgroundColor: '#0d1f1e',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
   },
-  privacyCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  privacyEmoji: { fontSize: 22 },
-  privacyLabel: { color: '#888', fontSize: 15, fontWeight: '600' },
-  privacyLabelSelected: { color: '#ffffff' },
-  privacyDesc: { color: '#333', fontSize: 13, lineHeight: 18 },
-  privacyDescSelected: { color: '#555' },
-  selectedCheck: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#00b4a6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // ── Nav cards ──
-  navList: { gap: 10 },
-  navCard: {
+  privacyCardInner: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    alignItems: 'flex-start',
     gap: 14,
   },
-  navIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#0d1f1e',
-    borderWidth: 1,
-    borderColor: '#00b4a620',
-    alignItems: 'center',
-    justifyContent: 'center',
+  iconGhosted: { opacity: 0.45 },
+  privacyText: { flex: 1, gap: 4 },
+  privacyLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.t2,
   },
-  navLabel: { color: '#ddd', fontSize: 14, fontWeight: '600' },
-  navSub: { color: '#444', fontSize: 12, marginTop: 2 },
+  privacyLabelSelected: { color: colors.t1 },
+  privacyDesc: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+    lineHeight: 18,
+  },
 
-  // ── Logout ──
-  logoutBtn: {
+  // Settings rows card
+  rowsCard: { padding: 0, overflow: 'hidden' },
+  settingsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
     paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#1a0a0a',
-    borderWidth: 1,
-    borderColor: '#ff4d4d22',
-    marginBottom: 12,
   },
-  logoutText: { color: '#ff4d4d', fontSize: 15, fontWeight: '600' },
+  settingsRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  settingsLabel: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+  },
+  settingsRight: { flexDirection: 'row', alignItems: 'center' },
 
-  // ── Delete Account ──
+  // Delete button
   deleteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#1a0a0a',
+    borderRadius: radius.m,
+    backgroundColor: `${colors.red}18`,
     borderWidth: 1,
-    borderColor: '#ff4d4d55',
+    borderColor: `${colors.red}35`,
   },
-  deleteText: { color: '#ff4d4d', fontSize: 15, fontWeight: '600' },
+  deleteText: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.red,
+  },
+
+  pressed: { opacity: 0.6 },
 });

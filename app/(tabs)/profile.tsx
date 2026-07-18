@@ -12,19 +12,30 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
+import { AuraMark } from '@/components/ui/AuraMark';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import {
+  IconCamera,
+  IconChevron,
+  IconHeart,
+  IconImage,
+  IconLogout,
+  IconPencil,
+  IconSound,
+  IconTrophy,
+  iconForInterest,
+  type IconComponent,
+} from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { colors, fonts, radius } from '@/constants/theme';
 
@@ -44,25 +55,29 @@ interface FriendList {
   connections: { id: number }[];
 }
 
-type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
-
 // ─── ActionRow ────────────────────────────────────────────────────────────────
-function ActionRow({ icon, label, onPress, last = false }: {
-  icon: IoniconsName;
+function ActionRow({ icon: Icon, label, onPress }: {
+  icon: IconComponent;
   label: string;
   onPress: () => void;
-  last?: boolean;
 }) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.actionRow, !last && styles.actionRowBorder, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
       onPress={onPress}
     >
-      <Ionicons name={icon} size={20} color={colors.teal} />
+      <Icon size={20} color={colors.t1} />
       <Text style={styles.actionLabel}>{label}</Text>
-      <Ionicons name="chevron-forward" size={16} color={colors.t3} />
+      <IconChevron size={16} color={colors.t3} />
     </Pressable>
   );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function fmtJoined(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -205,28 +220,44 @@ export default function ProfileScreen() {
               </View>
             ) : null}
             <View style={styles.editBadge}>
-              <Ionicons name="pencil" size={11} color={colors.t1} />
+              <IconCamera size={13} color={colors.t1} />
             </View>
           </Pressable>
 
-          <Text style={styles.username}>{profile?.username ?? '—'}</Text>
-          {profile?.bio ? (
-            <Text style={styles.bio}>{profile.bio}</Text>
-          ) : (
-            <Text style={styles.bioEmpty}>No bio yet</Text>
-          )}
+          <View style={styles.heroInfo}>
+            <Text style={styles.username}>{profile?.username ?? '—'}</Text>
+            {profile?.bio ? (
+              <Text style={styles.bio}>{profile.bio}</Text>
+            ) : (
+              <Text style={styles.bioEmpty}>No bio yet</Text>
+            )}
+
+            <View style={styles.pillRow}>
+              {profile?.aura_points != null && (
+                <View style={styles.pill}>
+                  <AuraMark size={13} color={colors.purple} />
+                  <Text style={styles.pillAura}>{profile.aura_points.toLocaleString()}</Text>
+                </View>
+              )}
+              {profile?.date_joined ? (
+                <View style={styles.pill}>
+                  <Text style={styles.pillText}>Since {fmtJoined(profile.date_joined)}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
         </View>
 
         {/* Stats */}
         <Card style={styles.statsCard}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{friendCount}</Text>
-            <Text style={styles.statLabel}>Friends</Text>
+            <Text style={styles.statValue}>{connectionCount}</Text>
+            <Text style={styles.statLabel}>Connections</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{connectionCount}</Text>
-            <Text style={styles.statLabel}>Connections</Text>
+            <Text style={styles.statValue}>{friendCount}</Text>
+            <Text style={styles.statLabel}>Friends</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
@@ -240,32 +271,37 @@ export default function ProfileScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>INTERESTS</Text>
             <View style={styles.chipWrap}>
-              {interests.map((tag, i) => (
-                <View key={i} style={styles.chip}>
-                  <Text style={styles.chipText}>{tag.icon} {tag.name}</Text>
-                </View>
-              ))}
+              {interests.map((tag, i) => {
+                const Icon = iconForInterest(tag.name);
+                return (
+                  <View key={i} style={styles.chip}>
+                    <Icon size={14} color={colors.t2} />
+                    <Text style={styles.chipText}>{tag.name}</Text>
+                  </View>
+                );
+              })}
             </View>
           </View>
         )}
 
         {/* Action rows */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>ACCOUNT</Text>
-          <Card style={styles.actionsCard}>
-            <ActionRow icon="create-outline"   label="Edit Profile"  onPress={openEdit} />
-            <ActionRow icon="heart-outline"     label="My Interests"  onPress={() => router.push('/interests')} />
-            <ActionRow icon="radio-outline"     label="Zone Setup"    onPress={() => router.push('/zone')} />
-            <ActionRow icon="trophy-outline"    label="Leaderboard"   onPress={() => router.push('/leaderboard')} last />
-          </Card>
+          <Text style={styles.sectionLabel}>MORE</Text>
+          <View style={styles.rowGroup}>
+            <ActionRow icon={IconTrophy} label="Leaderboard"    onPress={() => router.push('/leaderboard')} />
+            <ActionRow icon={IconSound}  label="My zone"        onPress={() => router.push('/zone')} />
+            <ActionRow icon={IconHeart}  label="Edit interests" onPress={() => router.push('/interests')} />
+            <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/(tabs)/map')} />
+          </View>
         </View>
 
         {/* Buttons */}
         <View style={styles.btnGroup}>
-          <Button label="Edit Profile" variant="ghost" size="lg" fullWidth onPress={openEdit} />
+          <Button label="Edit profile" icon={IconPencil} variant="ghost" size="lg" fullWidth onPress={openEdit} />
           <Button
-            label="Sign Out"
-            variant="danger"
+            label="Sign out"
+            icon={IconLogout}
+            variant="dangerTint"
             size="lg"
             fullWidth
             onPress={() => logout()}
@@ -336,8 +372,9 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20 },
 
   // Hero
-  hero: { alignItems: 'center', marginBottom: 24, gap: 8 },
-  avatarWrap: { marginBottom: 8 },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 18, marginBottom: 24 },
+  heroInfo: { flex: 1, gap: 5 },
+  avatarWrap: {},
   avatarOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -368,15 +405,34 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 14,
     color: colors.t2,
-    textAlign: 'center',
     lineHeight: 20,
-    maxWidth: 280,
   },
   bioEmpty: {
     fontFamily: fonts.body,
     fontSize: 14,
     color: colors.t3,
     fontStyle: 'italic',
+  },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.surface2,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  pillAura: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 13,
+    color: colors.purple,
+  },
+  pillText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.t2,
   },
 
   // Stats
@@ -389,12 +445,15 @@ const styles = StyleSheet.create({
   statValue: {
     fontFamily: fonts.display,
     fontWeight: '600',
-    fontSize: 17,
+    fontSize: 18,
     color: colors.t1,
   },
   statLabel: {
     fontFamily: fonts.body,
-    fontSize: 12,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
     color: colors.t3,
   },
   statDivider: {
@@ -418,8 +477,11 @@ const styles = StyleSheet.create({
   // Interests
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
-    backgroundColor: colors.surface2,
-    borderRadius: radius.l,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.surface,
+    borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderWidth: 1,
@@ -427,23 +489,21 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontFamily: fonts.body,
-    color: colors.t2,
+    color: colors.t1,
     fontSize: 13,
     fontWeight: '500',
   },
 
   // Action rows
-  actionsCard: { padding: 0, overflow: 'hidden' },
+  rowGroup: { gap: 6 },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
     paddingHorizontal: 16,
-    paddingVertical: 15,
-  },
-  actionRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    paddingVertical: 16,
+    backgroundColor: colors.surface,
+    borderRadius: radius.m,
   },
   actionLabel: {
     flex: 1,

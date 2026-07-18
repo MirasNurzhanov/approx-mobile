@@ -13,9 +13,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { AuraMark } from '@/components/ui/AuraMark';
+import { IconBack, IconMore } from '@/components/ui/icons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'hi_received' | 'connected' | 'friend';
@@ -263,7 +264,7 @@ export default function UserProfileScreen() {
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.headerBtn}>
-          <Ionicons name="chevron-back" size={26} color="#00b4a6" />
+          <IconBack size={24} color="#00b4a6" />
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
@@ -275,7 +276,7 @@ export default function UserProfileScreen() {
         </View>
 
         <TouchableOpacity onPress={openMenu} hitSlop={12} style={styles.headerBtn}>
-          <Ionicons name="ellipsis-horizontal" size={22} color="#555" />
+          <IconMore size={22} color="#555" />
         </TouchableOpacity>
       </View>
 
@@ -305,7 +306,7 @@ export default function UserProfileScreen() {
 
           {profile.aura_points != null && (
             <View style={styles.auraRow}>
-              <Text style={styles.auraIcon}>◉</Text>
+              <AuraMark size={15} color="#8b5cf6" />
               <Text style={styles.auraValue}>{profile.aura_points.toLocaleString()}</Text>
               <Text style={styles.auraLabel}>Aura Points</Text>
             </View>
@@ -323,7 +324,7 @@ export default function UserProfileScreen() {
             <View style={styles.chipWrap}>
               {interests.map((tag, i) => (
                 <View key={i} style={styles.chip}>
-                  <Text style={styles.chipText}>{tag.icon} {tag.name}</Text>
+                  <Text style={styles.chipText}>{tag.name}</Text>
                 </View>
               ))}
             </View>
@@ -438,7 +439,6 @@ const styles = StyleSheet.create({
   bioEmpty: { color: '#2a2a2a', fontSize: 13, marginBottom: 12 },
 
   auraRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 8 },
-  auraIcon: { color: '#8b5cf6', fontSize: 15 },
   auraValue: { color: '#8b5cf6', fontSize: 15, fontWeight: '700' },
   auraLabel: { color: '#555', fontSize: 13 },
 

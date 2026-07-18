@@ -1,7 +1,8 @@
 import { Pressable, Text, ActivityIndicator, StyleSheet, type PressableProps } from 'react-native'
 import { colors, radius, fonts } from '@/constants/theme'
+import type { IconComponent } from './icons'
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerTint'
 type Size = 'sm' | 'md' | 'lg'
 
 interface ButtonProps extends Omit<PressableProps, 'style'> {
@@ -10,6 +11,15 @@ interface ButtonProps extends Omit<PressableProps, 'style'> {
   size?: Size
   loading?: boolean
   fullWidth?: boolean
+  icon?: IconComponent
+}
+
+const LABEL_COLOR: Record<Variant, string> = {
+  primary: colors.bg,
+  secondary: colors.t1,
+  ghost: colors.t1,
+  danger: '#fff',
+  dangerTint: colors.red,
 }
 
 export function Button({
@@ -18,6 +28,7 @@ export function Button({
   size = 'md',
   loading = false,
   fullWidth = false,
+  icon: Icon,
   disabled,
   ...rest
 }: ButtonProps) {
@@ -38,9 +49,12 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={variant === 'primary' ? colors.bg : colors.teal} size="small" />
       ) : (
-        <Text style={[styles.label, styles[`label_${variant}`], styles[`label_${size}`]]}>
-          {label}
-        </Text>
+        <>
+          {Icon ? <Icon size={18} color={LABEL_COLOR[variant]} /> : null}
+          <Text style={[styles.label, styles[`label_${variant}`], styles[`label_${size}`]]}>
+            {label}
+          </Text>
+        </>
       )}
     </Pressable>
   )
@@ -51,6 +65,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
     borderRadius: radius.m,
     borderWidth: 1,
     borderColor: 'transparent',
@@ -63,6 +78,7 @@ const styles = StyleSheet.create({
   secondary: { backgroundColor: colors.surface2, borderColor: colors.border },
   ghost: { backgroundColor: 'transparent', borderColor: colors.border },
   danger: { backgroundColor: colors.red },
+  dangerTint: { backgroundColor: `${colors.red}26` },
 
   // sizes
   sm: { paddingHorizontal: 12, paddingVertical: 8 },
@@ -77,6 +93,7 @@ const styles = StyleSheet.create({
   label_secondary: { color: colors.t1 },
   label_ghost: { color: colors.t1 },
   label_danger: { color: '#fff' },
+  label_dangerTint: { color: colors.red },
 
   // label by size
   label_sm: { fontSize: 13 },

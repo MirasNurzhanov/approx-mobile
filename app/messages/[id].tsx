@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { decodeStoryReply } from '@/services/storyReply';
 import { Avatar } from '@/components/ui/Avatar';
 import { colors, fonts, radius } from '@/constants/theme';
 
@@ -270,6 +271,7 @@ export default function MessagesScreen() {
           }
           renderItem={({ item }) => {
             const isMine = item.sender_id === currentUserIdRef.current;
+            const storyReply = decodeStoryReply(item.text);
             return (
               <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
                 <View
@@ -279,7 +281,33 @@ export default function MessagesScreen() {
                     item.pending && styles.bubblePending,
                   ]}
                 >
-                  {item.image ? (
+                  {storyReply ? (
+                    <>
+                      <Text style={isMine ? styles.storyReplyLabelMine : styles.storyReplyLabelTheirs}>
+                        {isMine ? 'You replied to their story' : 'Replied to your story'}
+                      </Text>
+                      {storyReply.image ? (
+                        <Image
+                          source={{ uri: storyReply.image }}
+                          style={styles.storyReplyImage}
+                          resizeMode="cover"
+                        />
+                      ) : null}
+                      {storyReply.excerpt ? (
+                        <View style={[styles.storyReplyQuote, isMine ? styles.storyReplyQuoteMine : styles.storyReplyQuoteTheirs]}>
+                          <Text
+                            style={isMine ? styles.storyReplyQuoteTextMine : styles.storyReplyQuoteTextTheirs}
+                            numberOfLines={2}
+                          >
+                            “{storyReply.excerpt}”
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
+                        {storyReply.comment}
+                      </Text>
+                    </>
+                  ) : item.image ? (
                     <Image source={{ uri: item.image }} style={styles.bubbleImage} resizeMode="cover" />
                   ) : (
                     <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
@@ -419,6 +447,43 @@ const styles = StyleSheet.create({
     width: 210,
     height: 210,
     borderRadius: radius.m,
+  },
+
+  // Story-reply bubbles
+  storyReplyLabelMine: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(4,33,29,0.7)',
+  },
+  storyReplyLabelTheirs: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.t3,
+  },
+  storyReplyImage: {
+    width: 180,
+    height: 220,
+    borderRadius: radius.m,
+  },
+  storyReplyQuote: {
+    borderLeftWidth: 2,
+    paddingLeft: 8,
+  },
+  storyReplyQuoteMine: { borderLeftColor: 'rgba(4,33,29,0.4)' },
+  storyReplyQuoteTheirs: { borderLeftColor: colors.border },
+  storyReplyQuoteTextMine: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: 'rgba(4,33,29,0.8)',
+  },
+  storyReplyQuoteTextTheirs: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: colors.t2,
   },
 
   // Input bar

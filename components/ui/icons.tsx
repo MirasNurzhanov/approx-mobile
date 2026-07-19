@@ -243,6 +243,96 @@ export function IconLogout({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
+export function IconEye({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z" />
+        <Circle cx={12} cy={12} r={2.8} />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconEyeOff({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z" />
+        <Path d="M5 19L19 5" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconGhost({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M5.5 20.5V10a6.5 6.5 0 0113 0v10.5l-3.25-2.2-3.25 2.2-3.25-2.2z" />
+      </G>
+      <Circle cx={9.5} cy={11} r={1.2} fill={color} />
+      <Circle cx={14.5} cy={11} r={1.2} fill={color} />
+    </Svg>
+  )
+}
+
+export function IconBell({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M12 3.5a5.5 5.5 0 015.5 5.5v3.8l1.8 3.2H4.7l1.8-3.2V9A5.5 5.5 0 0112 3.5z" />
+        <Path d="M9.8 19.5a2.3 2.3 0 004.4 0" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconBlocked({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={8.25} />
+        <Path d="M6.2 6.2l11.6 11.6" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconTrash({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 6.5h15M9.5 6.5V4h5v2.5M6.5 6.5l1 13h9l1-13" />
+        <Path d="M10 10.5v5.5M14 10.5v5.5" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconMail({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M3.5 5.5h17v13h-17z" />
+        <Path d="M4.5 6.5L12 13l7.5-6.5" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconInfo({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={8.25} />
+        <Path d="M12 11.2V16" />
+      </G>
+      <Circle cx={12} cy={8} r={1.2} fill={color} />
+    </Svg>
+  )
+}
+
 // ── Interest-category icons ───────────────────────────────────────────────────
 
 export function IconMusic({ size = 24, color = colors.t2 }: IconProps) {

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { getFeed, markFeedRead, type LocalNotification } from '@/services/activityFeed';
 import { Speedometer } from '@/components/Speedometer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -28,7 +29,7 @@ interface FriendRequest {
 }
 
 interface Notification {
-  id: number;
+  id: number | string;
   message?: string;
   title?: string;
   body?: string;
@@ -160,6 +161,7 @@ export default function NotificationsScreen() {
 
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [localFeed, setLocalFeed] = useState<LocalNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
@@ -187,6 +189,8 @@ export default function NotificationsScreen() {
       }
       setNotifications(list);
     }
+
+    setLocalFeed(await getFeed());
   }, []);
 
   useEffect(() => { fetchAll().finally(() => setLoading(false)); }, [fetchAll]);
@@ -219,16 +223,33 @@ export default function NotificationsScreen() {
   async function markAllRead() {
     setMarkingRead(true);
     try {
+      await markFeedRead();
       await api.patch('/api/notifications/mark-all-read/');
-      await fetchAll();
     } catch {}
-    finally { setMarkingRead(false); }
+    finally {
+      await fetchAll();
+      setMarkingRead(false);
+    }
   }
 
-  const proximityNotifs = notifications.filter(isProximity);
-  const otherNotifs = notifications.filter((n) => !isProximity(n));
-  const unreadCount = notifications.filter((n) => !isRead(n)).length + requests.length;
-  const hasAnything = requests.length > 0 || notifications.length > 0;
+  // Server proximity notifications are intentionally dropped: only the local
+  // feed (friends with distance, interest matches) may produce nearby alerts.
+  const toNotif = (n: LocalNotification): Notification => ({
+    id: n.id,
+    message: n.message,
+    notification_type: n.type,
+    read: n.read,
+    created_at: n.created_at,
+  });
+  const byDateDesc = (a: Notification, b: Notification) =>
+    new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
+
+  const nearbyNotifs = localFeed.filter((n) => n.type !== 'story_reaction').map(toNotif);
+  const reactionNotifs = localFeed.filter((n) => n.type === 'story_reaction').map(toNotif);
+  const otherNotifs = [...reactionNotifs, ...notifications.filter((n) => !isProximity(n))].sort(byDateDesc);
+  const unreadCount =
+    [...nearbyNotifs, ...otherNotifs].filter((n) => !isRead(n)).length + requests.length;
+  const hasAnything = requests.length > 0 || nearbyNotifs.length > 0 || otherNotifs.length > 0;
 
   if (loading) {
     return (
@@ -292,20 +313,28 @@ export default function NotificationsScreen() {
           </Section>
         )}
 
-        {/* NEARBY */}
-        {proximityNotifs.length > 0 && (
+        {/* NEARBY — local feed only: friends (with distance) and interest matches */}
+        {nearbyNotifs.length > 0 && (
           <Section label="NEARBY">
-            {proximityNotifs.map((n) => (
-              <NotifRow key={n.id} notif={n} icon="location-outline" />
+            {nearbyNotifs.map((n) => (
+              <NotifRow
+                key={String(n.id)}
+                notif={n}
+                icon={n.notification_type === 'nearby_friend' ? 'people-outline' : 'location-outline'}
+              />
             ))}
           </Section>
         )}
 
-        {/* ACTIVITY */}
+        {/* ACTIVITY — story reactions + non-proximity server notifications */}
         {otherNotifs.length > 0 && (
           <Section label="ACTIVITY">
             {otherNotifs.map((n) => (
-              <NotifRow key={n.id} notif={n} icon="notifications-outline" />
+              <NotifRow
+                key={String(n.id)}
+                notif={n}
+                icon={n.notification_type === 'story_reaction' ? 'heart-outline' : 'notifications-outline'}
+              />
             ))}
           </Section>
         )}

@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { api } from '@/services/api';
 import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
+import { storyReplyPreview } from '@/services/storyReply';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { colors, fonts, radius } from '@/constants/theme';
 
@@ -137,7 +138,7 @@ function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: U
               style={[styles.cardSub, !hasMessage && styles.cardSubEmpty]}
               numberOfLines={1}
             >
-              {hasMessage ? user.last_message : 'No messages yet'}
+              {hasMessage ? storyReplyPreview(user.last_message) : 'No messages yet'}
             </Text>
             {unread > 0 && (
               <View style={styles.unreadBadge}>

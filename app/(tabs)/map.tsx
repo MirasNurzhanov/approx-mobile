@@ -18,6 +18,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
@@ -38,6 +39,7 @@ import { Speedometer } from '@/components/Speedometer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import {
+  IconChevron,
   IconClose,
   IconFunny,
   IconHi,
@@ -54,7 +56,10 @@ import {
   type IconComponent,
 } from '@/components/ui/icons';
 import { api } from '@/services/api';
+import { recordNearbySightings, recordStoryReactions } from '@/services/activityFeed';
+import { encodeStoryReply } from '@/services/storyReply';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
+import { getPref } from '@/services/preferences';
 import { registerNearbyRefresh } from '@/services/nearbyRefresh';
 import { colors, fonts, radius } from '@/constants/theme';
 
@@ -176,18 +181,81 @@ function timeLeft(expiresAt: string): string {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function UserDot({ color, size = 14 }: { color: string; size?: number }) {
+function DotMarker({ coordinate, color, onPress }: {
+  coordinate: { latitude: number; longitude: number };
+  color: string;
+  onPress?: () => void;
+}) {
+  // Re-arm tracking briefly when the color changes (friend data arrives after
+  // the first nearby fetch), then freeze the rasterized marker again.
+  const [settling, setSettling] = useState(true);
+  useEffect(() => {
+    setSettling(true);
+    const t = setTimeout(() => setSettling(false), 400);
+    return () => clearTimeout(t);
+  }, [color]);
+
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: color,
-        borderWidth: 2,
-        borderColor: colors.bg,
-      }}
-    />
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={settling} onPress={onPress}>
+      <View style={[styles.userDot, { backgroundColor: color }]} />
+    </Marker>
+  );
+}
+
+interface AvatarMarkerProps {
+  coordinate: { latitude: number; longitude: number };
+  uri?: string;
+  username: string;
+  ringColor: string;
+  size?: number;
+  zIndex?: number;
+  onPress?: () => void;
+}
+
+function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex, onPress }: AvatarMarkerProps) {
+  // Markers rasterize their children: keep tracking until the remote image is
+  // drawn, and re-arm briefly when the ring color changes (friend data arrives
+  // after the first nearby fetch).
+  const [imageReady, setImageReady] = useState(!uri);
+  const [imageFailed, setImageFailed] = useState(false);
+  const [ringSettling, setRingSettling] = useState(true);
+
+  useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
+  useEffect(() => {
+    setRingSettling(true);
+    const t = setTimeout(() => setRingSettling(false), 400);
+    return () => clearTimeout(t);
+  }, [ringColor]);
+
+  const inner = size - 6;
+  return (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={!imageReady || ringSettling}
+      zIndex={zIndex}
+      onPress={onPress}
+    >
+      <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
+        {uri && !imageFailed ? (
+          <Image
+            source={{ uri }}
+            style={{ width: inner, height: inner, borderRadius: inner / 2 }}
+            onLoad={() => setTimeout(() => setImageReady(true), 250)}
+            onError={() => { setImageFailed(true); setImageReady(true); }}
+          />
+        ) : (
+          <View
+            style={[
+              styles.avatarMarkerFallback,
+              { width: inner, height: inner, borderRadius: inner / 2, backgroundColor: avatarBgColor(username) },
+            ]}
+          >
+            <Text style={styles.avatarMarkerInitial}>{username ? username.charAt(0).toUpperCase() : '?'}</Text>
+          </View>
+        )}
+      </View>
+    </Marker>
   );
 }
 
@@ -323,14 +391,20 @@ interface StoryViewerProps {
   stories: Story[];
   onClose: () => void;
   onReact: (storyId: number, reaction: ReactionType) => void;
+  /** When set (author is a friend), shows the reply bar that DMs the comment. */
+  replyTo?: { id: number; username: string } | null;
 }
 
-function StoryViewer({ stories, onClose, onReact }: StoryViewerProps) {
+function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
   const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);
   const progress = useSharedValue(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [replyFocused, setReplyFocused] = useState(false);
+  const [sendingReply, setSendingReply] = useState(false);
+  const [replySent, setReplySent] = useState(false);
 
   function goTo(i: number) {
     if (i >= stories.length) { onClose(); return; }
@@ -343,7 +417,12 @@ function StoryViewer({ stories, onClose, onReact }: StoryViewerProps) {
   const goToRef = useRef(goTo);
   goToRef.current = goTo;
 
+  // Auto-advance, paused while the reply input is focused.
   useEffect(() => {
+    if (replyFocused) {
+      cancelAnimation(progress);
+      return;
+    }
     progress.value = 0;
     progress.value = withTiming(1, { duration: STORY_DURATION_MS });
     const timer = setTimeout(() => goToRef.current(indexRef.current + 1), STORY_DURATION_MS);
@@ -351,7 +430,7 @@ function StoryViewer({ stories, onClose, onReact }: StoryViewerProps) {
       cancelAnimation(progress);
       clearTimeout(timer);
     };
-  }, [index]);
+  }, [index, replyFocused]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -373,8 +452,33 @@ function StoryViewer({ stories, onClose, onReact }: StoryViewerProps) {
   const hasPhoto = !!story.image;
   const hasText  = !!(story.text || story.content);
 
+  async function sendReply() {
+    const trimmed = replyText.trim();
+    if (!trimmed || !replyTo || sendingReply) return;
+    setSendingReply(true);
+    try {
+      const context = story.content ?? story.text;
+      const content = encodeStoryReply({
+        image: story.image,
+        excerpt: context ? `${context.slice(0, 80)}${context.length > 80 ? '…' : ''}` : undefined,
+        comment: trimmed,
+      });
+      await api.post(`/api/friends/messages/${replyTo.id}/`, { content });
+      setReplyText('');
+      Keyboard.dismiss();
+      setReplySent(true);
+      setTimeout(() => setReplySent(false), 1600);
+    } catch (e: any) {
+      console.log('[Story reply] error:', e?.response?.status, JSON.stringify(e?.response?.data));
+      Alert.alert('Could not send', 'Please try again.');
+    } finally {
+      setSendingReply(false);
+    }
+  }
+
   return (
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.svContainer} {...panResponder.panHandlers}>
         {/* Static dark background */}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bg }]} />
@@ -442,6 +546,43 @@ function StoryViewer({ stories, onClose, onReact }: StoryViewerProps) {
           </View>
         )}
 
+        {/* Reply to a friend's story — the comment lands in your chat */}
+        {replyTo && (
+          <View style={styles.svReplyRow}>
+            <TextInput
+              style={styles.svReplyInput}
+              value={replyText}
+              onChangeText={setReplyText}
+              placeholder={`Reply to ${replyTo.username}…`}
+              placeholderTextColor={colors.t3}
+              maxLength={500}
+              onFocus={() => setReplyFocused(true)}
+              onBlur={() => setReplyFocused(false)}
+              onSubmitEditing={sendReply}
+              returnKeyType="send"
+            />
+            <TouchableOpacity
+              style={[styles.svReplySend, replyText.trim().length > 0 && styles.svReplySendActive]}
+              onPress={sendReply}
+              disabled={replyText.trim().length === 0 || sendingReply}
+              activeOpacity={0.8}
+            >
+              {sendingReply ? (
+                <ActivityIndicator size="small" color={colors.bg} />
+              ) : (
+                <IconChevron size={16} color={replyText.trim() ? colors.bg : colors.t3} />
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Sent confirmation */}
+        {replySent && replyTo && (
+          <View style={[styles.svSentToast, { bottom: bottom + 150 }]} pointerEvents="none">
+            <Text style={styles.svSentToastText}>Sent to @{replyTo.username}</Text>
+          </View>
+        )}
+
         {/* Reactions — in flex flow so content area ends above them */}
         <View style={[styles.svReactions, { paddingBottom: bottom + 16 }]}>
           {REACTIONS.map(({ type, Icon }) => {
@@ -464,6 +605,7 @@ function StoryViewer({ stories, onClose, onReact }: StoryViewerProps) {
           })}
         </View>
       </View>
+      </KeyboardAvoidingView>
 
       {/* Lightbox — tap anywhere to close */}
       {lightboxOpen && hasPhoto && (
@@ -698,7 +840,7 @@ export default function MapScreen() {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
-  const [friendsReady, setFriendsReady] = useState(false);
+  const [selfProfile, setSelfProfile] = useState<{ username: string; profile_picture?: string } | null>(null);
   const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl?: string } | null>(null);
   const [isPlaying, setIsPlaying]     = useState(false);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
@@ -725,6 +867,43 @@ export default function MapScreen() {
     }
     return map;
   }, [stories]);
+
+  // Interest matching: friends and connections are always visible; strangers
+  // only appear when at least one interest is shared.
+  const visibleNearby = useMemo(
+    () =>
+      nearby.filter((u) => {
+        const uid = Number(u.id);
+        if (currentUserId !== null && uid === currentUserId) return false;
+        if (friendIds.has(uid) || connectionIds.has(uid)) return true;
+        return (u.shared_interests?.length ?? 0) > 0;
+      }),
+    [nearby, currentUserId, friendIds, connectionIds],
+  );
+
+  // Feed the local notification feed: friends nearby (with distance) and
+  // interest matches. The feed itself dedupes with a per-user cooldown.
+  useEffect(() => {
+    if (visibleNearby.length === 0) return;
+    recordNearbySightings(
+      visibleNearby.map((u) => ({
+        id: Number(u.id),
+        username: u.username,
+        isFriend: friendIds.has(Number(u.id)),
+        sharedInterests: u.shared_interests ?? [],
+        distanceKm: u.distance_km ?? (u.distance != null ? u.distance / 1000 : undefined),
+      })),
+    );
+  }, [visibleNearby, friendIds]);
+
+  // Detect new reactions on the current user's own stories.
+  useEffect(() => {
+    if (currentUserId == null || stories.length === 0) return;
+    recordStoryReactions(
+      stories.map((s) => ({ id: s.id, authorId: s.author.id, reactions: s.reactions ?? {} })),
+      currentUserId,
+    );
+  }, [stories, currentUserId]);
 
   const fetchFriends = useCallback(async () => {
     try {
@@ -767,9 +946,10 @@ export default function MapScreen() {
     }
   }
 
-  // Detect when current user enters or leaves a zone
+  // Detect when current user enters or leaves a zone (only zones of visible,
+  // interest-matched users count)
   useEffect(() => {
-    const nearbyUsers = nearby.filter((u) => currentUserId === null || Number(u.id) !== currentUserId);
+    const nearbyUsers = visibleNearby;
     console.log('[Zone] checking nearby:', nearbyUsers.map((u) => ({
       username: u.username,
       zone_active: u.zone_active,
@@ -791,12 +971,14 @@ export default function MapScreen() {
     );
     if (entered) {
       setActiveZone({ username: entered.username, audioUrl: entered.zone_audio_url });
-      playZone(entered.zone_audio_url!, entered.username);
+      getPref('zoneAutoplay').then((autoplay) => {
+        if (autoplay) playZone(entered.zone_audio_url!, entered.username);
+      });
     } else {
       setActiveZone(null);
       stopZone();
     }
-  }, [nearby, currentUserId]);
+  }, [visibleNearby]);
 
   // Stop audio on unmount
   useEffect(() => {
@@ -887,11 +1069,15 @@ export default function MapScreen() {
       .then((r) => setCurrentUserId(r.data.id))
       .catch(() => {});
 
+    api.get<{ username: string; profile_picture?: string }>('/api/users/profile/')
+      .then((r) => setSelfProfile({ username: r.data.username, profile_picture: r.data.profile_picture }))
+      .catch(() => {});
+
     api.get<SelfZone>('/api/users/zone/')
       .then((r) => setSelfZone(r.data))
       .catch(() => {});
 
-    fetchFriends().finally(() => setFriendsReady(true));
+    fetchFriends();
   }, []);
 
   useEffect(() => {
@@ -996,8 +1182,6 @@ export default function MapScreen() {
     ? { latitude: coords.latitude, longitude: coords.longitude, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
 
-  const visibleNearby = nearby.filter((u) => currentUserId === null || Number(u.id) !== currentUserId);
-
   return (
     <View style={styles.container}>
       {permError ? (
@@ -1058,29 +1242,48 @@ export default function MapScreen() {
 
           {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
             const uid = Number(user.id);
-            const color = friendIds.has(uid) ? COLOR_FRIEND : connectionIds.has(uid) ? COLOR_CONNECTED : COLOR_STRANGER;
-            return (
-              <Marker
+            const isFriend = friendIds.has(uid);
+            const color = isFriend ? COLOR_FRIEND : connectionIds.has(uid) ? COLOR_CONNECTED : COLOR_STRANGER;
+            // Only friends reveal their avatar on the map; everyone else stays a dot.
+            return isFriend ? (
+              <AvatarMarker
                 key={user.id}
                 coordinate={{ latitude: user.latitude, longitude: user.longitude }}
-                anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges={!friendsReady}
+                uri={user.profile_picture}
+                username={user.username}
+                ringColor={color}
                 onPress={() => openSheet(user)}
-              >
-                <UserDot color={color} />
-              </Marker>
+              />
+            ) : (
+              <DotMarker
+                key={user.id}
+                coordinate={{ latitude: user.latitude, longitude: user.longitude }}
+                color={color}
+                onPress={() => openSheet(user)}
+              />
             );
           })}
 
-          <Marker
-            coordinate={coords}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
-          >
-            <View style={styles.selfRing}>
-              <View style={styles.selfDot} />
-            </View>
-          </Marker>
+          {selfProfile ? (
+            <AvatarMarker
+              coordinate={coords}
+              uri={selfProfile.profile_picture}
+              username={selfProfile.username}
+              ringColor={colors.purple}
+              size={38}
+              zIndex={10}
+            />
+          ) : (
+            <Marker
+              coordinate={coords}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+            >
+              <View style={styles.selfRing}>
+                <View style={styles.selfDot} />
+              </View>
+            </Marker>
+          )}
 
           {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => {
             const first = authorStories[0];
@@ -1128,13 +1331,22 @@ export default function MapScreen() {
       )}
 
       {/* Full-screen story viewer */}
-      {storyViewer && (
-        <StoryViewer
-          stories={storyViewer.stories}
-          onClose={() => setStoryViewer(null)}
-          onReact={reactToStory}
-        />
-      )}
+      {storyViewer && (() => {
+        const author = storyViewer.stories[0]?.author;
+        const authorId = author ? Number(author.id) : null;
+        const replyTo =
+          author && authorId !== null && authorId !== currentUserId && friendIds.has(authorId)
+            ? { id: authorId, username: author.username }
+            : null;
+        return (
+          <StoryViewer
+            stories={storyViewer.stories}
+            onClose={() => setStoryViewer(null)}
+            onReact={reactToStory}
+            replyTo={replyTo}
+          />
+        );
+      })()}
 
       <CreateStoryModal
         visible={createStoryCoord !== null}
@@ -1170,6 +1382,33 @@ const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: 16 },
   loadingText: { fontFamily: fonts.body, color: colors.t3, fontSize: 14 },
   errorText: { fontFamily: fonts.body, color: colors.red, fontSize: 15, textAlign: 'center', padding: 24 },
+
+  // ── Non-friend marker: small relationship-colored dot ──
+  userDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: colors.bg,
+  },
+
+  // ── Avatar markers: photo/initial core, bg gap, relationship-colored ring ──
+  avatarMarkerRing: {
+    borderWidth: 2,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarMarkerFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarMarkerInitial: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 12,
+    color: colors.bg,
+  },
 
   // ── Self marker: purple core, bg gap, thin purple ring — no glow ──
   selfRing: {
@@ -1545,6 +1784,58 @@ const styles = StyleSheet.create({
   },
   svPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
   svPlaceName: { fontFamily: fonts.body, fontSize: 12, color: colors.t2 },
+  // Reply bar (friends' stories only)
+  svReplyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    backgroundColor: 'rgba(10,10,11,0.82)',
+  },
+  svReplyInput: {
+    flex: 1,
+    height: 40,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    paddingHorizontal: 16,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t1,
+  },
+  svReplySend: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  svReplySendActive: {
+    backgroundColor: colors.teal,
+    borderColor: colors.teal,
+  },
+  svSentToast: {
+    position: 'absolute',
+    alignSelf: 'center',
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 100,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  svSentToastText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.t1,
+  },
+
   svReactions: {
     flexDirection: 'row',
     gap: 8,

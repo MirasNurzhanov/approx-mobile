@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
+import { getPref } from './preferences';
 
 export const BACKGROUND_LOCATION_TASK = 'aura-background-location';
 
@@ -45,6 +46,11 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 );
 
 export async function startBackgroundLocationUpdates(): Promise<void> {
+  if (!(await getPref('backgroundLocation'))) {
+    console.log('[BG Location] disabled by user preference, skipping');
+    return;
+  }
+
   const { status } = await Location.getBackgroundPermissionsAsync();
   if (status !== 'granted') {
     console.log('[BG Location] background permission not granted, skipping');

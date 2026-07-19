@@ -1,21 +1,50 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  Linking,
+  Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
 import { api } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import {
+  startBackgroundLocationUpdates,
+  stopBackgroundLocationUpdates,
+} from '@/services/backgroundLocation';
+import { getPref, setPref } from '@/services/preferences';
 import { Speedometer } from '@/components/Speedometer';
+import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import {
+  IconBell,
+  IconBlocked,
+  IconChevron,
+  IconEye,
+  IconEyeOff,
+  IconGhost,
+  IconInfo,
+  IconLogout,
+  IconMail,
+  IconMusic,
+  IconPin,
+  IconShield,
+  IconSound,
+  IconTrash,
+  type IconComponent,
+} from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
+import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PrivacyMode = 'active' | 'ghost' | 'invisible';
@@ -26,66 +55,83 @@ interface Profile {
   status?: PrivacyMode;
 }
 
+interface SelfZone {
+  zone_active?: boolean;
+  zone_radius?: number;
+}
+
+const FEEDBACK_EMAIL = 'support@aura-app.com';
+
 // ─── Privacy mode definitions ─────────────────────────────────────────────────
 const PRIVACY_MODES: {
   key: PrivacyMode;
-  emoji: string;
-  label: string;
-  desc: string;
-  dot: string;
-}[] = [
-  {
-    key: 'active',
-    emoji: '🟢',
-    label: 'Active',
-    desc: 'Visible on the map. Others can find and connect with you.',
-    dot: '#22c55e',
-  },
-  {
-    key: 'ghost',
-    emoji: '👻',
-    label: 'Ghost',
-    desc: 'Hidden on the map but still appear in nearby lists. You can see others.',
-    dot: '#f59e0b',
-  },
-  {
-    key: 'invisible',
-    emoji: '🔴',
-    label: 'Invisible',
-    desc: 'Completely hidden. You cannot be seen or found by anyone.',
-    dot: '#ef4444',
-  },
-];
-
-// ─── NavCard ──────────────────────────────────────────────────────────────────
-function NavCard({
-  icon,
-  label,
-  sub,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
+  Icon: IconComponent;
   label: string;
   sub: string;
-  onPress: () => void;
+}[] = [
+  { key: 'active',    Icon: IconEye,    label: 'Active',    sub: 'Visible to all' },
+  { key: 'ghost',     Icon: IconGhost,  label: 'Ghost',     sub: 'Friends only' },
+  { key: 'invisible', Icon: IconEyeOff, label: 'Invisible', sub: 'Hidden' },
+];
+
+// ─── SettingsRow ──────────────────────────────────────────────────────────────
+function SettingsRow({
+  icon: Icon,
+  label,
+  right,
+  onPress,
+  last = false,
+}: {
+  icon?: IconComponent;
+  label: string;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  last?: boolean;
+}) {
+  const inner = (
+    <View style={[styles.settingsRow, !last && styles.settingsRowBorder]}>
+      {Icon && <Icon size={20} color={colors.t2} />}
+      <Text style={styles.settingsLabel}>{label}</Text>
+      <View style={styles.settingsRight}>{right}</View>
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        {inner}
+      </Pressable>
+    );
+  }
+  return inner;
+}
+
+function PrefSwitch({
+  value,
+  onValueChange,
+  disabled,
+}: {
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <TouchableOpacity style={styles.navCard} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.navIconWrap}>
-        <Ionicons name={icon} size={20} color="#00b4a6" />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.navLabel}>{label}</Text>
-        <Text style={styles.navSub}>{sub}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={16} color="#2e2e2e" />
-    </TouchableOpacity>
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      trackColor={{ false: colors.surface2, true: colors.teal }}
+      thumbColor={colors.t1}
+      ios_backgroundColor={colors.surface2}
+    />
   );
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
-  const router = useRouter();
   const { logout } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
@@ -94,37 +140,47 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const [zoneActive, setZoneActive] = useState<boolean | null>(null);
+  const [zoneSaving, setZoneSaving] = useState(false);
+  const [autoplay, setAutoplay] = useState(true);
+  const [bgLocation, setBgLocation] = useState(true);
+  const [notifAllowed, setNotifAllowed] = useState<boolean | null>(null);
+
+  const refreshNotifPermission = useCallback(async () => {
+    try {
+      const p = await Notifications.getPermissionsAsync();
+      setNotifAllowed(p.granted);
+    } catch {
+      setNotifAllowed(false);
+    }
+  }, []);
+
+  // The OS owns this permission — re-check it whenever the app returns to the
+  // foreground so the switch reflects changes made in system settings.
+  useEffect(() => {
+    refreshNotifPermission();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshNotifPermission();
+    });
+    return () => sub.remove();
+  }, [refreshNotifPermission]);
+
   useEffect(() => {
     api.get<Profile>('/api/users/profile/')
       .then((r) => {
         const mode = r.data.privacy_mode ?? r.data.privacy ?? r.data.status ?? 'active';
         setPrivacy(mode as PrivacyMode);
       })
-      .catch((e) => console.log('[Settings] profile fetch error:', e?.response?.status))
+      .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
 
-  function confirmDeleteAccount() {
-    Alert.alert(
-      'Delete Account',
-      'Are you sure? This action cannot be undone. All your data will be permanently deleted.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete('/api/users/delete/');
-            } catch {
-              // Proceed with local cleanup even if the request fails
-            }
-            await logout();
-          },
-        },
-      ],
-    );
-  }
+    api.get<SelfZone>('/api/users/zone/')
+      .then((r) => setZoneActive(!!r.data.zone_active))
+      .catch(() => setZoneActive(false));
+
+    getPref('zoneAutoplay').then(setAutoplay);
+    getPref('backgroundLocation').then(setBgLocation);
+  }, []);
 
   async function selectPrivacy(mode: PrivacyMode) {
     if (mode === privacy || saving) return;
@@ -133,13 +189,130 @@ export default function SettingsScreen() {
     setSaving(true);
     try {
       await api.patch('/api/users/privacy/', { privacy_mode: mode });
-    } catch (e: any) {
-      console.log('[Settings] privacy PATCH error:', e?.response?.status, JSON.stringify(e?.response?.data));
+    } catch {
       setPrivacy(prev);
     } finally {
       setSaving(false);
     }
   }
+
+  async function toggleZone(value: boolean) {
+    if (zoneSaving) return;
+    const prev = zoneActive;
+    setZoneActive(value);
+    setZoneSaving(true);
+    try {
+      await api.patch('/api/users/zone/', { zone_active: value });
+    } catch {
+      setZoneActive(prev);
+      Alert.alert('Could not update zone', 'Please try again.');
+    } finally {
+      setZoneSaving(false);
+    }
+  }
+
+  function toggleAutoplay(value: boolean) {
+    setAutoplay(value);
+    setPref('zoneAutoplay', value);
+  }
+
+  async function toggleBgLocation(value: boolean) {
+    setBgLocation(value);
+    await setPref('backgroundLocation', value);
+
+    if (!value) {
+      await stopBackgroundLocationUpdates();
+      return;
+    }
+
+    let granted = false;
+    try {
+      const { status } = await Location.requestBackgroundPermissionsAsync();
+      granted = status === 'granted';
+    } catch {
+      granted = false;
+    }
+    if (!granted) {
+      setBgLocation(false);
+      await setPref('backgroundLocation', false);
+      Alert.alert(
+        'Permission needed',
+        'Allow background location access ("Always") in system settings so Aura can update your location while the app is closed.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ],
+      );
+      return;
+    }
+    await startBackgroundLocationUpdates();
+  }
+
+  async function toggleNotifications(value: boolean) {
+    if (!value) {
+      // Permission can't be revoked programmatically — point to system settings.
+      Alert.alert(
+        'Turn off notifications',
+        'Notifications are managed by the system. Turn them off for Aura in system settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ],
+      );
+      return;
+    }
+    try {
+      const current = await Notifications.getPermissionsAsync();
+      if (current.granted) {
+        setNotifAllowed(true);
+        return;
+      }
+      if (current.canAskAgain) {
+        const r = await Notifications.requestPermissionsAsync();
+        setNotifAllowed(r.granted);
+      } else {
+        Alert.alert(
+          'Permission needed',
+          'Enable notifications for Aura in system settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+      }
+    } catch {
+      setNotifAllowed(false);
+    }
+  }
+
+  async function sendFeedback() {
+    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('Aura feedback')}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('No mail app', `Write to us at ${FEEDBACK_EMAIL}`);
+    }
+  }
+
+  function confirmDeleteAccount() {
+    Alert.alert(
+      'Delete Account',
+      'This cannot be undone. All your data will be permanently deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try { await api.delete('/api/users/delete/'); } catch {}
+            await logout();
+          },
+        },
+      ],
+    );
+  }
+
+  const version = Constants.expoConfig?.version ?? '1.0.0';
 
   return (
     <View style={styles.root}>
@@ -148,111 +321,144 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
         {...scrollProps}
       >
-        {/* ── Header ── */}
-        <View style={styles.pageHeader}>
-          <Text style={styles.pageTitle}>Settings</Text>
-          {saving && <ActivityIndicator color="#00b4a6" size="small" />}
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Settings</Text>
+          {saving && <ActivityIndicator color={colors.teal} size="small" />}
         </View>
 
-        {/* ── Privacy Mode ── */}
+        {/* Visibility */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Privacy Mode</Text>
+          <Text style={styles.sectionLabel}>VISIBILITY</Text>
           {loading ? (
             <View style={styles.loadingWrap}>
-              <ActivityIndicator color="#00b4a6" />
+              <ActivityIndicator color={colors.teal} />
             </View>
           ) : (
-            <View style={styles.privacyList}>
+            <View style={styles.modeRow}>
               {PRIVACY_MODES.map((mode) => {
                 const selected = privacy === mode.key;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={mode.key}
-                    style={[styles.privacyCard, selected && styles.privacyCardSelected]}
                     onPress={() => selectPrivacy(mode.key)}
-                    activeOpacity={0.75}
-                    disabled={saving}
+                    style={({ pressed }) => [
+                      styles.modeCard,
+                      selected && styles.modeCardSelected,
+                      pressed && styles.pressed,
+                    ]}
                   >
-                    <View style={styles.privacyCardTop}>
-                      <Text style={styles.privacyEmoji}>{mode.emoji}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.privacyLabel, selected && styles.privacyLabelSelected]}>
-                          {mode.label}
-                        </Text>
-                      </View>
-                      {selected && (
-                        <View style={styles.selectedCheck}>
-                          <Ionicons name="checkmark" size={14} color="#0a0a0a" />
-                        </View>
-                      )}
-                    </View>
-                    <Text style={[styles.privacyDesc, selected && styles.privacyDescSelected]}>
-                      {mode.desc}
+                    <mode.Icon size={22} color={selected ? colors.teal : colors.t3} />
+                    <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
+                      {mode.label}
                     </Text>
-                  </TouchableOpacity>
+                    <Text style={styles.modeSub}>{mode.sub}</Text>
+                  </Pressable>
                 );
               })}
             </View>
           )}
         </View>
 
-        {/* ── Account ── */}
+        {/* Zone & location */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          <View style={styles.navList}>
-            <NavCard
-              icon="create-outline"
-              label="Edit Profile"
-              sub="Update your username, bio and photo"
-              onPress={() => router.push('/edit-profile')}
+          <Text style={styles.sectionLabel}>ZONE & LOCATION</Text>
+          <Card style={styles.rowsCard}>
+            <SettingsRow
+              icon={IconSound}
+              label="Sound zone"
+              right={
+                zoneActive === null ? (
+                  <ActivityIndicator color={colors.t3} size="small" />
+                ) : (
+                  <PrefSwitch value={zoneActive} onValueChange={toggleZone} disabled={zoneSaving} />
+                )
+              }
             />
-            <NavCard
-              icon="location-outline"
-              label="Zone Setup"
-              sub="Configure your activity zones"
-              onPress={() => router.push('/zone')}
+            <SettingsRow
+              icon={IconMusic}
+              label="Auto-play zone audio"
+              right={<PrefSwitch value={autoplay} onValueChange={toggleAutoplay} />}
             />
-          </View>
+            <SettingsRow
+              icon={IconPin}
+              label="Background location"
+              last
+              right={<PrefSwitch value={bgLocation} onValueChange={toggleBgLocation} />}
+            />
+          </Card>
         </View>
 
-        {/* ── App ── */}
+        {/* Preferences */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>App</Text>
-          <View style={styles.navList}>
-            <NavCard
-              icon="notifications-outline"
+          <Text style={styles.sectionLabel}>PREFERENCES</Text>
+          <Card style={styles.rowsCard}>
+            <SettingsRow
+              icon={IconBell}
               label="Notifications"
-              sub="Manage push notification preferences"
-              onPress={() => router.push('/(tabs)/notifications')}
+              right={
+                notifAllowed === null ? (
+                  <ActivityIndicator color={colors.t3} size="small" />
+                ) : (
+                  <PrefSwitch value={notifAllowed} onValueChange={toggleNotifications} />
+                )
+              }
             />
-            <NavCard
-              icon="shield-outline"
-              label="Privacy & Safety"
-              sub="Blocked users and data settings"
-              onPress={() => router.push('/(tabs)/notifications')}
+            <SettingsRow
+              icon={IconShield}
+              label="Privacy & safety"
+              onPress={() => Linking.openURL('https://aura-app.com/privacy')}
+              right={<IconChevron size={16} color={colors.t3} />}
             />
-          </View>
+            <SettingsRow
+              icon={IconBlocked}
+              label="Blocked users"
+              last
+              onPress={() => Alert.alert('Blocked users', 'Coming soon.')}
+              right={<IconChevron size={16} color={colors.t3} />}
+            />
+          </Card>
         </View>
 
-        {/* ── Logout ── */}
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={() => { console.log('[Settings] Sign Out pressed'); logout(); }}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="log-out-outline" size={18} color="#ff4d4d" />
-          <Text style={styles.logoutText}>Sign Out</Text>
-        </TouchableOpacity>
+        {/* Support */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>SUPPORT</Text>
+          <Card style={styles.rowsCard}>
+            <SettingsRow
+              icon={IconMail}
+              label="Send feedback"
+              onPress={sendFeedback}
+              right={<IconChevron size={16} color={colors.t3} />}
+            />
+            <SettingsRow
+              icon={IconInfo}
+              label="Version"
+              last
+              right={<Text style={styles.rowValue}>{version}</Text>}
+            />
+          </Card>
+        </View>
 
-        {/* ── Delete Account ── */}
-        <TouchableOpacity
-          style={styles.deleteBtn}
+        {/* Sign out */}
+        <View style={styles.signOutWrap}>
+          <Button
+            label="Sign out"
+            icon={IconLogout}
+            variant="dangerTint"
+            size="lg"
+            fullWidth
+            onPress={() => logout()}
+          />
+        </View>
+
+        {/* Delete account */}
+        <Pressable
+          style={({ pressed }) => [styles.deleteRow, pressed && styles.pressed]}
           onPress={confirmDeleteAccount}
-          activeOpacity={0.8}
         >
-          <Ionicons name="trash-outline" size={18} color="#ff4d4d" />
-          <Text style={styles.deleteText}>Delete Account</Text>
-        </TouchableOpacity>
+          <IconTrash size={16} color={colors.red} />
+          <Text style={styles.deleteText}>Delete account</Text>
+        </Pressable>
       </ScrollView>
 
       <Speedometer />
@@ -262,117 +468,108 @@ export default function SettingsScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 20 },
 
-  // ── Header ──
-  pageHeader: {
+  // Header
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 28,
   },
-  pageTitle: { color: '#ffffff', fontSize: 26, fontWeight: '700' },
+  headerTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 26,
+    color: colors.t1,
+  },
 
-  // ── Section ──
+  // Section
   section: { marginBottom: 28 },
-  sectionTitle: {
-    color: '#444',
+  sectionLabel: {
+    fontFamily: fonts.body,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
+    color: colors.t3,
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: 10,
   },
 
   loadingWrap: { paddingVertical: 24, alignItems: 'center' },
 
-  // ── Privacy cards ──
-  privacyList: { gap: 10 },
-  privacyCard: {
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    padding: 16,
-    gap: 8,
-  },
-  privacyCardSelected: {
-    borderColor: '#00b4a6',
-    backgroundColor: '#0d1f1e',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  privacyCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  privacyEmoji: { fontSize: 22 },
-  privacyLabel: { color: '#888', fontSize: 15, fontWeight: '600' },
-  privacyLabelSelected: { color: '#ffffff' },
-  privacyDesc: { color: '#333', fontSize: 13, lineHeight: 18 },
-  privacyDescSelected: { color: '#555' },
-  selectedCheck: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#00b4a6',
+  // Visibility mode cards (3-up row)
+  modeRow: { flexDirection: 'row', gap: 8 },
+  modeCard: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modeCardSelected: {
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
+  },
+  modeLabel: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.t1,
+  },
+  modeLabelSelected: { color: colors.teal },
+  modeSub: {
+    fontFamily: fonts.body,
+    fontSize: 10,
+    color: colors.t3,
   },
 
-  // ── Nav cards ──
-  navList: { gap: 10 },
-  navCard: {
+  // Settings rows card
+  rowsCard: { padding: 0, overflow: 'hidden' },
+  settingsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
     gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  navIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#0d1f1e',
-    borderWidth: 1,
-    borderColor: '#00b4a620',
-    alignItems: 'center',
-    justifyContent: 'center',
+  settingsRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  navLabel: { color: '#ddd', fontSize: 14, fontWeight: '600' },
-  navSub: { color: '#444', fontSize: 12, marginTop: 2 },
+  settingsLabel: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+  },
+  settingsRight: { flexDirection: 'row', alignItems: 'center' },
+  rowValue: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t3,
+  },
 
-  // ── Logout ──
-  logoutBtn: {
+  // Sign out + delete
+  signOutWrap: { marginBottom: 18 },
+  deleteRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#1a0a0a',
-    borderWidth: 1,
-    borderColor: '#ff4d4d22',
-    marginBottom: 12,
+    paddingVertical: 12,
   },
-  logoutText: { color: '#ff4d4d', fontSize: 15, fontWeight: '600' },
+  deleteText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.red,
+  },
 
-  // ── Delete Account ──
-  deleteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#1a0a0a',
-    borderWidth: 1,
-    borderColor: '#ff4d4d55',
-  },
-  deleteText: { color: '#ff4d4d', fontSize: 15, fontWeight: '600' },
+  pressed: { opacity: 0.6 },
 });

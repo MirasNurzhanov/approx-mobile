@@ -4,22 +4,25 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import axios from 'axios';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { loginRequest } from '@/services/auth';
 import { BASE_URL } from '@/services/api';
-import { ParticleBackground } from '@/components/ParticleBackground';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { colors, fonts, radius } from '@/constants/theme';
 
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
-const MONTH_KEYS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
-const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_KEYS = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 100 }, (_, i) => String(CURRENT_YEAR - i));
 
@@ -27,7 +30,7 @@ const ITEM_H = 44;
 
 type FieldErrors = Record<string, string[]>;
 
-// --------------- Wheel column ---------------
+// ─── Wheel column ────────────────────────────────────────────────────────────
 
 interface WheelProps {
   items: string[];
@@ -75,7 +78,6 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
           onSelect(c);
         }}
       />
-      <View pointerEvents="none" style={wheel.indicator} />
     </View>
   );
 }
@@ -83,21 +85,20 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
 const wheel = StyleSheet.create({
   wrap: { flex: 1, height: ITEM_H * 5, overflow: 'hidden' },
   item: { height: ITEM_H, justifyContent: 'center', alignItems: 'center' },
-  label: { color: '#444', fontSize: 15 },
-  labelSel: { color: '#00b4a6', fontWeight: '700', fontSize: 16 },
-  indicator: {
-    position: 'absolute',
-    top: ITEM_H * 2,
-    left: 2,
-    right: 2,
-    height: ITEM_H,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#00b4a6',
+  label: {
+    fontFamily: fonts.body,
+    color: colors.t3,
+    fontSize: 15,
+  },
+  labelSel: {
+    fontFamily: fonts.body,
+    color: colors.t1,
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 
-// --------------- DatePickerField ---------------
+// ─── DatePickerField ──────────────────────────────────────────────────────────
 
 interface DatePickerFieldProps {
   value: string;
@@ -108,27 +109,20 @@ interface DatePickerFieldProps {
 function DatePickerField({ value, onChange, error }: DatePickerFieldProps) {
   const [open, setOpen] = useState(false);
 
-  const defaultDayIdx = 0;
-  const defaultMonthIdx = 0;
-  const defaultYearIdx = 20;
-
   const [dayIdx, setDayIdx] = useState(() => {
-    if (!value) return defaultDayIdx;
-    const d = value.split('-')[2];
-    const i = DAYS.indexOf(d);
-    return i >= 0 ? i : defaultDayIdx;
+    if (!value) return 0;
+    const i = DAYS.indexOf(value.split('-')[2]);
+    return i >= 0 ? i : 0;
   });
   const [monthIdx, setMonthIdx] = useState(() => {
-    if (!value) return defaultMonthIdx;
-    const m = value.split('-')[1];
-    const i = MONTH_KEYS.indexOf(m);
-    return i >= 0 ? i : defaultMonthIdx;
+    if (!value) return 0;
+    const i = MONTH_KEYS.indexOf(value.split('-')[1]);
+    return i >= 0 ? i : 0;
   });
   const [yearIdx, setYearIdx] = useState(() => {
-    if (!value) return defaultYearIdx;
-    const y = value.split('-')[0];
-    const i = YEARS.indexOf(y);
-    return i >= 0 ? i : defaultYearIdx;
+    if (!value) return 20;
+    const i = YEARS.indexOf(value.split('-')[0]);
+    return i >= 0 ? i : 20;
   });
 
   const displayValue = value
@@ -141,45 +135,105 @@ function DatePickerField({ value, onChange, error }: DatePickerFieldProps) {
   }
 
   return (
-    <>
-      <TouchableOpacity
-        style={[styles.input, styles.dateInput, error ? styles.inputError : null]}
+    <View style={dp.wrapper}>
+      <Text style={dp.fieldLabel}>Date of birth</Text>
+      <Pressable
         onPress={() => setOpen(true)}
-        activeOpacity={0.7}
+        style={[dp.trigger, !!error && dp.triggerError]}
       >
-        <Text style={displayValue ? styles.dateText : styles.datePlaceholder}>
-          {displayValue || 'Date of birth'}
+        <Text style={displayValue ? dp.valueText : dp.placeholder}>
+          {displayValue || 'DD Mon YYYY'}
         </Text>
-      </TouchableOpacity>
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </Pressable>
+      {error ? <Text style={dp.error}>{error}</Text> : null}
 
       <Modal visible={open} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Date of birth</Text>
-            <View style={styles.wheelRow}>
+        <View style={dp.overlay}>
+          <View style={dp.sheet}>
+            <Text style={dp.sheetTitle}>Date of birth</Text>
+            <View style={dp.wheelRow}>
+              {/* selection band — rendered first so the wheel labels stay visible above it */}
+              <View pointerEvents="none" style={dp.band} />
               <Wheel items={DAYS} selectedIdx={dayIdx} onSelect={setDayIdx} />
               <Wheel items={MONTH_KEYS} labels={MONTH_LABELS} selectedIdx={monthIdx} onSelect={setMonthIdx} />
               <Wheel items={YEARS} selectedIdx={yearIdx} onSelect={setYearIdx} />
             </View>
-            <View style={styles.modalBtns}>
-              <TouchableOpacity onPress={() => setOpen(false)} style={styles.cancelBtn}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleDone} style={styles.doneBtn}>
-                <Text style={styles.doneText}>Done</Text>
-              </TouchableOpacity>
+            <View style={dp.sheetBtns}>
+              <Button label="Cancel" variant="secondary" size="md" onPress={() => setOpen(false)} />
+              <Button label="Done" variant="primary" size="md" onPress={handleDone} />
             </View>
           </View>
         </View>
       </Modal>
-    </>
+    </View>
   );
 }
 
-// --------------- RegisterScreen ---------------
+const dp = StyleSheet.create({
+  wrapper: { gap: 6 },
+  fieldLabel: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.t2,
+  },
+  trigger: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  triggerError: { borderColor: colors.red },
+  valueText: { fontFamily: fonts.body, fontSize: 15, color: colors.t1 },
+  placeholder: { fontFamily: fonts.body, fontSize: 15, color: colors.t3 },
+  error: { fontFamily: fonts.body, fontSize: 12, color: colors.red },
+
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  sheet: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.l,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 20,
+  },
+  sheetTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  wheelRow: { flexDirection: 'row', gap: 4 },
+  band: {
+    position: 'absolute',
+    top: ITEM_H * 2,
+    left: 0,
+    right: 0,
+    height: ITEM_H,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.s,
+  },
+  sheetBtns: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+});
+
+// ─── RegisterScreen ───────────────────────────────────────────────────────────
 
 export default function RegisterScreen() {
+  const { top } = useSafeAreaInsets();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [dob, setDob] = useState('');
@@ -189,10 +243,7 @@ export default function RegisterScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   async function handleRegister() {
-    console.log('[Register] handleRegister called');
-    console.log('[Register] form values:', { username, email, dob, password, confirmPassword });
     setErrors({});
-
     if (password !== confirmPassword) {
       setErrors({ confirm_password: ['Passwords do not match'] });
       return;
@@ -201,8 +252,6 @@ export default function RegisterScreen() {
       setErrors({ date_of_birth: ['Date of birth is required'] });
       return;
     }
-
-    console.log('[Register] validation passed, calling API...');
     setSubmitting(true);
     try {
       await axios.post(`${BASE_URL}/api/users/register/`, {
@@ -215,8 +264,6 @@ export default function RegisterScreen() {
       await loginRequest(email, password);
       router.replace('/interests-setup');
     } catch (err) {
-      console.log('[Register] API error:', (err as any)?.response?.status, JSON.stringify((err as any)?.response?.data));
-      console.log('[Register] full error:', (err as any)?.message);
       if (axios.isAxiosError(err) && err.response?.data) {
         const data = err.response.data;
         if (typeof data === 'object' && !Array.isArray(data)) {
@@ -232,84 +279,81 @@ export default function RegisterScreen() {
     }
   }
 
-  const fe = (field: string) => errors[field]?.[0] ?? null;
+  const fe = (field: string) => errors[field]?.[0];
+
+  const globalError = errors.non_field_errors?.[0] ?? errors.detail?.[0];
 
   return (
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ParticleBackground />
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.logo}>AURA</Text>
-        <Text style={styles.tagline}>Create your account</Text>
+      <ScrollView
+        contentContainerStyle={[styles.container, { paddingTop: top + 32 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.title}>Create account</Text>
 
-        {errors.non_field_errors ? (
-          <Text style={[styles.errorText, styles.centerError]}>{errors.non_field_errors[0]}</Text>
+        {globalError ? (
+          <View style={styles.globalError}>
+            <Text style={styles.globalErrorText}>{globalError}</Text>
+          </View>
         ) : null}
-        {errors.detail ? (
-          <Text style={[styles.errorText, styles.centerError]}>{errors.detail[0]}</Text>
-        ) : null}
 
-        <TextInput
-          style={[styles.input, fe('username') ? styles.inputError : null]}
-          placeholder="Username"
-          placeholderTextColor="#555"
-          value={username}
-          onChangeText={setUsername}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {fe('username') ? <Text style={styles.errorText}>{fe('username')}</Text> : null}
+        <View style={styles.form}>
+          <Input
+            label="Username"
+            placeholder="yourhandle"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
+            error={fe('username')}
+          />
+          <Input
+            label="Email"
+            placeholder="you@example.com"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            error={fe('email')}
+          />
+          <DatePickerField value={dob} onChange={setDob} error={fe('date_of_birth')} />
+          <Input
+            label="Password"
+            placeholder="••••••••"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            error={fe('password')}
+          />
+          <Input
+            label="Confirm password"
+            placeholder="••••••••"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+            error={fe('confirm_password')}
+          />
+        </View>
 
-        <TextInput
-          style={[styles.input, fe('email') ? styles.inputError : null]}
-          placeholder="Email"
-          placeholderTextColor="#555"
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {fe('email') ? <Text style={styles.errorText}>{fe('email')}</Text> : null}
-
-        <DatePickerField value={dob} onChange={setDob} error={fe('date_of_birth')} />
-
-        <TextInput
-          style={[styles.input, fe('password') ? styles.inputError : null]}
-          placeholder="Password"
-          placeholderTextColor="#555"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-        {fe('password') ? <Text style={styles.errorText}>{fe('password')}</Text> : null}
-
-        <TextInput
-          style={[styles.input, fe('confirm_password') ? styles.inputError : null]}
-          placeholder="Confirm password"
-          placeholderTextColor="#555"
-          secureTextEntry
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-        />
-        {fe('confirm_password') ? <Text style={styles.errorText}>{fe('confirm_password')}</Text> : null}
-
-        <TouchableOpacity
-          style={[styles.button, submitting ? styles.buttonDisabled : null]}
+        <Button
+          label="Create Account"
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={submitting}
           onPress={handleRegister}
-          disabled={submitting}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.buttonText}>{submitting ? 'Creating account…' : 'Create account'}</Text>
-        </TouchableOpacity>
+        />
 
-        <View style={styles.loginRow}>
-          <Text style={styles.loginPrompt}>Already have an account?{'  '}</Text>
-          <TouchableOpacity onPress={() => router.replace('/login')}>
-            <Text style={styles.loginLink}>Sign in</Text>
-          </TouchableOpacity>
+        <View style={styles.signinRow}>
+          <Text style={styles.signinText}>Already have an account? </Text>
+          <Pressable onPress={() => router.replace('/login')} hitSlop={8}>
+            <Text style={styles.signinLink}>Sign in</Text>
+          </Pressable>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -317,86 +361,40 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#0a0a0a' },
+  flex: { flex: 1, backgroundColor: colors.bg },
   container: {
     flexGrow: 1,
-    backgroundColor: '#0a0a0a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 28,
-    paddingTop: 60,
-    paddingBottom: 40,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
   },
-  logo: {
-    fontSize: 52,
-    color: '#00b4a6',
-    fontWeight: '800',
-    letterSpacing: 10,
-    marginBottom: 8,
+  title: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 28,
+    color: colors.t1,
+    marginBottom: 28,
   },
-  tagline: {
-    color: '#555',
-    fontSize: 14,
-    marginBottom: 36,
-    letterSpacing: 1,
-  },
-  input: {
-    width: '100%',
-    backgroundColor: '#111',
-    color: '#fff',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 14,
+  globalError: {
+    backgroundColor: `${colors.red}18`,
+    borderRadius: radius.m,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
-    fontSize: 15,
+    borderColor: colors.red,
+    padding: 12,
+    marginBottom: 20,
   },
-  inputError: { borderColor: '#e55', marginBottom: 4 },
-  dateInput: { justifyContent: 'center' },
-  dateText: { color: '#fff', fontSize: 15 },
-  datePlaceholder: { color: '#555', fontSize: 15 },
-  errorText: { color: '#e55', fontSize: 12, marginBottom: 10, alignSelf: 'flex-start', paddingLeft: 4 },
-  centerError: { alignSelf: 'center', textAlign: 'center', marginBottom: 12 },
-  button: {
-    width: '100%',
-    backgroundColor: '#00b4a6',
-    padding: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '700', fontSize: 16, letterSpacing: 0.5 },
-  loginRow: { flexDirection: 'row', marginTop: 28, alignItems: 'center' },
-  loginPrompt: { color: '#555', fontSize: 14 },
-  loginLink: { color: '#00b4a6', fontSize: 14, fontWeight: '600' },
-  // Modal
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    backgroundColor: '#111',
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-  },
-  modalTitle: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
+  globalErrorText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.red,
     textAlign: 'center',
-    marginBottom: 12,
   },
-  wheelRow: { flexDirection: 'row', columnGap: 4 },
-  modalBtns: { flexDirection: 'row', columnGap: 12, marginTop: 16 },
-  cancelBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#1a1a1a', alignItems: 'center' },
-  cancelText: { color: '#777', fontWeight: '600' },
-  doneBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#00b4a6', alignItems: 'center' },
-  doneText: { color: '#fff', fontWeight: '700' },
+  form: { gap: 16, marginBottom: 28 },
+  signinRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 28,
+  },
+  signinText: { fontFamily: fonts.body, fontSize: 14, color: colors.t2 },
+  signinLink: { fontFamily: fonts.body, fontSize: 14, color: colors.teal, fontWeight: '600' },
 });

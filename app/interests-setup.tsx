@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
-import { ParticleBackground } from '@/components/ParticleBackground';
+import { Button } from '@/components/ui/Button';
+import { colors, fonts, radius } from '@/constants/theme';
 
 interface Interest {
   id: number;
@@ -28,12 +29,16 @@ export default function InterestsSetupScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  function loadInterests() {
+    setError(null);
+    setLoading(true);
     api.get<Interest[]>('/api/interests/')
       .then((r) => setInterests(r.data))
       .catch(() => setError('Could not load interests. Please try again.'))
       .finally(() => setLoading(false));
-  }, []);
+  }
+
+  useEffect(() => { loadInterests(); }, []);
 
   function toggle(id: number) {
     setSelected((prev) => {
@@ -48,188 +53,151 @@ export default function InterestsSetupScreen() {
     try {
       await api.post('/api/interests/select/', { interest_ids: Array.from(selected) });
     } catch {
-      // Non-fatal — still navigate so the user isn't stuck
+      // Non-fatal — navigate anyway so the user isn't stuck
     } finally {
       setSaving(false);
     }
     router.replace('/(tabs)/map');
   }
 
+  const canContinue = selected.size > 0;
+
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <ParticleBackground />
-      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Your Interests</Text>
-        <Text style={styles.subtitle}>
-          Choose what you care about to find people like you
-        </Text>
+        <Text style={styles.title}>Choose your interests</Text>
+        <Text style={styles.subtitle}>Find people who share your passions</Text>
       </View>
 
-      {/* Body */}
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#00b4a6" size="large" />
+          <ActivityIndicator color={colors.teal} size="large" />
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => {
-              setError(null);
-              setLoading(true);
-              api.get<Interest[]>('/api/interests/')
-                .then((r) => setInterests(r.data))
-                .catch(() => setError('Could not load interests. Please try again.'))
-                .finally(() => setLoading(false));
-            }}
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          <Button label="Retry" variant="ghost" size="sm" onPress={loadInterests} />
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.bubbleContainer}
+          contentContainerStyle={styles.grid}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.bubbleWrap}>
+          <View style={styles.chips}>
             {interests.map((item) => {
-              const isSelected = selected.has(item.id);
+              const sel = selected.has(item.id);
               return (
-                <TouchableOpacity
+                <Pressable
                   key={item.id}
-                  style={[styles.bubble, isSelected && styles.bubbleSelected]}
                   onPress={() => toggle(item.id)}
-                  activeOpacity={0.75}
+                  style={[styles.chip, sel && styles.chipSelected]}
                 >
-                  <Text style={styles.bubbleIcon}>{item.icon}</Text>
-                  <Text style={[styles.bubbleName, isSelected && styles.bubbleNameSelected]}>
+                  <Text style={styles.chipIcon}>{item.icon}</Text>
+                  <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
                     {item.name}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               );
             })}
           </View>
         </ScrollView>
       )}
 
-      {/* Footer */}
-      <View style={[styles.footer, { paddingBottom: bottom + 20 }]}>
-        {selected.size > 0 && (
-          <Text style={styles.countLabel}>{selected.size} selected</Text>
-        )}
-        <TouchableOpacity
-          style={[styles.continueBtn, saving && styles.continueBtnDisabled]}
+      <View style={[styles.footer, { paddingBottom: bottom + 16 }]}>
+        <Text style={styles.count}>
+          {selected.size > 0 ? `${selected.size} selected` : ' '}
+        </Text>
+        <Button
+          label="Continue"
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={saving}
+          disabled={!canContinue}
           onPress={handleContinue}
-          disabled={saving}
-          activeOpacity={0.85}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Text style={styles.continueBtnText}>
-              {selected.size === 0 ? 'Skip for now' : 'Continue'}
-            </Text>
-          )}
-        </TouchableOpacity>
+        />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  root: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
 
-  // ── Header ──
   header: {
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 24,
+    gap: 8,
   },
   title: {
-    color: '#fff',
+    fontFamily: fonts.display,
+    fontWeight: '600',
     fontSize: 28,
-    fontWeight: '800',
-    marginBottom: 8,
+    color: colors.t1,
   },
   subtitle: {
-    color: '#555',
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t2,
+    lineHeight: 22,
   },
 
-  // ── Bubbles ──
-  bubbleContainer: {
+  grid: {
     paddingHorizontal: 20,
     paddingBottom: 16,
   },
-  bubbleWrap: {
+  chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
-  bubble: {
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 50,
-    backgroundColor: '#111',
+    borderRadius: radius.l,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: colors.border,
   },
-  bubbleSelected: {
-    backgroundColor: '#0d2420',
-    borderColor: '#00b4a6',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 3,
+  chipSelected: {
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
   },
-  bubbleIcon: { fontSize: 18 },
-  bubbleName: { color: '#666', fontSize: 14, fontWeight: '500' },
-  bubbleNameSelected: { color: '#00b4a6', fontWeight: '600' },
+  chipIcon: { fontSize: 17 },
+  chipLabel: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.t2,
+  },
+  chipLabelSelected: {
+    color: colors.teal,
+    fontWeight: '600',
+  },
 
-  // ── Footer ──
   footer: {
     paddingHorizontal: 24,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#141414',
-    gap: 10,
+    borderTopColor: colors.border,
+    gap: 8,
   },
-  countLabel: {
-    color: '#00b4a6',
+  count: {
+    fontFamily: fonts.body,
     fontSize: 13,
+    color: colors.t3,
     textAlign: 'center',
-    fontWeight: '500',
   },
-  continueBtn: {
-    backgroundColor: '#00b4a6',
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  continueBtnDisabled: { opacity: 0.6 },
-  continueBtnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.4 },
 
-  // ── Error ──
-  errorText: { color: '#e55', fontSize: 14, textAlign: 'center', marginBottom: 16 },
-  retryBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 28,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#00b4a6',
+  errorText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.red,
+    textAlign: 'center',
   },
-  retryText: { color: '#00b4a6', fontSize: 14, fontWeight: '600' },
 });

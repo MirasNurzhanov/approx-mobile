@@ -1,15 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ParticleBackground } from '@/components/ParticleBackground';
+import { AuraMark } from '@/components/ui/AuraMark';
+import { Button } from '@/components/ui/Button';
+import { colors, fonts } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 
 export default function Index() {
   const { isAuthenticated } = useAuth();
   const [ready, setReady] = useState(false);
-  const fadeIn = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -19,79 +21,72 @@ export default function Index() {
     setReady(true);
   }, [isAuthenticated]);
 
-  useEffect(() => {
-    if (!ready) return;
-    Animated.timing(fadeIn, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-  }, [ready]);
-
-  async function handleGetStarted() {
+  async function handleCreateAccount() {
     const seen = await AsyncStorage.getItem('onboarding_seen');
-    router.push(seen === 'true' ? '/welcome' : '/onboarding');
+    router.push(seen === 'true' ? '/register' : '/onboarding');
   }
 
   if (!ready) return <View style={styles.root} />;
 
   return (
-    <View style={styles.root}>
-      <ParticleBackground />
+    <SafeAreaView style={styles.root}>
+      <View style={styles.hero}>
+        <AuraMark size={32} />
+        <Text style={styles.wordmark}>AURA</Text>
+        <Text style={styles.tagline}>Find your people nearby</Text>
+      </View>
 
-      <Animated.View style={[styles.content, { opacity: fadeIn }]}>
-        <View style={styles.logoWrap}>
-          <Image source={require('../assets/images/icon.png')} style={styles.logoImage} />
-          <Text style={styles.logo}>AURA</Text>
-          <Text style={styles.tagline}>Find your people nearby</Text>
-        </View>
-
-        <TouchableOpacity style={styles.btn} activeOpacity={0.85} onPress={handleGetStarted}>
-          <Text style={styles.btnText}>Get Started</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
+      <View style={styles.buttons}>
+        <Button
+          label="Log in"
+          variant="primary"
+          size="lg"
+          fullWidth
+          onPress={() => router.push('/login')}
+        />
+        <Button
+          label="Create account"
+          variant="ghost"
+          size="lg"
+          fullWidth
+          onPress={handleCreateAccount}
+        />
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
-  content: {
+  root: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
+  hero: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 14,
     paddingHorizontal: 32,
   },
-
-  logoWrap: { alignItems: 'center', marginBottom: 80 },
-  logoImage: {
-    width: 160,
-    height: 160,
-    borderRadius: 36,
-    marginBottom: 28,
+  wordmark: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 30,
+    color: colors.t1,
+    letterSpacing: 30 * 0.34,
+    // Mirrors the design's text-indent: recenters the trailing letter-space.
+    paddingLeft: 30 * 0.34,
   },
-  logo: {
-    fontSize: 46,
-    color: '#00b4a6',
-    fontWeight: '800',
-    letterSpacing: 14,
-    paddingLeft: 14,
+  tagline: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.t2,
     textAlign: 'center',
-    width: '100%',
-    textShadowColor: '#00b4a6',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 22,
-    marginBottom: 14,
   },
-  tagline: { color: '#4a4a4a', fontSize: 14, letterSpacing: 1.8 },
-
-  btn: {
-    width: '100%',
-    backgroundColor: '#00b4a6',
-    paddingVertical: 17,
-    borderRadius: 16,
-    alignItems: 'center',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+  buttons: {
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+    gap: 12,
   },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
 });

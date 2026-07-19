@@ -2,12 +2,10 @@ import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -15,6 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { Avatar } from '@/components/ui/Avatar';
+import { Card } from '@/components/ui/Card';
+import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'connected' | 'friend';
@@ -23,36 +24,12 @@ interface SearchUser {
   id: number;
   username: string;
   profile_picture?: string;
-  // API may return count directly or a full array
   shared_interests_count?: number;
   shared_interests?: { name: string; icon: string }[] | number;
   relationship?: Relationship;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const AVATAR_COLORS = ['#7c3aed', '#0891b2', '#059669', '#d97706', '#be185d', '#0284c7'];
-
-const REL_COLOR: Record<Relationship, string> = {
-  stranger:  '#666666',
-  connected: '#f97316',
-  friend:    '#3b82f6',
-};
-
-const REL_LABEL: Record<Relationship, string> = {
-  stranger:  'Nearby',
-  connected: 'Connected',
-  friend:    'Friend',
-};
-
-const TEAL = '#00b4a6';
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function avatarBg(username: string): string {
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) hash = username.charCodeAt(i) + (hash << 5) - hash;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
 function sharedCount(user: SearchUser): number {
   if (user.shared_interests_count != null) return user.shared_interests_count;
   if (Array.isArray(user.shared_interests)) return user.shared_interests.length;
@@ -60,72 +37,99 @@ function sharedCount(user: SearchUser): number {
   return 0;
 }
 
-// ─── User card ────────────────────────────────────────────────────────────────
-interface CardProps {
+function ringColor(rel: Relationship): string {
+  if (rel === 'friend') return colors.blue;
+  if (rel === 'connected') return colors.orange;
+  return colors.t3;
+}
+
+// ─── Action button ────────────────────────────────────────────────────────────
+function ActionBtn({
+  rel,
+  hiSent,
+  onSendHi,
+  onMessage,
+}: {
+  rel: Relationship;
+  hiSent: boolean;
+  onSendHi: () => void;
+  onMessage: () => void;
+}) {
+  if (rel !== 'stranger') {
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.actionBtn, styles.actionBtnGhost, pressed && styles.pressed]}
+        onPress={onMessage}
+        hitSlop={4}
+      >
+        <Text style={styles.actionBtnGhostText}>Message</Text>
+      </Pressable>
+    );
+  }
+
+  if (hiSent) {
+    return (
+      <View style={[styles.actionBtn, styles.actionBtnGhost, styles.actionBtnDisabled]}>
+        <Text style={styles.actionBtnSentText}>Sent ✓</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.actionBtn, styles.actionBtnPrimary, pressed && styles.pressed]}
+      onPress={onSendHi}
+      hitSlop={4}
+    >
+      <Text style={styles.actionBtnPrimaryText}>Hi</Text>
+    </Pressable>
+  );
+}
+
+// ─── User result card ─────────────────────────────────────────────────────────
+function UserCard({
+  user,
+  hiSent,
+  onSendHi,
+  onMessage,
+  onPress,
+}: {
   user: SearchUser;
   hiSent: boolean;
-  hiSuccess: boolean;
   onSendHi: () => void;
   onMessage: () => void;
   onPress: () => void;
-}
-
-function UserCard({ user, hiSent, hiSuccess, onSendHi, onMessage, onPress }: CardProps) {
-  const bg    = avatarBg(user.username);
-  const rel   = user.relationship ?? 'stranger';
+}) {
+  const rel = user.relationship ?? 'stranger';
   const count = sharedCount(user);
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
-      {/* Avatar */}
-      <View style={[styles.avatar, { backgroundColor: bg }]}>
-        {user.profile_picture ? (
-          <Image source={{ uri: user.profile_picture }} style={styles.avatarImage} />
-        ) : (
-          <Text style={styles.avatarInitial}>{user.username.charAt(0).toUpperCase()}</Text>
-        )}
-      </View>
+    <Card onPress={onPress}>
+      <View style={styles.cardRow}>
+        <Avatar
+          uri={user.profile_picture}
+          name={user.username}
+          size="md"
+          ringColor={ringColor(rel)}
+        />
 
-      {/* Info */}
-      <View style={styles.cardInfo}>
-        <Text style={styles.cardName} numberOfLines={1}>{user.username}</Text>
-        <View style={styles.cardMeta}>
-          <View style={[styles.relDot, { backgroundColor: REL_COLOR[rel] }]} />
-          <Text style={styles.relText}>{REL_LABEL[rel]}</Text>
-          {count > 0 && (
-            <>
-              <Text style={styles.metaSep}>·</Text>
-              <Ionicons name="heart" size={10} color={TEAL} />
-              <Text style={styles.sharedText}>{count} shared</Text>
-            </>
+        <View style={styles.cardInfo}>
+          <Text style={styles.cardName} numberOfLines={1}>{user.username}</Text>
+          {count > 0 ? (
+            <Text style={styles.cardMeta}>{count} shared interest{count !== 1 ? 's' : ''}</Text>
+          ) : (
+            <Text style={styles.cardMeta}>Nearby</Text>
           )}
         </View>
-      </View>
 
-      {/* Action */}
-      {rel === 'stranger' ? (
-        <TouchableOpacity
-          style={[styles.actionBtn, hiSent && styles.actionBtnDone]}
-          onPress={onSendHi}
-          disabled={hiSent}
-          activeOpacity={0.75}
-          hitSlop={4}
-        >
-          <Text style={[styles.actionText, hiSent && styles.actionTextDone]}>
-            {hiSuccess ? 'Hi sent! 👋' : hiSent ? 'Sent ✓' : '👋 Hi'}
-          </Text>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          style={styles.actionBtn}
-          onPress={onMessage}
-          activeOpacity={0.75}
-          hitSlop={4}
-        >
-          <Text style={styles.actionText}>💬</Text>
-        </TouchableOpacity>
-      )}
-    </TouchableOpacity>
+        <ActionBtn
+          rel={rel}
+          hiSent={hiSent}
+          onSendHi={onSendHi}
+          onMessage={onMessage}
+        />
+      </View>
+    </Card>
   );
 }
 
@@ -134,15 +138,15 @@ export default function SearchScreen() {
   const router = useRouter();
   const { top } = useSafeAreaInsets();
 
-  const [query, setQuery]     = useState('');
+  const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [sentHiIds, setSentHiIds] = useState<Set<number>>(new Set());
-  const [hiSuccessId, setHiSuccessId] = useState<number | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const inputRef    = useRef<TextInput>(null);
+  const inputRef = useRef<TextInput>(null);
 
   function handleChange(text: string) {
     setQuery(text);
@@ -178,13 +182,9 @@ export default function SearchScreen() {
   }
 
   async function sendHi(user: SearchUser) {
-    const url = `/api/friends/hi/${user.id}/`;
-    console.log('[Hi] sending to URL:', url);
     try {
-      await api.post(url);
+      await api.post(`/api/friends/hi/${user.id}/`);
       setSentHiIds((prev) => new Set(prev).add(user.id));
-      setHiSuccessId(user.id);
-      setTimeout(() => setHiSuccessId(null), 1000);
     } catch (e: any) {
       console.log('[Hi] error:', e?.response?.status, JSON.stringify(e?.response?.data));
     }
@@ -198,38 +198,33 @@ export default function SearchScreen() {
     router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } });
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
-  let body: React.ReactNode;
+  // ─── Body ─────────────────────────────────────────────────────────────────
+  function renderBody() {
+    if (loading) {
+      return (
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.teal} />
+        </View>
+      );
+    }
 
-  if (loading) {
-    body = (
-      <View style={styles.center}>
-        <ActivityIndicator color={TEAL} size="large" />
-        <Text style={styles.centerSub}>Searching…</Text>
-      </View>
-    );
-  } else if (!searched) {
-    body = (
-      <View style={styles.center}>
-        <View style={styles.placeholderIcon}>
-          <Ionicons name="search" size={32} color={TEAL} />
+    if (!searched || query.trim().length < 2) {
+      return (
+        <View style={styles.center}>
+          <Text style={styles.idleText}>Search for people by username</Text>
         </View>
-        <Text style={styles.centerTitle}>Find people</Text>
-        <Text style={styles.centerSub}>Type a username to search</Text>
-      </View>
-    );
-  } else if (results.length === 0) {
-    body = (
-      <View style={styles.center}>
-        <View style={styles.placeholderIcon}>
-          <Ionicons name="person-outline" size={32} color="#2e2e2e" />
+      );
+    }
+
+    if (results.length === 0) {
+      return (
+        <View style={styles.center}>
+          <Text style={styles.idleText}>No results for "{query.trim()}"</Text>
         </View>
-        <Text style={styles.centerTitle}>No results</Text>
-        <Text style={styles.centerSub}>Try a different username</Text>
-      </View>
-    );
-  } else {
-    body = (
+      );
+    }
+
+    return (
       <FlatList
         data={results}
         keyExtractor={(item) => String(item.id)}
@@ -237,15 +232,14 @@ export default function SearchScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          <Text style={styles.resultMeta}>
-            {results.length} result{results.length !== 1 ? 's' : ''}
+          <Text style={styles.resultsLabel}>
+            {results.length} RESULT{results.length !== 1 ? 'S' : ''}
           </Text>
         }
         renderItem={({ item }) => (
           <UserCard
             user={item}
             hiSent={sentHiIds.has(item.id)}
-            hiSuccess={hiSuccessId === item.id}
             onSendHi={() => sendHi(item)}
             onMessage={() => goToMessages(item)}
             onPress={() => goToProfile(item)}
@@ -257,21 +251,23 @@ export default function SearchScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      {/* ── Search bar ── */}
+      {/* Search bar */}
       <View style={styles.searchBar}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={26} color={TEAL} />
-        </TouchableOpacity>
+        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={colors.t1} />
+        </Pressable>
 
-        <View style={styles.inputWrap}>
-          <Ionicons name="search-outline" size={16} color="#444" />
+        <View style={[styles.inputPill, focused && styles.inputPillFocused]}>
+          <Ionicons name="search-outline" size={16} color={colors.t3} />
           <TextInput
             ref={inputRef}
             style={styles.input}
             value={query}
             onChangeText={handleChange}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             placeholder="Search by username…"
-            placeholderTextColor="#2e2e2e"
+            placeholderTextColor={colors.t3}
             autoFocus
             autoCapitalize="none"
             autoCorrect={false}
@@ -280,22 +276,22 @@ export default function SearchScreen() {
           />
           {query.length > 0 && (
             <Pressable onPress={clear} hitSlop={8}>
-              <Ionicons name="close-circle" size={17} color="#333" />
+              <Ionicons name="close-outline" size={20} color={colors.t3} />
             </Pressable>
           )}
         </View>
       </View>
 
-      {body}
+      {renderBody()}
     </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: { flex: 1, backgroundColor: colors.bg },
 
-  // ── Search bar ──
+  // Search bar
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -303,100 +299,102 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#161616',
+    borderBottomColor: colors.border,
   },
   backBtn: { padding: 4 },
-  inputWrap: {
+  inputPill: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderRadius: 100,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
-    paddingHorizontal: 12,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     gap: 8,
   },
-  input: { flex: 1, color: '#fff', fontSize: 15 },
+  inputPillFocused: { borderColor: colors.teal },
+  input: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+  },
 
-  // ── Center states ──
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingBottom: 60 },
-  placeholderIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#0d1f1e',
-    borderWidth: 1,
-    borderColor: `${TEAL}22`,
-    alignItems: 'center',
-    justifyContent: 'center',
+  // Center states
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 60 },
+  idleText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t3,
+  },
+
+  // List
+  list: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 60, gap: 8 },
+  resultsLabel: {
+    fontFamily: fonts.body,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    color: colors.t3,
     marginBottom: 8,
   },
-  centerTitle: { color: '#333', fontSize: 17, fontWeight: '600' },
-  centerSub:   { color: '#222', fontSize: 13 },
 
-  // ── List ──
-  list: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 60, gap: 10 },
-  resultMeta: {
-    color: '#2e2e2e',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-
-  // ── Card ──
-  card: {
+  // Card row
+  cardRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#1a1a1a',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
     gap: 12,
   },
-
-  // Avatar
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    flexShrink: 0,
+  cardInfo: { flex: 1, gap: 4 },
+  cardName: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.t1,
   },
-  avatarImage:   { width: 48, height: 48, borderRadius: 24 },
-  avatarInitial: { color: '#fff', fontSize: 20, fontWeight: '700' },
-
-  // Info
-  cardInfo: { flex: 1, gap: 5 },
-  cardName: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
-  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  relDot:   { width: 6, height: 6, borderRadius: 3 },
-  relText:  { color: '#444', fontSize: 12 },
-  metaSep:  { color: '#2a2a2a', fontSize: 12 },
-  sharedText: { color: TEAL, fontSize: 12, fontWeight: '500' },
+  cardMeta: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+  },
 
   // Action button
   actionBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#0d1f1e',
-    borderWidth: 1,
-    borderColor: `${TEAL}30`,
-    minWidth: 60,
+    borderRadius: radius.s,
     alignItems: 'center',
+    minWidth: 72,
   },
-  actionBtnDone: {
+  actionBtnPrimary: {
+    backgroundColor: colors.teal,
+  },
+  actionBtnPrimaryText: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 13,
+    color: colors.bg,
+  },
+  actionBtnGhost: {
+    borderWidth: 1,
+    borderColor: colors.border,
     backgroundColor: 'transparent',
-    borderColor: '#1e1e1e',
   },
-  actionText:     { color: TEAL,  fontSize: 13, fontWeight: '600' },
-  actionTextDone: { color: '#2e2e2e', fontSize: 13, fontWeight: '500' },
+  actionBtnGhostText: {
+    fontFamily: fonts.body,
+    fontWeight: '500',
+    fontSize: 13,
+    color: colors.t2,
+  },
+  actionBtnDisabled: { opacity: 0.7 },
+  actionBtnSentText: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 13,
+    color: colors.teal,
+  },
+
+  pressed: { opacity: 0.6 },
 });

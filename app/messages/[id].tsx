@@ -8,31 +8,32 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { decodeStoryReply } from '@/services/storyReply';
+import { Avatar } from '@/components/ui/Avatar';
+import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Message {
   id: string;
   text?: string;
   image?: string;
-  sender_id: number;   // always normalised to a number
+  sender_id: number;
   created_at: string;
   pending?: boolean;
 }
 
-// Raw shape from API / WebSocket — sender can be an id or an object.
 interface RawMessage {
   id?: string | number;
-  // all plausible text field names from Django backends
   message?: string;
   text?: string;
   content?: string;
@@ -43,7 +44,7 @@ interface RawMessage {
   sender?: number | { id: number; username?: string };
   timestamp?: string;
   created_at?: string;
-  [key: string]: unknown; // catch-all so we can inspect unknown fields
+  [key: string]: unknown;
 }
 
 const WS_BASE = 'wss://project-x-production-3261.up.railway.app';
@@ -57,8 +58,6 @@ function fmtTime(iso: string) {
   }
 }
 
-// Resolves sender_id regardless of shape, always returning a number.
-// Coerces strings to numbers so === comparisons never silently fail.
 function extractSenderId(raw: RawMessage): number {
   if (raw.sender_id != null) return Number(raw.sender_id);
   if (typeof raw.sender === 'number') return raw.sender;
@@ -68,8 +67,6 @@ function extractSenderId(raw: RawMessage): number {
 }
 
 function extractText(raw: RawMessage): string | undefined {
-  // content is the confirmed field name for this API.
-  // The others are kept as fallbacks for history vs WS shape differences.
   const value = raw.content ?? raw.message ?? raw.text ?? raw.body ?? raw.msg;
   if (value != null) return String(value);
   return undefined;
@@ -101,22 +98,16 @@ export default function MessagesScreen() {
   const ws = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
-  // ── Fetch current user id + other user's profile picture ────────────────
   useEffect(() => {
     api.get<{ id: number | string }>('/api/users/profile/')
-      .then((r) => {
-        const uid = Number(r.data.id);
-        currentUserIdRef.current = uid;
-        console.log('[Messages] current user id:', uid);
-      })
-      .catch((e) => console.log('[Messages] profile fetch failed:', e?.response?.status));
+      .then((r) => { currentUserIdRef.current = Number(r.data.id); })
+      .catch(() => {});
 
     api.get<{ profile_picture?: string }>(`/api/users/profile/${id}/`)
       .then((r) => setOtherUserPicture(r.data.profile_picture ?? null))
       .catch(() => {});
   }, [id]);
 
-  // ── Mark conversation as read (clears badge) ────────────────────────────
   useEffect(() => {
     AsyncStorage.setItem('chat_last_seen', new Date().toISOString());
     const timer = setTimeout(() => {
@@ -125,7 +116,6 @@ export default function MessagesScreen() {
     return () => clearTimeout(timer);
   }, [id]);
 
-  // ── Fetch message history ────────────────────────────────────────────────
   useEffect(() => {
     api.get<RawMessage[]>(`/api/friends/messages/${id}/`)
       .then((r) => {
@@ -136,7 +126,6 @@ export default function MessagesScreen() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // ── WebSocket ────────────────────────────────────────────────────────────
   useEffect(() => {
     let active = true;
 
@@ -156,22 +145,12 @@ export default function MessagesScreen() {
         try {
           const raw: RawMessage = JSON.parse(event.data);
           const incoming = normalise(raw);
-          if (!incoming.text && !incoming.image) {
-            // Not a chat message (e.g. presence/error event) — skip silently.
-            console.log('[WS] skipped non-message event:', JSON.stringify(raw));
-            return;
-          }
+          if (!incoming.text && !incoming.image) return;
 
           setMessages((prev) => {
-            // Dedup: ignore if exact server id already exists (handles re-delivery)
-            if (incoming.id && prev.some((m) => m.id === incoming.id && !m.pending)) {
-              return prev;
-            }
-
+            if (incoming.id && prev.some((m) => m.id === incoming.id && !m.pending)) return prev;
             const isFromMe = incoming.sender_id === currentUserIdRef.current;
             if (isFromMe) {
-              // Replace the most-recent pending message with matching text.
-              // Manual reverse loop — findLastIndex not guaranteed on all Hermes builds.
               for (let i = prev.length - 1; i >= 0; i--) {
                 if (prev[i].pending && prev[i].text === incoming.text) {
                   const updated = [...prev];
@@ -180,18 +159,16 @@ export default function MessagesScreen() {
                 }
               }
             }
-
             return [...prev, incoming];
           });
         } catch {}
       };
 
-      socket.onclose  = () => { if (active) setWsReady(false); };
-      socket.onerror  = () => { if (active) setWsReady(false); };
+      socket.onclose = () => { if (active) setWsReady(false); };
+      socket.onerror = () => { if (active) setWsReady(false); };
     }
 
     connect();
-
     return () => {
       active = false;
       ws.current?.close();
@@ -199,75 +176,51 @@ export default function MessagesScreen() {
     };
   }, [id]);
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
     }
   }, [messages.length]);
 
-  // ── Send text ────────────────────────────────────────────────────────────
   function sendText() {
     const trimmed = text.trim();
     if (!trimmed) return;
     setText('');
 
-    const wsOpen = ws.current?.readyState === WebSocket.OPEN;
-
-    if (wsOpen) {
-      // WS is live — send only, let the server broadcast deliver the message
-      // back through onmessage so it appears exactly once.
-      ws.current!.send(JSON.stringify({ content: trimmed }));
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ content: trimmed }));
     } else {
-      // No WS — POST and only add to the list if the request succeeded.
       api.post<RawMessage>(`/api/friends/messages/${id}/`, { content: trimmed })
-        .then((r) => {
-          setMessages((prev) => [...prev, normalise(r.data)]);
-        })
+        .then((r) => setMessages((prev) => [...prev, normalise(r.data)]))
         .catch(() => {});
     }
   }
 
-  // ── Attach image ─────────────────────────────────────────────────────────
   async function handleAttach() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return;
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'] as any,
       allowsEditing: true,
       quality: 0.8,
     });
-
     if (result.canceled) return;
 
     const asset = result.assets[0];
     const tempId = `temp-img-${Date.now()}`;
 
-    // Optimistic local display
     setMessages((prev) => [
       ...prev,
-      {
-        id:         tempId,
-        image:      asset.uri,
-        sender_id:  currentUserIdRef.current ?? -1,
-        created_at: new Date().toISOString(),
-        pending:    true,
-      },
+      { id: tempId, image: asset.uri, sender_id: currentUserIdRef.current ?? -1, created_at: new Date().toISOString(), pending: true },
     ]);
 
-    // Upload via REST
     const formData = new FormData();
-    formData.append('image', {
-      uri:  asset.uri,
-      type: asset.mimeType ?? 'image/jpeg',
-      name: 'attachment.jpg',
-    } as any);
-
-    api.post(`/api/friends/messages/${id}/`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }).catch(() => {});
+    formData.append('image', { uri: asset.uri, type: asset.mimeType ?? 'image/jpeg', name: 'attachment.jpg' } as any);
+    api.post(`/api/friends/messages/${id}/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
   }
+
+  const canSend = text.trim().length > 0;
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -275,36 +228,34 @@ export default function MessagesScreen() {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={26} color="#00b4a6" />
-        </TouchableOpacity>
+        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={colors.t1} />
+        </Pressable>
 
-        {/* Avatar */}
-        <View style={styles.headerAvatar}>
-          {otherUserPicture ? (
-            <Image source={{ uri: otherUserPicture }} style={styles.headerAvatarImage} />
-          ) : (
-            <Text style={styles.headerAvatarInitial}>
-              {(username ?? 'C').charAt(0).toUpperCase()}
-            </Text>
-          )}
-        </View>
+        <Avatar
+          uri={otherUserPicture}
+          name={username ?? 'C'}
+          size="sm"
+          ringColor={colors.t3}
+        />
 
         <View style={styles.headerInfo}>
-          <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
-          <View style={styles.statusRow}>
-            <View style={[styles.statusDot, wsReady ? styles.statusOnline : styles.statusOffline]} />
-            <Text style={styles.statusText}>{wsReady ? 'Connected' : 'Reconnecting…'}</Text>
+          <View style={styles.headerNameRow}>
+            <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
+            {wsReady && <View style={styles.onlineDot} />}
           </View>
+          {!wsReady && (
+            <Text style={styles.statusText}>Reconnecting…</Text>
+          )}
         </View>
       </View>
 
-      {/* ── Messages ── */}
+      {/* Messages */}
       {loading ? (
         <View style={styles.loadingWrap}>
-          <ActivityIndicator color="#00b4a6" size="large" />
+          <ActivityIndicator color={colors.teal} size="large" />
         </View>
       ) : (
         <FlatList
@@ -320,13 +271,9 @@ export default function MessagesScreen() {
           }
           renderItem={({ item }) => {
             const isMine = item.sender_id === currentUserIdRef.current;
-            console.log(
-              '[Messages] bubble | sender_id:', item.sender_id, typeof item.sender_id,
-              '| currentUserId:', currentUserIdRef.current, typeof currentUserIdRef.current,
-              '| isMine:', isMine,
-            );
+            const storyReply = decodeStoryReply(item.text);
             return (
-              <View style={[styles.row, isMine && styles.rowRight]}>
+              <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
                 <View
                   style={[
                     styles.bubble,
@@ -334,16 +281,41 @@ export default function MessagesScreen() {
                     item.pending && styles.bubblePending,
                   ]}
                 >
-                  {item.image ? (
+                  {storyReply ? (
+                    <>
+                      <Text style={isMine ? styles.storyReplyLabelMine : styles.storyReplyLabelTheirs}>
+                        {isMine ? 'You replied to their story' : 'Replied to your story'}
+                      </Text>
+                      {storyReply.image ? (
+                        <Image
+                          source={{ uri: storyReply.image }}
+                          style={styles.storyReplyImage}
+                          resizeMode="cover"
+                        />
+                      ) : null}
+                      {storyReply.excerpt ? (
+                        <View style={[styles.storyReplyQuote, isMine ? styles.storyReplyQuoteMine : styles.storyReplyQuoteTheirs]}>
+                          <Text
+                            style={isMine ? styles.storyReplyQuoteTextMine : styles.storyReplyQuoteTextTheirs}
+                            numberOfLines={2}
+                          >
+                            “{storyReply.excerpt}”
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
+                        {storyReply.comment}
+                      </Text>
+                    </>
+                  ) : item.image ? (
                     <Image source={{ uri: item.image }} style={styles.bubbleImage} resizeMode="cover" />
                   ) : (
-                    <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>
+                    <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
                       {item.text}
                     </Text>
                   )}
-                  <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine]}>
-                    {fmtTime(item.created_at)}
-                    {item.pending ? '  ·' : ''}
+                  <Text style={[styles.bubbleTime, isMine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs]}>
+                    {fmtTime(item.created_at)}{item.pending ? ' ·' : ''}
                   </Text>
                 </View>
               </View>
@@ -352,30 +324,29 @@ export default function MessagesScreen() {
         />
       )}
 
-      {/* ── Input bar ── */}
+      {/* Input bar */}
       <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
-        <TouchableOpacity style={styles.attachBtn} onPress={handleAttach} activeOpacity={0.7}>
-          <Ionicons name="image-outline" size={22} color="#00b4a6" />
-        </TouchableOpacity>
+        <Pressable style={styles.attachBtn} onPress={handleAttach} hitSlop={4}>
+          <Ionicons name="image-outline" size={20} color={colors.t3} />
+        </Pressable>
 
         <TextInput
           style={styles.input}
           value={text}
           onChangeText={setText}
           placeholder="Message…"
-          placeholderTextColor="#2e2e2e"
+          placeholderTextColor={colors.t3}
           multiline
           maxLength={2000}
         />
 
-        <TouchableOpacity
-          style={[styles.sendBtn, !text.trim() && styles.sendBtnOff]}
+        <Pressable
+          style={[styles.sendBtn, canSend && styles.sendBtnActive]}
           onPress={sendText}
-          disabled={!text.trim()}
-          activeOpacity={0.8}
+          disabled={!canSend}
         >
-          <Ionicons name="send" size={17} color={text.trim() ? '#0a0a0a' : '#2e2e2e'} />
-        </TouchableOpacity>
+          <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
+        </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
@@ -383,83 +354,136 @@ export default function MessagesScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: { flex: 1, backgroundColor: colors.bg },
 
   // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#141414',
-    backgroundColor: '#0a0a0a',
+    paddingBottom: 10,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
   },
-  backBtn: { padding: 4, marginRight: 4 },
-  headerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#1a2e2e',
-    borderWidth: 1.5,
-    borderColor: '#00b4a630',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-    overflow: 'hidden',
+  backBtn: { padding: 4 },
+  headerInfo: { flex: 1, gap: 2 },
+  headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerName: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
+    flexShrink: 1,
   },
-  headerAvatarImage: { width: 36, height: 36, borderRadius: 18 },
-  headerAvatarInitial: { color: '#00b4a6', fontSize: 15, fontWeight: '700' },
-  headerInfo: { flex: 1 },
-  headerName: { color: '#ffffff', fontSize: 17, fontWeight: '700' },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusOnline: { backgroundColor: '#00b4a6' },
-  statusOffline: { backgroundColor: '#2e2e2e' },
-  statusText: { color: '#444', fontSize: 11 },
+  onlineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+  },
+  statusText: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: colors.t3,
+  },
 
   // Loading / empty
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
-  emptyText: { color: '#2a2a2a', fontSize: 14 },
+  emptyText: { fontFamily: fonts.body, color: colors.t3, fontSize: 14 },
 
-  // Message list
+  // List
   listContent: { paddingHorizontal: 14, paddingVertical: 16, gap: 6, flexGrow: 1 },
 
-  // Bubble row
-  row: { flexDirection: 'row', alignItems: 'flex-end' },
+  // Rows
+  row: { flexDirection: 'row' },
   rowRight: { justifyContent: 'flex-end' },
+  rowLeft: { justifyContent: 'flex-start' },
 
-  // Bubble
+  // Bubbles
   bubble: {
     maxWidth: '75%',
-    borderRadius: 20,
+    borderRadius: radius.l,
     paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 7,
-    gap: 3,
+    gap: 4,
   },
   bubbleMine: {
-    backgroundColor: '#00b4a6',
+    backgroundColor: colors.teal,
     borderBottomRightRadius: 4,
   },
   bubbleTheirs: {
-    backgroundColor: '#161616',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: colors.border,
     borderBottomLeftRadius: 4,
   },
   bubblePending: { opacity: 0.55 },
 
-  bubbleText: { color: '#ffffff', fontSize: 15, lineHeight: 21 },
-  bubbleTextMine: { color: '#ffffff' },
-  bubbleTime: { color: 'rgba(255,255,255,0.5)', fontSize: 10, alignSelf: 'flex-end' },
-  bubbleTimeMine: { color: 'rgba(255,255,255,0.6)' },
+  bubbleTextMine: {
+    fontFamily: fonts.body,
+    color: '#04211D',
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  bubbleTextTheirs: {
+    fontFamily: fonts.body,
+    color: colors.t1,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  bubbleTime: {
+    fontSize: 10,
+    fontFamily: fonts.body,
+    alignSelf: 'flex-end',
+  },
+  bubbleTimeMine: { color: colors.tealTint },
+  bubbleTimeTheirs: { color: colors.t3 },
 
   bubbleImage: {
     width: 210,
     height: 210,
-    borderRadius: 14,
+    borderRadius: radius.m,
+  },
+
+  // Story-reply bubbles
+  storyReplyLabelMine: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(4,33,29,0.7)',
+  },
+  storyReplyLabelTheirs: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.t3,
+  },
+  storyReplyImage: {
+    width: 180,
+    height: 220,
+    borderRadius: radius.m,
+  },
+  storyReplyQuote: {
+    borderLeftWidth: 2,
+    paddingLeft: 8,
+  },
+  storyReplyQuoteMine: { borderLeftColor: 'rgba(4,33,29,0.4)' },
+  storyReplyQuoteTheirs: { borderLeftColor: colors.border },
+  storyReplyQuoteTextMine: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: 'rgba(4,33,29,0.8)',
+  },
+  storyReplyQuoteTextTheirs: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontStyle: 'italic',
+    color: colors.t2,
   },
 
   // Input bar
@@ -469,46 +493,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 10,
     gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#141414',
-    backgroundColor: '#0a0a0a',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
   },
   attachBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#111111',
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
   },
   input: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 38,
     maxHeight: 120,
-    backgroundColor: '#111111',
-    borderRadius: 20,
+    backgroundColor: colors.surface2,
+    borderRadius: radius.l,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
-    paddingHorizontal: 16,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
     paddingTop: Platform.OS === 'ios' ? 10 : 8,
     paddingBottom: Platform.OS === 'ios' ? 10 : 8,
-    color: '#ffffff',
+    fontFamily: fonts.body,
+    color: colors.t1,
     fontSize: 15,
     lineHeight: 20,
   },
   sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#00b4a6',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  sendBtnOff: {
-    backgroundColor: '#111111',
+    backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: colors.border,
+  },
+  sendBtnActive: {
+    backgroundColor: colors.teal,
+    borderColor: colors.teal,
   },
 });

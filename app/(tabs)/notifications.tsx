@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -13,8 +13,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { getFeed, markFeedRead, type LocalNotification } from '@/services/activityFeed';
 import { Speedometer } from '@/components/Speedometer';
+import { Avatar } from '@/components/ui/Avatar';
+import { Button } from '@/components/ui/Button';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
+import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FriendRequest {
@@ -25,7 +29,7 @@ interface FriendRequest {
 }
 
 interface Notification {
-  id: number;
+  id: number | string;
   message?: string;
   title?: string;
   body?: string;
@@ -40,14 +44,12 @@ function fmtTime(iso?: string): string {
   if (!iso) return '';
   try {
     const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return 'just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffH = Math.floor(diffMin / 60);
-    if (diffH < 24) return `${diffH}h ago`;
-    return `${Math.floor(diffH / 24)}d ago`;
+    const mins = Math.floor((Date.now() - d.getTime()) / 60_000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
   } catch {
     return '';
   }
@@ -62,8 +64,94 @@ function isRead(n: Notification): boolean {
 }
 
 function isProximity(n: Notification): boolean {
-  const type = n.notification_type ?? '';
-  return type === 'proximity' || type === 'nearby' || type === 'wave';
+  const t = n.notification_type ?? '';
+  return t === 'proximity' || t === 'nearby' || t === 'wave';
+}
+
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
+// ─── Notification row ─────────────────────────────────────────────────────────
+function NotifRow({ notif, icon }: { notif: Notification; icon: IoniconsName }) {
+  const read = isRead(notif);
+  const text = notifText(notif) || 'Someone nearby shares your interests';
+  const dotIndex = text.indexOf(' · ');
+  const title = dotIndex > -1 ? text.slice(0, dotIndex) : text;
+  const subtitle = dotIndex > -1 ? text.slice(dotIndex + 3) : undefined;
+
+  return (
+    <View style={[styles.notifRow, read && styles.notifRowRead]}>
+      {!read && <View style={styles.unreadDot} />}
+      <View style={styles.notifIconTile}>
+        <Ionicons name={icon} size={18} color={read ? colors.t3 : colors.teal} />
+      </View>
+      <View style={styles.notifBody}>
+        <Text style={styles.notifTitle} numberOfLines={2}>{title}</Text>
+        {subtitle ? (
+          <Text style={styles.notifSubtitle} numberOfLines={1}>{subtitle}</Text>
+        ) : null}
+        {notif.created_at ? (
+          <Text style={styles.notifTime}>{fmtTime(notif.created_at)}</Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+// ─── Friend request row ───────────────────────────────────────────────────────
+function RequestRow({
+  request,
+  actioning,
+  onAccept,
+  onDecline,
+}: {
+  request: FriendRequest;
+  actioning: 'accept' | 'decline' | undefined;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const user = request.from_user ?? request.sender;
+  if (!user) return null;
+
+  return (
+    <View style={styles.notifRow}>
+      <View style={styles.unreadDot} />
+      <Avatar uri={undefined} name={user.username} size="sm" ringColor={colors.t3} />
+      <View style={styles.notifBody}>
+        <Text style={styles.notifTitle}>{user.username}</Text>
+        <Text style={styles.notifSubtitle}>
+          Wants to connect{request.created_at ? `  ·  ${fmtTime(request.created_at)}` : ''}
+        </Text>
+        <View style={styles.requestActions}>
+          <Button
+            label="Accept"
+            variant="primary"
+            size="sm"
+            loading={actioning === 'accept'}
+            disabled={!!actioning}
+            onPress={onAccept}
+          />
+          <Button
+            label="Decline"
+            variant="ghost"
+            size="sm"
+            loading={actioning === 'decline'}
+            disabled={!!actioning}
+            onPress={onDecline}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>{label}</Text>
+      <View style={styles.sectionRows}>{children}</View>
+    </View>
+  );
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -73,11 +161,10 @@ export default function NotificationsScreen() {
 
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [localFeed, setLocalFeed] = useState<LocalNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
-
-  // Per-request action state: 'accept' | 'decline' | null
   const [actioning, setActioning] = useState<Record<number, 'accept' | 'decline'>>({});
 
   const fetchAll = useCallback(async () => {
@@ -88,10 +175,7 @@ export default function NotificationsScreen() {
 
     if (reqRes.status === 'fulfilled') {
       const data = reqRes.value.data;
-      console.log('[Notifications] incoming friend requests:', JSON.stringify(data));
       setRequests(Array.isArray(data) ? data : []);
-    } else {
-      console.log('[Notifications] requests error:', reqRes.reason?.response?.status);
     }
 
     if (notifRes.status === 'fulfilled') {
@@ -104,25 +188,18 @@ export default function NotificationsScreen() {
         list = Array.isArray(wrapped) ? wrapped : [];
       }
       setNotifications(list);
-    } else {
-      console.log('[Notifications] notifications error:', notifRes.reason?.response?.status);
     }
+
+    setLocalFeed(await getFeed());
   }, []);
 
-  // Initial load
-  useEffect(() => {
-    fetchAll().finally(() => setLoading(false));
-  }, [fetchAll]);
+  useEffect(() => { fetchAll().finally(() => setLoading(false)); }, [fetchAll]);
 
-  // Re-fetch on focus + poll every 10 seconds while tab is active
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   useFocusEffect(useCallback(() => {
     fetchAll();
     pollRef.current = setInterval(fetchAll, 5_000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchAll]));
 
   const onRefresh = useCallback(async () => {
@@ -131,46 +208,53 @@ export default function NotificationsScreen() {
     setRefreshing(false);
   }, [fetchAll]);
 
-  async function handleRequest(requestId: number, action: 'accept' | 'decline') {
-    setActioning((prev) => ({ ...prev, [requestId]: action }));
+  async function handleRequest(id: number, action: 'accept' | 'decline') {
+    setActioning((prev) => ({ ...prev, [id]: action }));
     try {
-      await api.post(`/api/friends/request/${requestId}/${action}/`);
-      setRequests((prev) => prev.filter((r) => r.id !== requestId));
+      await api.post(`/api/friends/request/${id}/${action}/`);
+      setRequests((prev) => prev.filter((r) => r.id !== id));
     } catch (e: any) {
-      console.log(`[Notifications] ${action} error:`, e?.response?.status, JSON.stringify(e?.response?.data));
+      console.log(`[Notifications] ${action} error:`, e?.response?.status);
     } finally {
-      setActioning((prev) => {
-        const next = { ...prev };
-        delete next[requestId];
-        return next;
-      });
+      setActioning((prev) => { const next = { ...prev }; delete next[id]; return next; });
     }
   }
 
   async function markAllRead() {
     setMarkingRead(true);
-    const url = '/api/notifications/mark-all-read/';
-    console.log('[Notifications] markAllRead calling:', url);
     try {
-      const res = await api.patch(url);
-      console.log('[Notifications] markAllRead response:', res.status, JSON.stringify(res.data));
+      await markFeedRead();
+      await api.patch('/api/notifications/mark-all-read/');
+    } catch {}
+    finally {
       await fetchAll();
-    } catch (e: any) {
-      console.log('[Notifications] markAllRead error:', e?.response?.status, JSON.stringify(e?.response?.data));
-    } finally {
       setMarkingRead(false);
     }
   }
 
-  const proximityNotifs = notifications.filter(isProximity);
-  const otherNotifs = notifications.filter((n) => !isProximity(n));
-  const unreadCount = notifications.filter((n) => !isRead(n)).length + requests.length;
-  const hasAnything = requests.length > 0 || notifications.length > 0;
+  // Server proximity notifications are intentionally dropped: only the local
+  // feed (friends with distance, interest matches) may produce nearby alerts.
+  const toNotif = (n: LocalNotification): Notification => ({
+    id: n.id,
+    message: n.message,
+    notification_type: n.type,
+    read: n.read,
+    created_at: n.created_at,
+  });
+  const byDateDesc = (a: Notification, b: Notification) =>
+    new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
+
+  const nearbyNotifs = localFeed.filter((n) => n.type !== 'story_reaction').map(toNotif);
+  const reactionNotifs = localFeed.filter((n) => n.type === 'story_reaction').map(toNotif);
+  const otherNotifs = [...reactionNotifs, ...notifications.filter((n) => !isProximity(n))].sort(byDateDesc);
+  const unreadCount =
+    [...nearbyNotifs, ...otherNotifs].filter((n) => !isRead(n)).length + requests.length;
+  const hasAnything = requests.length > 0 || nearbyNotifs.length > 0 || otherNotifs.length > 0;
 
   if (loading) {
     return (
       <View style={[styles.root, styles.center]}>
-        <ActivityIndicator color="#00b4a6" size="large" />
+        <ActivityIndicator color={colors.teal} size="large" />
         <Speedometer />
       </View>
     );
@@ -182,129 +266,77 @@ export default function NotificationsScreen() {
         contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: bottom + 110 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00b4a6" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />
         }
         {...scrollProps}
       >
-        {/* ── Page header ── */}
-        <View style={styles.pageHeader}>
-          <View style={styles.pageTitleRow}>
-            <Text style={styles.pageTitle}>Notifications</Text>
-            {unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unreadCount}</Text>
-              </View>
-            )}
-          </View>
-
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Notifications</Text>
           {unreadCount > 0 && (
-            <TouchableOpacity
-              onPress={markAllRead}
-              disabled={markingRead}
-              hitSlop={10}
-              activeOpacity={0.7}
-            >
+            <Pressable onPress={markAllRead} disabled={markingRead} hitSlop={10}>
               {markingRead ? (
-                <ActivityIndicator color="#00b4a6" size="small" />
+                <ActivityIndicator color={colors.teal} size="small" />
               ) : (
                 <Text style={styles.markReadBtn}>Mark all read</Text>
               )}
-            </TouchableOpacity>
+            </Pressable>
           )}
         </View>
 
-        {/* ── Empty state ── */}
+        {/* Unread pill */}
+        {unreadCount > 0 && (
+          <View style={styles.unreadPill}>
+            <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
+          </View>
+        )}
+
+        {/* Empty state */}
         {!hasAnything && (
           <View style={styles.emptyWrap}>
-            <View style={styles.emptyIconWrap}>
-              <Ionicons name="notifications-outline" size={32} color="#1e1e1e" />
-            </View>
-            <Text style={styles.emptyTitle}>All caught up</Text>
-            <Text style={styles.emptySub}>No new notifications or friend requests</Text>
+            <Text style={styles.emptyText}>You're all caught up</Text>
           </View>
         )}
 
-        {/* ── Friend Requests ── */}
+        {/* FRIEND REQUESTS */}
         {requests.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Friend Requests</Text>
-            <View style={styles.cardList}>
-              {requests.map((req) => {
-                const pending = actioning[req.id];
-                const user = req.from_user ?? req.sender;
-                if (!user) return null;
-                return (
-                  <View key={req.id} style={styles.requestCard}>
-                    <View style={styles.requestLeft}>
-                      <View style={styles.requestAvatar}>
-                        <Text style={styles.requestAvatarText}>
-                          {user.username.charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.requestName}>{user.username}</Text>
-                        <Text style={styles.requestSub}>
-                          Wants to connect{req.created_at ? `  ·  ${fmtTime(req.created_at)}` : ''}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.requestActions}>
-                      <TouchableOpacity
-                        style={[styles.btnAccept, pending && styles.btnDisabled]}
-                        onPress={() => handleRequest(req.id, 'accept')}
-                        disabled={!!pending}
-                        activeOpacity={0.75}
-                      >
-                        {pending === 'accept' ? (
-                          <ActivityIndicator color="#0a0a0a" size="small" />
-                        ) : (
-                          <Text style={styles.btnAcceptText}>Accept</Text>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.btnDecline, pending && styles.btnDisabled]}
-                        onPress={() => handleRequest(req.id, 'decline')}
-                        disabled={!!pending}
-                        activeOpacity={0.75}
-                      >
-                        {pending === 'decline' ? (
-                          <ActivityIndicator color="#555" size="small" />
-                        ) : (
-                          <Text style={styles.btnDeclineText}>Decline</Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
+          <Section label="FRIEND REQUESTS">
+            {requests.map((req) => (
+              <RequestRow
+                key={req.id}
+                request={req}
+                actioning={actioning[req.id]}
+                onAccept={() => handleRequest(req.id, 'accept')}
+                onDecline={() => handleRequest(req.id, 'decline')}
+              />
+            ))}
+          </Section>
         )}
 
-        {/* ── Proximity Notifications ── */}
-        {proximityNotifs.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Nearby</Text>
-            <View style={styles.cardList}>
-              {proximityNotifs.map((n) => (
-                <NotifRow key={n.id} notif={n} icon="location-outline" iconColor="#00b4a6" />
-              ))}
-            </View>
-          </View>
+        {/* NEARBY — local feed only: friends (with distance) and interest matches */}
+        {nearbyNotifs.length > 0 && (
+          <Section label="NEARBY">
+            {nearbyNotifs.map((n) => (
+              <NotifRow
+                key={String(n.id)}
+                notif={n}
+                icon={n.notification_type === 'nearby_friend' ? 'people-outline' : 'location-outline'}
+              />
+            ))}
+          </Section>
         )}
 
-        {/* ── Other Notifications ── */}
+        {/* ACTIVITY — story reactions + non-proximity server notifications */}
         {otherNotifs.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Activity</Text>
-            <View style={styles.cardList}>
-              {otherNotifs.map((n) => (
-                <NotifRow key={n.id} notif={n} icon="notifications-outline" iconColor="#444" />
-              ))}
-            </View>
-          </View>
+          <Section label="ACTIVITY">
+            {otherNotifs.map((n) => (
+              <NotifRow
+                key={String(n.id)}
+                notif={n}
+                icon={n.notification_type === 'story_reaction' ? 'heart-outline' : 'notifications-outline'}
+              />
+            ))}
+          </Section>
         )}
       </ScrollView>
 
@@ -313,167 +345,126 @@ export default function NotificationsScreen() {
   );
 }
 
-// ─── NotifRow ─────────────────────────────────────────────────────────────────
-function NotifRow({
-  notif,
-  icon,
-  iconColor,
-}: {
-  notif: Notification;
-  icon: keyof typeof Ionicons.glyphMap;
-  iconColor: string;
-}) {
-  const read = isRead(notif);
-  const text = notifText(notif);
-
-  return (
-    <View style={[styles.notifCard, read && styles.notifCardRead]}>
-      <View style={[styles.notifIconWrap, { borderColor: iconColor + '30' }]}>
-        <Ionicons name={icon} size={18} color={iconColor} />
-      </View>
-      <View style={{ flex: 1 }}>
-        {text ? (
-          <Text style={[styles.notifText, read && styles.notifTextRead]}>{text}</Text>
-        ) : (
-          <Text style={styles.notifText}>Someone nearby shares your interests</Text>
-        )}
-        {notif.created_at && (
-          <Text style={styles.notifTime}>{fmtTime(notif.created_at)}</Text>
-        )}
-      </View>
-      {!read && <View style={styles.unreadDot} />}
-    </View>
-  );
-}
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+  root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 20 },
 
-  // ── Header ──
-  pageHeader: {
+  // Header
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 28,
+    marginBottom: 12,
   },
-  pageTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  pageTitle: { color: '#ffffff', fontSize: 26, fontWeight: '700' },
-  badge: {
-    backgroundColor: '#00b4a6',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
+  headerTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 26,
+    color: colors.t1,
   },
-  badgeText: { color: '#0a0a0a', fontSize: 11, fontWeight: '700' },
-  markReadBtn: { color: '#00b4a6', fontSize: 13, fontWeight: '500' },
+  markReadBtn: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.teal,
+  },
 
-  // ── Empty ──
-  emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#111',
+  // Unread pill
+  unreadPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surface2,
+    borderRadius: radius.l,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
+    borderColor: colors.border,
   },
-  emptyTitle: { color: '#333', fontSize: 16, fontWeight: '600' },
-  emptySub: { color: '#222', fontSize: 13, textAlign: 'center' },
+  unreadPillText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.t2,
+  },
 
-  // ── Section ──
+  // Empty
+  emptyWrap: { alignItems: 'center', paddingTop: 80 },
+  emptyText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t3,
+  },
+
+  // Section
   section: { marginBottom: 28 },
-  sectionTitle: {
-    color: '#444',
+  sectionLabel: {
+    fontFamily: fonts.body,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
+    color: colors.t3,
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: 10,
   },
-  cardList: { gap: 10 },
+  sectionRows: { gap: 2 },
 
-  // ── Friend Request card ──
-  requestCard: {
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    padding: 14,
-    gap: 12,
-  },
-  requestLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  requestAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#0d1f1e',
-    borderWidth: 1,
-    borderColor: '#00b4a630',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requestAvatarText: { color: '#00b4a6', fontSize: 17, fontWeight: '700' },
-  requestName: { color: '#e0e0e0', fontSize: 15, fontWeight: '600' },
-  requestSub: { color: '#444', fontSize: 12, marginTop: 2 },
-  requestActions: { flexDirection: 'row', gap: 10 },
-  btnAccept: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 11,
-    backgroundColor: '#00b4a6',
-    alignItems: 'center',
-  },
-  btnAcceptText: { color: '#0a0a0a', fontSize: 14, fontWeight: '700' },
-  btnDecline: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 11,
-    backgroundColor: '#1a1a1a',
-    borderWidth: 1,
-    borderColor: '#252525',
-    alignItems: 'center',
-  },
-  btnDeclineText: { color: '#666', fontSize: 14, fontWeight: '600' },
-  btnDisabled: { opacity: 0.5 },
-
-  // ── Notification row ──
-  notifCard: {
+  // Notification row
+  notifRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
-    padding: 14,
+    alignItems: 'flex-start',
+    paddingVertical: 12,
     gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  notifCardRead: { opacity: 0.55 },
-  notifIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#0d0d0d',
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifText: { color: '#ddd', fontSize: 14, lineHeight: 19 },
-  notifTextRead: { color: '#444' },
-  notifTime: { color: '#2e2e2e', fontSize: 11, marginTop: 3 },
+  notifRowRead: { opacity: 0.55 },
+
   unreadDot: {
     width: 7,
     height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#00b4a6',
-    alignSelf: 'center',
+    borderRadius: 4,
+    backgroundColor: colors.teal,
+    marginTop: 5,
+    flexShrink: 0,
+  },
+
+  notifIconTile: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.s,
+    backgroundColor: colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+
+  notifBody: { flex: 1, gap: 3 },
+  notifTitle: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 14,
+    color: colors.t1,
+    lineHeight: 19,
+  },
+  notifSubtitle: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+    lineHeight: 18,
+  },
+  notifTime: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: colors.t3,
+    marginTop: 1,
+  },
+
+  // Request row actions
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
   },
 });

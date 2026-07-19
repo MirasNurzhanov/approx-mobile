@@ -1,66 +1,71 @@
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ParticleBackground } from '@/components/ParticleBackground';
+import { AuraMark } from '@/components/ui/AuraMark';
+import { Button } from '@/components/ui/Button';
+import { colors, fonts } from '@/constants/theme';
 
 export default function WelcomeScreen() {
   return (
-    <View style={styles.root}>
-      <ParticleBackground />
-
-      <View style={styles.content}>
-        <Image source={require('../assets/images/icon.png')} style={styles.logo} />
-
-        <View style={styles.buttons}>
-          <TouchableOpacity style={styles.loginBtn} onPress={() => router.push('/login')} activeOpacity={0.85}>
-            <Text style={styles.loginText}>Login</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.registerBtn} onPress={() => router.push('/register')} activeOpacity={0.85}>
-            <Text style={styles.registerText}>Register</Text>
-          </TouchableOpacity>
-        </View>
+    <SafeAreaView style={styles.root}>
+      <View style={styles.hero}>
+        <AuraMark size={32} />
+        <Text style={styles.wordmark}>AURA</Text>
+        <Text style={styles.tagline}>Find your people nearby</Text>
       </View>
-    </View>
+
+      <View style={styles.buttons}>
+        <Button
+          label="Log in"
+          variant="primary"
+          size="lg"
+          fullWidth
+          onPress={() => router.push('/login')}
+        />
+        <Button
+          label="Create account"
+          variant="ghost"
+          size="lg"
+          fullWidth
+          onPress={() => router.push('/register')}
+        />
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
-  content: {
+  root: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
+  hero: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 14,
     paddingHorizontal: 32,
   },
-
-  logo: {
-    width: 220,
-    height: 220,
-    borderRadius: 48,
-    marginBottom: 56,
+  wordmark: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 30,
+    color: colors.t1,
+    letterSpacing: 30 * 0.34,
+    // Mirrors the design's text-indent: recenters the trailing letter-space.
+    paddingLeft: 30 * 0.34,
   },
-
-  buttons: { width: '100%', gap: 14 },
-  loginBtn: {
-    width: '100%',
-    backgroundColor: '#00b4a6',
-    paddingVertical: 17,
-    borderRadius: 16,
-    alignItems: 'center',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+  tagline: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.t2,
+    textAlign: 'center',
   },
-  loginText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
-  registerBtn: {
-    width: '100%',
-    paddingVertical: 17,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#00b4a6',
+  buttons: {
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+    gap: 12,
   },
-  registerText: { color: '#00b4a6', fontSize: 16, fontWeight: '600', letterSpacing: 0.5 },
 });

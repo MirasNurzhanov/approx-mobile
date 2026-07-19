@@ -400,7 +400,6 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);
   const progress = useSharedValue(0);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [replyFocused, setReplyFocused] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
@@ -411,7 +410,6 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
     if (i < 0) return;
     indexRef.current = i;
     setIndex(i);
-    setLightboxOpen(false);
   }
 
   const goToRef = useRef(goTo);
@@ -480,18 +478,26 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.svContainer} {...panResponder.panHandlers}>
-        {/* Static dark background */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bg }]} />
+        {/* Background — photo fills entire screen or solid dark for text-only */}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
+        {hasPhoto && (
+          <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        )}
+
+
+        {/* Nav tap zones — cover full screen, interactive elements rendered after override them */}
+        <TouchableOpacity style={styles.svNavLeft}  activeOpacity={1} onPress={() => goTo(index - 1)} />
+        <TouchableOpacity style={styles.svNavRight} activeOpacity={1} onPress={() => goTo(index + 1)} />
 
         {/* Progress bars */}
-        <View style={[styles.svProgressRow, { marginTop: top + 8 }]}>
+        <View style={[styles.svProgressRow, { top: top + 8 }]} pointerEvents="none">
           {stories.map((_, i) => (
             <ProgressBar key={i} active={i === index} past={i < index} progress={progress} />
           ))}
         </View>
 
-        {/* Header */}
-        <View style={styles.svHeader}>
+        {/* Header: avatar + username + time + close */}
+        <View style={[styles.svHeader, { top: top + 22 }]}>
           <Avatar uri={story.author.profile_picture} name={story.author.username} size="xs" />
           <View style={styles.svAuthorInfo}>
             <Text style={styles.svAuthorName}>{story.author.username}</Text>
@@ -503,46 +509,16 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
           </TouchableOpacity>
         </View>
 
-        {/* Content */}
-        {hasPhoto ? (
-          <View style={styles.svPhotoArea}>
-            {/* Photo — tap center opens lightbox */}
-            <TouchableOpacity
-              activeOpacity={0.95}
-              onPress={() => setLightboxOpen(true)}
-              style={StyleSheet.absoluteFill}
-            >
-              <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-            </TouchableOpacity>
-
-            {/* Text overlay at bottom with dark gradient — pointerEvents none so taps reach photo */}
-            {hasText && (
-              <View style={styles.svTextOverlay} pointerEvents="none">
-                {story.place_name ? (
-                  <View style={styles.svPlaceRow}>
-                    <IconPin size={12} color={colors.t2} />
-                    <Text style={styles.svPlaceName} numberOfLines={1}>{story.place_name}</Text>
-                  </View>
-                ) : null}
-                <Text style={styles.svTextOverlayText}>{story.content ?? story.text}</Text>
-              </View>
-            )}
-
-            {/* Edge strips for navigation — rendered last so they win over photo tap */}
-            <TouchableOpacity style={styles.svNavLeft}  activeOpacity={1} onPress={() => goTo(index - 1)} />
-            <TouchableOpacity style={styles.svNavRight} activeOpacity={1} onPress={() => goTo(index + 1)} />
-          </View>
-        ) : (
-          <View style={styles.svTextCenter}>
+        {/* Story text above reactions */}
+        {hasText && (
+          <View style={[styles.svTextBlock, { bottom: bottom + 96 }]} pointerEvents="none">
             {story.place_name ? (
               <View style={styles.svPlaceRow}>
                 <IconPin size={12} color={colors.t2} />
                 <Text style={styles.svPlaceName} numberOfLines={1}>{story.place_name}</Text>
               </View>
             ) : null}
-            {hasText && <Text style={styles.svTextLarge}>{story.content ?? story.text}</Text>}
-            <TouchableOpacity style={styles.svNavLeft}  activeOpacity={1} onPress={() => goTo(index - 1)} />
-            <TouchableOpacity style={styles.svNavRight} activeOpacity={1} onPress={() => goTo(index + 1)} />
+            <Text style={styles.svTextLarge}>{story.content ?? story.text}</Text>
           </View>
         )}
 
@@ -583,8 +559,8 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
           </View>
         )}
 
-        {/* Reactions — in flex flow so content area ends above them */}
-        <View style={[styles.svReactions, { paddingBottom: bottom + 16 }]}>
+        {/* Reactions */}
+        <View style={[styles.svReactions, { bottom: bottom + 20 }]}>
           {REACTIONS.map(({ type, Icon }) => {
             const count = story.reactions?.[type] ?? 0;
             const isActive = story.user_reaction === type;
@@ -606,18 +582,6 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
         </View>
       </View>
       </KeyboardAvoidingView>
-
-      {/* Lightbox — tap anywhere to close */}
-      {lightboxOpen && hasPhoto && (
-        <Modal visible animationType="fade" statusBarTranslucent onRequestClose={() => setLightboxOpen(false)}>
-          <Pressable style={styles.svLightbox} onPress={() => setLightboxOpen(false)}>
-            <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-            <View style={[styles.svCloseBtn, { position: 'absolute', top: top + 16, right: 16 }]}>
-              <IconClose size={18} color={colors.t1} />
-            </View>
-          </Pressable>
-        </Modal>
-      )}
     </Modal>
   );
 }
@@ -1678,17 +1642,37 @@ const styles = StyleSheet.create({
     color: colors.t1,
   },
 
-  // ─── Full-screen story viewer ───
-  svContainer: { flex: 1, backgroundColor: colors.bg },
+  // ─── Full-screen story viewer (Instagram-style) ───
+  svContainer: { flex: 1, backgroundColor: '#000' },
+  svNavLeft: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '30%',
+  },
+  svNavRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: '30%',
+  },
   svProgressRow: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
     flexDirection: 'row',
     gap: 4,
-    paddingHorizontal: 12,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
   },
   svTrack: {
     flex: 1,
     height: 2,
-    backgroundColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(255,255,255,0.35)',
     borderRadius: 1,
     overflow: 'hidden',
   },
@@ -1698,10 +1682,15 @@ const styles = StyleSheet.create({
     borderRadius: 1,
   },
   svHeader: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   svAuthorInfo: { flex: 1, marginLeft: 8 },
   svAuthorName: {
@@ -1710,81 +1699,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.t1,
   },
-  svTimeAgo: { fontFamily: fonts.body, fontSize: 11, color: colors.t2 },
-  svTimeLeft: { fontFamily: fonts.body, fontSize: 11, color: colors.t2, marginRight: 10 },
+  svTimeAgo: { fontFamily: fonts.body, fontSize: 11, color: 'rgba(255,255,255,0.7)' },
+  svTimeLeft: { fontFamily: fonts.body, fontSize: 11, color: 'rgba(255,255,255,0.7)', marginRight: 10 },
   svCloseBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  svPhotoArea: {
-    flex: 1,
-  },
-  svTextOverlay: {
+  svTextBlock: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: 20,
-    paddingVertical: 14,
-  },
-  svTextOverlayText: {
-    fontFamily: fonts.body,
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.t1,
-    lineHeight: 22,
-  },
-  svNavLeft: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: '25%',
-  },
-  svNavRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: '25%',
-  },
-  svTextCenter: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  svLightbox: {
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
   },
   svTextLarge: {
     fontFamily: fonts.body,
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '500',
     color: colors.t1,
-    lineHeight: 32,
-    textAlign: 'center',
-  },
-  svTextSmall: {
-    fontFamily: fonts.body,
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.t1,
-    lineHeight: 22,
-    textShadowColor: 'rgba(0,0,0,0.6)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    lineHeight: 26,
   },
   svPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
-  svPlaceName: { fontFamily: fonts.body, fontSize: 12, color: colors.t2 },
-  // Reply bar (friends' stories only)
+  svPlaceName: { fontFamily: fonts.body, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
   svReplyRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1835,13 +1774,16 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: colors.t1,
   },
-
   svReactions: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
     flexDirection: 'row',
     gap: 8,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    backgroundColor: 'rgba(10,10,11,0.82)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 12,
   },
   svReactionBtn: {
     flex: 1,

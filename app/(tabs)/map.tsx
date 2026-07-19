@@ -329,11 +329,13 @@ function TopBar({ nearby, onPrivacy, onSearch }: { nearby: number; onPrivacy: ()
 function ZoneBanner({
   username,
   isPlaying,
+  canListen,
   onTap,
   onMute,
 }: {
   username: string;
   isPlaying: boolean;
+  canListen: boolean;
   onTap: () => void;
   onMute: () => void;
 }) {
@@ -354,10 +356,12 @@ function ZoneBanner({
         <TouchableOpacity onPress={onMute} hitSlop={12}>
           <IconMute size={20} color={colors.teal} />
         </TouchableOpacity>
-      ) : (
+      ) : canListen ? (
         <TouchableOpacity onPress={onTap} hitSlop={12}>
           <Text style={styles.zoneBannerAction}>Listen</Text>
         </TouchableOpacity>
+      ) : (
+        <Text style={styles.zoneBannerLocked}>Friends only</Text>
       )}
     </Animated.View>
   );
@@ -841,7 +845,7 @@ export default function MapScreen() {
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [selfProfile, setSelfProfile] = useState<{ username: string; profile_picture?: string } | null>(null);
-  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl?: string } | null>(null);
+  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl?: string; isFriend: boolean } | null>(null);
   const [isPlaying, setIsPlaying]     = useState(false);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
   const [hiToast, setHiToast]           = useState(false);
@@ -858,15 +862,18 @@ export default function MapScreen() {
 
   const sheetY = useSharedValue(SHEET_H);
 
+  // Stories are friends-only: the backend returns everyone nearby, so drop
+  // anything not authored by the current user or one of their friends.
   const storiesByAuthor = useMemo(() => {
     const map = new Map<number, Story[]>();
     for (const story of stories) {
-      const id = story.author.id;
+      const id = Number(story.author.id);
+      if (id !== currentUserId && !friendIds.has(id)) continue;
       if (!map.has(id)) map.set(id, []);
       map.get(id)!.push(story);
     }
     return map;
-  }, [stories]);
+  }, [stories, currentUserId, friendIds]);
 
   // Interest matching: friends and connections are always visible; strangers
   // only appear when at least one interest is shared.
@@ -966,19 +973,31 @@ export default function MapScreen() {
         radius: u.zone_radius,
         inZone: (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
       })));
-    const entered = nearbyUsers.find((u) =>
+    const insideZones = nearbyUsers.filter((u) =>
       u.zone_active && u.zone_audio_url && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
     );
+    // Zone music is friends-only (same rule as stories): when inside several
+    // zones prefer a friend's, and never start playback for a non-friend's.
+    const entered = insideZones.find((u) => friendIds.has(Number(u.id))) ?? insideZones[0];
     if (entered) {
-      setActiveZone({ username: entered.username, audioUrl: entered.zone_audio_url });
-      getPref('zoneAutoplay').then((autoplay) => {
-        if (autoplay) playZone(entered.zone_audio_url!, entered.username);
+      const isFriend = friendIds.has(Number(entered.id));
+      setActiveZone({
+        username: entered.username,
+        audioUrl: isFriend ? entered.zone_audio_url : undefined,
+        isFriend,
       });
+      if (isFriend) {
+        getPref('zoneAutoplay').then((autoplay) => {
+          if (autoplay) playZone(entered.zone_audio_url!, entered.username);
+        });
+      } else {
+        stopZone();
+      }
     } else {
       setActiveZone(null);
       stopZone();
     }
-  }, [visibleNearby]);
+  }, [visibleNearby, friendIds]);
 
   // Stop audio on unmount
   useEffect(() => {
@@ -1313,6 +1332,7 @@ export default function MapScreen() {
       {activeZone && (
         <ZoneBanner
           username={activeZone.username}
+          canListen={activeZone.isFriend}
           isPlaying={isPlaying}
           onTap={() => activeZone.audioUrl && playZone(activeZone.audioUrl, activeZone.username)}
           onMute={stopZone}
@@ -1505,6 +1525,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.teal,
+  },
+  zoneBannerLocked: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.t2,
   },
 
 

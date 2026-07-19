@@ -5,12 +5,14 @@ import Animated, {
   FadeIn,
   FadeOut,
   type SharedValue,
+  cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -18,6 +20,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -92,7 +95,7 @@ interface Story {
   author: StoryAuthor;
   text?: string;
   content?: string;
-  photo?: string;
+  image?: string;
   place_name?: string;
   latitude: number;
   longitude: number;
@@ -114,9 +117,9 @@ const REL_LABEL: Record<Relationship, string> = {
   friend:    'Friend',
 };
 
-const POLL_MS       = 10_000;
-const STORY_POLL_MS = 10_000;
-const STORY_SHEET_H = 480;
+const POLL_MS            = 10_000;
+const STORY_POLL_MS      = 10_000;
+const STORY_DURATION_MS  = 7_000;
 
 // Neutral dark map per the redesign: tonal grays only, muted labels, no accent color.
 const DARK_MAP_STYLE = [
@@ -188,7 +191,7 @@ function UserDot({ color, size = 14 }: { color: string; size?: number }) {
   );
 }
 
-function StoryBubble({ story }: { story: Story }) {
+function StoryBubble({ story, count }: { story: Story; count: number }) {
   const avatarBg = avatarBgColor(story.author.username);
 
   const reactions = story.reactions ?? {};
@@ -203,13 +206,20 @@ function StoryBubble({ story }: { story: Story }) {
   return (
     <View style={{ alignItems: 'center' }}>
       <View style={styles.storyCard}>
-        {story.author.profile_picture ? (
-          <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
-        ) : (
-          <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
-            <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
-          </View>
-        )}
+        <View style={styles.storyAvatarWrap}>
+          {story.author.profile_picture ? (
+            <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
+          ) : (
+            <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
+              <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
+            </View>
+          )}
+          {count > 1 && (
+            <View style={styles.storyCountBadge}>
+              <Text style={styles.storyCountText}>{count}</Text>
+            </View>
+          )}
+        </View>
       </View>
       <View style={styles.storyCardTail} />
       {topReaction && (
@@ -285,7 +295,7 @@ function ZoneBanner({
   );
 }
 
-// ─── Story Sheet ──────────────────────────────────────────────────────────────
+// ─── Story Viewer (full-screen, Instagram-style) ──────────────────────────────
 const REACTIONS: { type: ReactionType; Icon: IconComponent }[] = [
   { type: 'like',        Icon: IconLike },
   { type: 'funny',       Icon: IconFunny },
@@ -293,81 +303,180 @@ const REACTIONS: { type: ReactionType; Icon: IconComponent }[] = [
   { type: 'interesting', Icon: IconStar },
 ];
 
-interface StorySheetProps {
-  story: Story;
-  storySheetY: SharedValue<number>;
-  onDismiss: () => void;
-  onReact: (reaction: ReactionType) => void;
+function ProgressBar({ active, past, progress }: {
+  active: boolean;
+  past: boolean;
+  progress: SharedValue<number>;
+}) {
+  const style = useAnimatedStyle(() => {
+    const pct = active ? progress.value : past ? 1 : 0;
+    return { width: `${pct * 100}%` };
+  });
+  return (
+    <View style={styles.svTrack}>
+      <Animated.View style={[styles.svFill, style]} />
+    </View>
+  );
 }
 
-function StorySheet({ story, storySheetY, onDismiss, onReact }: StorySheetProps) {
-  const { bottom } = useSafeAreaInsets();
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: storySheetY.value }],
-  }));
+interface StoryViewerProps {
+  stories: Story[];
+  onClose: () => void;
+  onReact: (storyId: number, reaction: ReactionType) => void;
+}
+
+function StoryViewer({ stories, onClose, onReact }: StoryViewerProps) {
+  const { top, bottom } = useSafeAreaInsets();
+  const [index, setIndex] = useState(0);
+  const indexRef = useRef(0);
+  const progress = useSharedValue(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  function goTo(i: number) {
+    if (i >= stories.length) { onClose(); return; }
+    if (i < 0) return;
+    indexRef.current = i;
+    setIndex(i);
+    setLightboxOpen(false);
+  }
+
+  const goToRef = useRef(goTo);
+  goToRef.current = goTo;
+
+  useEffect(() => {
+    progress.value = 0;
+    progress.value = withTiming(1, { duration: STORY_DURATION_MS });
+    const timer = setTimeout(() => goToRef.current(indexRef.current + 1), STORY_DURATION_MS);
+    return () => {
+      cancelAnimation(progress);
+      clearTimeout(timer);
+    };
+  }, [index]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gs) =>
+        Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy),
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dx < -40) goToRef.current(indexRef.current + 1);
+        else if (gs.dx > 40) goToRef.current(indexRef.current - 1);
+      },
+    })
+  ).current;
+
+  const story = stories[index];
+  if (!story) return null;
+
+  console.log('[Story viewer] current story:', story.content, 'photo:', story.image);
+  console.log('[Story] full object:', JSON.stringify(story));
+
+  const hasPhoto = !!story.image;
+  const hasText  = !!(story.text || story.content);
 
   return (
-    <>
-      <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
-      <Animated.View style={[styles.storySheet, { paddingBottom: bottom + 20 }, animStyle]}>
-        <View style={styles.sheetHandle} />
+    <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <View style={styles.svContainer} {...panResponder.panHandlers}>
+        {/* Static dark background */}
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.bg }]} />
 
-        <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-          <IconClose size={16} color={colors.t3} />
-        </Pressable>
+        {/* Progress bars */}
+        <View style={[styles.svProgressRow, { marginTop: top + 8 }]}>
+          {stories.map((_, i) => (
+            <ProgressBar key={i} active={i === index} past={i < index} progress={progress} />
+          ))}
+        </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyScroll}>
-          {/* Header row */}
-          <View style={styles.storyAuthorRow}>
-            <Avatar uri={story.author.profile_picture} name={story.author.username} size="sm" />
-            <View style={styles.storyAuthorInfo}>
-              <Text style={styles.storyAuthorName}>{story.author.username}</Text>
-              {story.place_name ? (
-                <View style={styles.storyMetaRow}>
-                  <IconPin size={13} color={colors.t3} />
-                  <Text style={styles.storyMeta} numberOfLines={1}>{story.place_name}</Text>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.storyExpiryBadge}>
-              <Text style={styles.storyExpiryText}>{timeLeft(story.expires_at)}</Text>
-            </View>
+        {/* Header */}
+        <View style={styles.svHeader}>
+          <Avatar uri={story.author.profile_picture} name={story.author.username} size="xs" />
+          <View style={styles.svAuthorInfo}>
+            <Text style={styles.svAuthorName}>{story.author.username}</Text>
+            <Text style={styles.svTimeAgo}>{timeAgo(story.created_at)}</Text>
           </View>
+          <Text style={styles.svTimeLeft}>{timeLeft(story.expires_at)}</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.svCloseBtn}>
+            <IconClose size={18} color={colors.t1} />
+          </TouchableOpacity>
+        </View>
 
-          {/* Content */}
-          <Text style={styles.storyText}>{story.content ?? story.text}</Text>
+        {/* Content */}
+        {hasPhoto ? (
+          <View style={styles.svPhotoArea}>
+            {/* Photo — tap center opens lightbox */}
+            <TouchableOpacity
+              activeOpacity={0.95}
+              onPress={() => setLightboxOpen(true)}
+              style={StyleSheet.absoluteFill}
+            >
+              <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+            </TouchableOpacity>
 
-          {story.photo ? (
-            <Image source={{ uri: story.photo }} style={styles.storyPhoto} resizeMode="cover" />
-          ) : null}
+            {/* Text overlay at bottom with dark gradient — pointerEvents none so taps reach photo */}
+            {hasText && (
+              <View style={styles.svTextOverlay} pointerEvents="none">
+                {story.place_name ? (
+                  <View style={styles.svPlaceRow}>
+                    <IconPin size={12} color={colors.t2} />
+                    <Text style={styles.svPlaceName} numberOfLines={1}>{story.place_name}</Text>
+                  </View>
+                ) : null}
+                <Text style={styles.svTextOverlayText}>{story.content ?? story.text}</Text>
+              </View>
+            )}
 
-          {/* Divider */}
-          <View style={styles.storyDivider} />
-
-          {/* Reaction row */}
-          <View style={styles.reactionsRow}>
-            {REACTIONS.map(({ type, Icon }) => {
-              const count = story.reactions?.[type] ?? 0;
-              const isActive = story.user_reaction === type;
-              return (
-                <Pressable
-                  key={type}
-                  style={[styles.reactionBtn, isActive && styles.reactionBtnActive]}
-                  onPress={() => onReact(type)}
-                >
-                  <Icon size={20} color={isActive ? colors.teal : colors.t3} />
-                  {count > 0 && (
-                    <Text style={[styles.reactionCount, isActive && styles.reactionCountActive]}>
-                      {count}
-                    </Text>
-                  )}
-                </Pressable>
-              );
-            })}
+            {/* Edge strips for navigation — rendered last so they win over photo tap */}
+            <TouchableOpacity style={styles.svNavLeft}  activeOpacity={1} onPress={() => goTo(index - 1)} />
+            <TouchableOpacity style={styles.svNavRight} activeOpacity={1} onPress={() => goTo(index + 1)} />
           </View>
-        </ScrollView>
-      </Animated.View>
-    </>
+        ) : (
+          <View style={styles.svTextCenter}>
+            {story.place_name ? (
+              <View style={styles.svPlaceRow}>
+                <IconPin size={12} color={colors.t2} />
+                <Text style={styles.svPlaceName} numberOfLines={1}>{story.place_name}</Text>
+              </View>
+            ) : null}
+            {hasText && <Text style={styles.svTextLarge}>{story.content ?? story.text}</Text>}
+            <TouchableOpacity style={styles.svNavLeft}  activeOpacity={1} onPress={() => goTo(index - 1)} />
+            <TouchableOpacity style={styles.svNavRight} activeOpacity={1} onPress={() => goTo(index + 1)} />
+          </View>
+        )}
+
+        {/* Reactions — in flex flow so content area ends above them */}
+        <View style={[styles.svReactions, { paddingBottom: bottom + 16 }]}>
+          {REACTIONS.map(({ type, Icon }) => {
+            const count = story.reactions?.[type] ?? 0;
+            const isActive = story.user_reaction === type;
+            return (
+              <Pressable
+                key={type}
+                style={[styles.svReactionBtn, isActive && styles.svReactionBtnActive]}
+                onPress={() => onReact(story.id, type)}
+              >
+                <Icon size={20} color={isActive ? colors.teal : colors.t2} />
+                {count > 0 && (
+                  <Text style={[styles.svReactionCount, isActive && styles.svReactionCountActive]}>
+                    {count}
+                  </Text>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* Lightbox — tap anywhere to close */}
+      {lightboxOpen && hasPhoto && (
+        <Modal visible animationType="fade" statusBarTranslucent onRequestClose={() => setLightboxOpen(false)}>
+          <Pressable style={styles.svLightbox} onPress={() => setLightboxOpen(false)}>
+            <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="contain" />
+            <View style={[styles.svCloseBtn, { position: 'absolute', top: top + 16, right: 16 }]}>
+              <IconClose size={18} color={colors.t1} />
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+    </Modal>
   );
 }
 
@@ -594,17 +703,28 @@ export default function MapScreen() {
   const [isPlaying, setIsPlaying]     = useState(false);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
   const [hiToast, setHiToast]           = useState(false);
+  const [locationToast, setLocationToast] = useState(false);
   const [stories, setStories]           = useState<Story[]>([]);
-  const [selectedStory, setSelectedStory] = useState<Story | null>(null);
+  const [storyViewer, setStoryViewer]   = useState<{ stories: Story[] } | null>(null);
   const [createStoryCoord, setCreateStoryCoord] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  const coordsRef      = useRef(coords);
-  const hiToastTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const soundRef       = useRef<Audio.Sound | null>(null);
+  const coordsRef          = useRef(coords);
+  const hiToastTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const locationToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const soundRef           = useRef<Audio.Sound | null>(null);
   coordsRef.current = coords;
 
-  const sheetY      = useSharedValue(SHEET_H);
-  const storySheetY = useSharedValue(STORY_SHEET_H);
+  const sheetY = useSharedValue(SHEET_H);
+
+  const storiesByAuthor = useMemo(() => {
+    const map = new Map<number, Story[]>();
+    for (const story of stories) {
+      const id = story.author.id;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id)!.push(story);
+    }
+    return map;
+  }, [stories]);
 
   const fetchFriends = useCallback(async () => {
     try {
@@ -702,24 +822,16 @@ export default function MapScreen() {
     } catch {}
   }, []);
 
-  function openStorySheet(story: Story) {
+  function openStoryViewer(authorStories: Story[]) {
     sheetY.value = SHEET_H;
     setSelectedUser(null);
-    setSelectedStory(story);
-    storySheetY.value = withSpring(0, SPRING_CFG);
-  }
-
-  function closeStorySheet() {
-    storySheetY.value = withSpring(STORY_SHEET_H, SPRING_CFG, (done) => {
-      if (done) runOnJS(setSelectedStory)(null);
-    });
+    setStoryViewer({ stories: authorStories });
   }
 
   async function reactToStory(storyId: number, reaction: ReactionType) {
     try {
       const response = await api.post(`/api/stories/${storyId}/react/`, { reaction: reaction });
       console.log('[Reaction] success:', response.data);
-      console.log('[Reaction] response data:', JSON.stringify(response.data));
       const applyReaction = <T extends Story>(s: T): T => {
         if (s.id !== storyId) return s;
         const wasActive = s.user_reaction === reaction;
@@ -728,9 +840,8 @@ export default function MapScreen() {
         if (!wasActive) updated[reaction] = (updated[reaction] ?? 0) + 1;
         return { ...s, reactions: updated, user_reaction: wasActive ? null : reaction };
       };
-      setSelectedStory((prev) => prev ? applyReaction(prev) : prev);
+      setStoryViewer((prev) => prev ? { stories: prev.stories.map(applyReaction) } : prev);
       setStories((prev) => prev.map(applyReaction));
-      console.log('[Reaction] story after update:', JSON.stringify(selectedStory));
       await fetchStories();
     } catch (error: any) {
       console.log('[Reaction] error:', error.response?.status, JSON.stringify(error.response?.data));
@@ -750,12 +861,20 @@ export default function MapScreen() {
     formData.append('latitude', String(lat));
     formData.append('longitude', String(lng));
     if (photoUri) {
-      formData.append('photo', { uri: photoUri, name: 'photo.jpg', type: 'image/jpeg' } as any);
+      formData.append('image', {
+        uri: photoUri,
+        type: 'image/jpeg',
+        name: 'story-image.jpg',
+      } as any);
     }
+    console.log('[Story] posting with image:', photoUri ? 'yes' : 'no');
+    console.log('[Story] formData fields:', text, lat, lng);
     try {
       const response = await api.post('/api/stories/', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      console.log('[Story] success:', response.data);
-      await fetchStories();
+      const newStory = response.data;
+      console.log('[Story] success:', newStory);
+      setStories(prev => [...prev, newStory]);
+      setTimeout(() => fetchStories(), 500);
     } catch (error: any) {
       console.log('[Story] error:', error.response?.status, JSON.stringify(error.response?.data));
       throw error;
@@ -853,16 +972,16 @@ export default function MapScreen() {
     if (fresh) setSelectedUser(fresh);
   }, [nearby]);
 
-  // Keep the open story sheet in sync with the latest stories fetch
+  // Keep the open story viewer in sync with the latest stories fetch
   useEffect(() => {
-    if (!selectedStory) return;
-    const fresh = stories.find((s) => s.id === selectedStory.id);
-    if (fresh) setSelectedStory(fresh);
+    if (!storyViewer) return;
+    setStoryViewer((prev) => {
+      if (!prev) return prev;
+      return { stories: prev.stories.map((s) => stories.find((f) => f.id === s.id) ?? s) };
+    });
   }, [stories]);
 
   function openSheet(user: NearbyUser) {
-    storySheetY.value = STORY_SHEET_H;
-    setSelectedStory(null);
     setSelectedUser(user);
     sheetY.value = withSpring(0, SPRING_CFG);
   }
@@ -901,7 +1020,13 @@ export default function MapScreen() {
           showsMyLocationButton={false}
           rotateEnabled={false}
           pitchEnabled={false}
-          onLongPress={(e) => setCreateStoryCoord(e.nativeEvent.coordinate)}
+          onLongPress={() => {
+            if (!coords) return;
+            setCreateStoryCoord(coords);
+            setLocationToast(true);
+            if (locationToastTimer.current) clearTimeout(locationToastTimer.current);
+            locationToastTimer.current = setTimeout(() => setLocationToast(false), 2000);
+          }}
         >
           {/* Zone circles for nearby users */}
           {visibleNearby
@@ -957,17 +1082,20 @@ export default function MapScreen() {
             </View>
           </Marker>
 
-          {stories.map((story) => (
-            <Marker
-              key={`story-${story.id}`}
-              coordinate={{ latitude: story.latitude, longitude: story.longitude }}
-              anchor={{ x: 0.5, y: 1 }}
-              tracksViewChanges={false}
-              onPress={() => openStorySheet(story)}
-            >
-              <StoryBubble story={story} />
-            </Marker>
-          ))}
+          {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => {
+            const first = authorStories[0];
+            return (
+              <Marker
+                key={`story-author-${authorId}`}
+                coordinate={{ latitude: first.latitude, longitude: first.longitude }}
+                anchor={{ x: 0.5, y: 1 }}
+                tracksViewChanges={false}
+                onPress={() => openStoryViewer(authorStories)}
+              >
+                <StoryBubble story={first} count={authorStories.length} />
+              </Marker>
+            );
+          })}
         </MapView>
       )}
 
@@ -999,13 +1127,12 @@ export default function MapScreen() {
         />
       )}
 
-      {/* Story detail sheet */}
-      {selectedStory && (
-        <StorySheet
-          story={selectedStory}
-          storySheetY={storySheetY}
-          onDismiss={closeStorySheet}
-          onReact={(reaction) => reactToStory(selectedStory.id, reaction)}
+      {/* Full-screen story viewer */}
+      {storyViewer && (
+        <StoryViewer
+          stories={storyViewer.stories}
+          onClose={() => setStoryViewer(null)}
+          onReact={reactToStory}
         />
       )}
 
@@ -1020,6 +1147,14 @@ export default function MapScreen() {
         <View style={[styles.hiToast, { top: topInset + 104 }]} pointerEvents="none">
           <IconHi size={16} color={colors.teal} />
           <Text style={styles.hiToastText}>Hi sent</Text>
+        </View>
+      )}
+
+      {/* Story location toast */}
+      {locationToast && (
+        <View style={[styles.hiToast, { top: topInset + 104 }]} pointerEvents="none">
+          <IconPin size={16} color={colors.teal} />
+          <Text style={styles.hiToastText}>Story will be posted at your current location</Text>
         </View>
       )}
 
@@ -1235,6 +1370,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  storyAvatarWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
   storyCardAvatar: {
     width: 40,
     height: 40,
@@ -1278,87 +1419,157 @@ const styles = StyleSheet.create({
     color: colors.t2,
   },
 
-  // ─── Story sheet ───
-  storySheet: {
+  // ─── Story count badge (inside avatar, bottom-right) ───
+  storyCountBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(10,10,11,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  storyCountText: {
+    fontFamily: fonts.body,
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.t1,
+  },
+
+  // ─── Full-screen story viewer ───
+  svContainer: { flex: 1, backgroundColor: colors.bg },
+  svProgressRow: {
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: 12,
+  },
+  svTrack: {
+    flex: 1,
+    height: 2,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderRadius: 1,
+    overflow: 'hidden',
+  },
+  svFill: {
+    height: '100%',
+    backgroundColor: colors.t1,
+    borderRadius: 1,
+  },
+  svHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  svAuthorInfo: { flex: 1, marginLeft: 8 },
+  svAuthorName: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 13,
+    color: colors.t1,
+  },
+  svTimeAgo: { fontFamily: fonts.body, fontSize: 11, color: colors.t2 },
+  svTimeLeft: { fontFamily: fonts.body, fontSize: 11, color: colors.t2, marginRight: 10 },
+  svCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  svPhotoArea: {
+    flex: 1,
+  },
+  svTextOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: STORY_SHEET_H,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    borderColor: colors.border,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: 20,
-    paddingTop: 10,
-    zIndex: 200,
-    elevation: 20,
-    backgroundColor: colors.surface,
+    paddingVertical: 14,
   },
-  storyScroll: { paddingBottom: 8 },
-  storyAuthorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 16,
-    marginTop: 4,
-  },
-  storyAuthorInfo: { flex: 1, gap: 2 },
-  storyAuthorName: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 15,
-    color: colors.t1,
-  },
-  storyMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  storyMeta: { fontFamily: fonts.body, color: colors.t3, fontSize: 12 },
-  storyExpiryBadge: {
-    backgroundColor: colors.surface2,
-    borderRadius: radius.s,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  storyExpiryText: { fontFamily: fonts.body, color: colors.t3, fontSize: 11, fontWeight: '500' },
-  storyText: {
+  svTextOverlayText: {
     fontFamily: fonts.body,
+    fontSize: 16,
+    fontWeight: '500',
     color: colors.t1,
-    fontSize: 15,
     lineHeight: 22,
-    marginBottom: 16,
   },
-  storyPhoto: {
-    width: '100%',
-    height: 200,
-    borderRadius: radius.m,
-    marginBottom: 16,
+  svNavLeft: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '25%',
   },
-  storyDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-    marginBottom: 14,
+  svNavRight: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: '25%',
   },
-  reactionsRow: { flexDirection: 'row', gap: 8 },
-  reactionBtn: {
+  svTextCenter: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  svLightbox: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+  },
+  svTextLarge: {
+    fontFamily: fonts.body,
+    fontSize: 24,
+    fontWeight: '500',
+    color: colors.t1,
+    lineHeight: 32,
+    textAlign: 'center',
+  },
+  svTextSmall: {
+    fontFamily: fonts.body,
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.t1,
+    lineHeight: 22,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  svPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  svPlaceName: { fontFamily: fonts.body, fontSize: 12, color: colors.t2 },
+  svReactions: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    backgroundColor: 'rgba(10,10,11,0.82)',
+  },
+  svReactionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderRadius: radius.m,
-    backgroundColor: colors.surface2,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  reactionBtnActive: {
+  svReactionBtnActive: {
     backgroundColor: colors.tealTint,
     borderColor: colors.tealLine,
   },
-  reactionCount: { fontFamily: fonts.body, color: colors.t3, fontSize: 13, fontWeight: '500' },
-  reactionCountActive: { color: colors.teal },
+  svReactionCount: { fontFamily: fonts.body, color: colors.t3, fontSize: 13, fontWeight: '500' },
+  svReactionCountActive: { color: colors.teal },
 
   // ─── Create story modal ───
   createModalBackdrop: {

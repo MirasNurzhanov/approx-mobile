@@ -5,10 +5,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/Button';
@@ -28,6 +30,12 @@ export default function InterestsSetupScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleInterests = normalizedQuery
+    ? interests.filter((i) => i.name.toLowerCase().includes(normalizedQuery))
+    : interests;
 
   function loadInterests() {
     setError(null);
@@ -79,28 +87,54 @@ export default function InterestsSetupScreen() {
           <Button label="Retry" variant="ghost" size="sm" onPress={loadInterests} />
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.grid}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.chips}>
-            {interests.map((item) => {
-              const sel = selected.has(item.id);
-              return (
-                <Pressable
-                  key={item.id}
-                  onPress={() => toggle(item.id)}
-                  style={[styles.chip, sel && styles.chipSelected]}
-                >
-                  <Text style={styles.chipIcon}>{item.icon}</Text>
-                  <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
-                    {item.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
+        <>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={18} color={colors.t3} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search interests..."
+              placeholderTextColor={colors.t3}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {query.length > 0 && (
+              <Pressable onPress={() => setQuery('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color={colors.t3} />
+              </Pressable>
+            )}
           </View>
-        </ScrollView>
+
+          <ScrollView
+            contentContainerStyle={styles.grid}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {visibleInterests.length === 0 ? (
+              <Text style={styles.emptyText}>No interests match “{query.trim()}”</Text>
+            ) : (
+              <View style={styles.chips}>
+                {visibleInterests.map((item) => {
+                  const sel = selected.has(item.id);
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => toggle(item.id)}
+                      style={[styles.chip, sel && styles.chipSelected]}
+                    >
+                      <Text style={styles.chipIcon}>{item.icon}</Text>
+                      <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
+                        {item.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </ScrollView>
+        </>
       )}
 
       <View style={[styles.footer, { paddingBottom: bottom + 16 }]}>
@@ -142,6 +176,33 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.t2,
     lineHeight: 22,
+  },
+
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    paddingHorizontal: 14,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t1,
+  },
+  emptyText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t3,
+    textAlign: 'center',
+    marginTop: 32,
   },
 
   grid: {

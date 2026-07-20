@@ -13,7 +13,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -330,12 +330,14 @@ function ZoneBanner({
   username,
   isPlaying,
   canListen,
+  isSelf,
   onTap,
   onMute,
 }: {
   username: string;
   isPlaying: boolean;
   canListen: boolean;
+  isSelf: boolean;
   onTap: () => void;
   onMute: () => void;
 }) {
@@ -349,8 +351,8 @@ function ZoneBanner({
       <IconSound size={20} color={colors.teal} />
       <Text style={styles.zoneBannerText} numberOfLines={1}>
         {isPlaying ? 'Playing ' : "You're in "}
-        <Text style={styles.zoneBannerUser}>@{username}</Text>
-        {"'s zone"}
+        <Text style={styles.zoneBannerUser}>{isSelf ? 'your' : `@${username}`}</Text>
+        {isSelf ? ' zone' : "'s zone"}
       </Text>
       {isPlaying ? (
         <TouchableOpacity onPress={onMute} hitSlop={12}>
@@ -515,7 +517,7 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
 
         {/* Story text above reactions */}
         {hasText && (
-          <View style={[styles.svTextBlock, { bottom: bottom + 96 }]} pointerEvents="none">
+          <View style={[styles.svTextBlock, { bottom: bottom + (replyTo ? 152 : 96) }]} pointerEvents="none">
             {story.place_name ? (
               <View style={styles.svPlaceRow}>
                 <IconPin size={12} color={colors.t2} />
@@ -528,7 +530,7 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
 
         {/* Reply to a friend's story — the comment lands in your chat */}
         {replyTo && (
-          <View style={styles.svReplyRow}>
+          <View style={[styles.svReplyRow, { bottom: bottom + 90 }]}>
             <TextInput
               style={styles.svReplyInput}
               value={replyText}
@@ -709,6 +711,17 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
   const relLabelColor = isFriend ? colors.blue : isConnected ? colors.orange : colors.t2;
   const dist          = fmtDistance(user.distance);
 
+  // The sheet stays mounted when tapping straight to another marker, so the
+  // sent state must reset per user.
+  const [requestSent, setRequestSent] = useState(false);
+  useEffect(() => { setRequestSent(false); }, [user.id]);
+
+  function sendFriendRequest() {
+    api.post(`/api/friends/request/${user.id}/`)
+      .then(() => setRequestSent(true))
+      .catch((e) => console.log('[Friend Request] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
+  }
+
   function sendHi() {
     api.post('/api/friends/hi/', { receiver_id: user.id })
       .then(() => onFriendChange())
@@ -775,6 +788,21 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
           </View>
         )}
 
+        {/* Connections can be promoted to friends right from the map; the
+            server rejects friend requests to anyone not connected yet. */}
+        {isConnected && (
+          <View style={styles.addFriendRow}>
+            <Button
+              label={requestSent ? 'Friend Request Sent ✓' : 'Add Friend'}
+              variant={requestSent ? 'secondary' : 'primary'}
+              size="md"
+              fullWidth
+              disabled={requestSent}
+              onPress={sendFriendRequest}
+            />
+          </View>
+        )}
+
         <View style={styles.actions}>
           <View style={styles.actionBtn}>
             {isStranger && (
@@ -784,7 +812,13 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
               <Button label="Hi Sent ✓" variant="secondary" size="md" fullWidth disabled />
             )}
             {(isFriend || isConnected) && (
-              <Button label="Message" variant="primary" size="md" fullWidth onPress={goToMessages} />
+              <Button
+                label="Message"
+                variant={isConnected ? 'secondary' : 'primary'}
+                size="md"
+                fullWidth
+                onPress={goToMessages}
+              />
             )}
           </View>
           <View style={styles.actionBtn}>
@@ -809,7 +843,7 @@ export default function MapScreen() {
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [selfProfile, setSelfProfile] = useState<{ username: string; profile_picture?: string } | null>(null);
-  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl?: string; isFriend: boolean } | null>(null);
+  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl?: string; isFriend: boolean; isSelf: boolean } | null>(null);
   const [isPlaying, setIsPlaying]     = useState(false);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
   const [hiToast, setHiToast]           = useState(false);
@@ -822,7 +856,11 @@ export default function MapScreen() {
   const hiToastTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const soundRef           = useRef<Audio.Sound | null>(null);
+  const currentUserIdRef   = useRef<number | null>(null);
+  const playingUrlRef      = useRef<string | null>(null);
+  const mutedZoneRef       = useRef<string | null>(null);
   coordsRef.current = coords;
+  currentUserIdRef.current = currentUserId;
 
   const sheetY = useSharedValue(SHEET_H);
 
@@ -840,17 +878,19 @@ export default function MapScreen() {
   }, [stories, currentUserId, friendIds]);
 
   // Interest matching: friends and connections are always visible; strangers
-  // only appear when at least one interest is shared.
-  const visibleNearby = useMemo(
-    () =>
-      nearby.filter((u) => {
-        const uid = Number(u.id);
-        if (currentUserId !== null && uid === currentUserId) return false;
-        if (friendIds.has(uid) || connectionIds.has(uid)) return true;
-        return (u.shared_interests?.length ?? 0) > 0;
-      }),
-    [nearby, currentUserId, friendIds, connectionIds],
-  );
+  // only appear when at least one interest is shared. The backend includes
+  // the requester in /nearby/, so until our own id is known we can't tell
+  // ourselves apart from strangers — render nobody for that moment instead of
+  // briefly treating the owner's zone as a locked stranger zone.
+  const visibleNearby = useMemo(() => {
+    if (currentUserId === null) return [];
+    return nearby.filter((u) => {
+      const uid = Number(u.id);
+      if (uid === currentUserId) return false;
+      if (friendIds.has(uid) || connectionIds.has(uid)) return true;
+      return (u.shared_interests?.length ?? 0) > 0;
+    });
+  }, [nearby, currentUserId, friendIds, connectionIds]);
 
   // Feed the local notification feed: friends nearby (with distance) and
   // interest matches. The feed itself dedupes with a per-user cooldown.
@@ -885,6 +925,7 @@ export default function MapScreen() {
   }, []);
 
   async function stopZone() {
+    playingUrlRef.current = null;
     if (soundRef.current) {
       await soundRef.current.stopAsync().catch(() => {});
       await soundRef.current.unloadAsync().catch(() => {});
@@ -906,6 +947,7 @@ export default function MapScreen() {
         { shouldPlay: true, isLooping: true },
       );
       soundRef.current = sound;
+      playingUrlRef.current = url;
       setIsPlaying(true);
       console.log('[Zone] audio playing successfully');
       sound.setOnPlaybackStatusUpdate((status) => {
@@ -917,51 +959,54 @@ export default function MapScreen() {
     }
   }
 
-  // Detect when current user enters or leaves a zone (only zones of visible,
-  // interest-matched users count)
+  // Detect which zone the banner/audio should follow.
+  // Priority: a friend's zone we're standing in → the owner's own active zone
+  // → a non-friend zone (shown locked, never played). The owner's zone comes
+  // from /api/users/zone/, not the nearby list, so the friends-only rule can
+  // never lock the owner out of their own music.
   useEffect(() => {
-    const nearbyUsers = visibleNearby;
-    console.log('[Zone] checking nearby:', nearbyUsers.map((u) => ({
-      username: u.username,
-      zone_active: u.zone_active,
-      zone_audio_url: u.zone_audio_url,
-      distance_km: u.distance_km,
-      zone_radius: u.zone_radius,
-    })));
-    console.log('[Zone] active zones check:', nearbyUsers
-      .filter(u => u.zone_active)
-      .map(u => ({
-        username: u.username,
-        audio: u.zone_audio_url,
-        distance_m: ((u.distance_km ?? 0) * 1000).toFixed(0),
-        radius: u.zone_radius,
-        inZone: (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
-      })));
-    const insideZones = nearbyUsers.filter((u) =>
-      u.zone_active && u.zone_audio_url && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
+    // The server nulls zone_audio_url for non-friends, so presence of a URL
+    // can't be the "is there a zone here" test — zone_active/radius can.
+    const insideZones = visibleNearby.filter((u) =>
+      u.zone_active && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
     );
-    // Zone music is friends-only (same rule as stories): when inside several
-    // zones prefer a friend's, and never start playback for a non-friend's.
-    const entered = insideZones.find((u) => friendIds.has(Number(u.id))) ?? insideZones[0];
-    if (entered) {
-      const isFriend = friendIds.has(Number(entered.id));
-      setActiveZone({
-        username: entered.username,
-        audioUrl: isFriend ? entered.zone_audio_url : undefined,
-        isFriend,
-      });
-      if (isFriend) {
-        getPref('zoneAutoplay').then((autoplay) => {
-          if (autoplay) playZone(entered.zone_audio_url!, entered.username);
-        });
-      } else {
-        stopZone();
-      }
-    } else {
-      setActiveZone(null);
-      stopZone();
+    console.log('[Zone] zones in range:', insideZones.map((u) => u.username),
+      '| self zone active:', !!selfZone?.zone_active);
+    const friendZone = insideZones.find((u) => friendIds.has(Number(u.id)) && u.zone_audio_url);
+    const strangerZone = insideZones.find((u) => !friendIds.has(Number(u.id)));
+
+    let next: { username: string; audioUrl?: string; isFriend: boolean; isSelf: boolean } | null = null;
+    if (friendZone) {
+      next = { username: friendZone.username, audioUrl: friendZone.zone_audio_url, isFriend: true, isSelf: false };
+    } else if (selfZone?.zone_active && selfZone.zone_audio_url) {
+      next = { username: selfProfile?.username ?? 'you', audioUrl: selfZone.zone_audio_url, isFriend: false, isSelf: true };
+    } else if (strangerZone) {
+      next = { username: strangerZone.username, audioUrl: undefined, isFriend: false, isSelf: false };
     }
-  }, [visibleNearby, friendIds]);
+
+    if (!next) {
+      setActiveZone(null);
+      mutedZoneRef.current = null;
+      if (playingUrlRef.current) stopZone();
+      return;
+    }
+
+    setActiveZone(next);
+    if (mutedZoneRef.current && mutedZoneRef.current !== next.username) mutedZoneRef.current = null;
+
+    // Stop stale audio when the zone (or its track) changed.
+    if (playingUrlRef.current && playingUrlRef.current !== next.audioUrl) stopZone();
+
+    // Autoplay only a friend's zone, and only when nothing is playing yet and
+    // the user hasn't muted it — the nearby poll re-runs this effect every
+    // 10s, and an unguarded playZone() here restarts the track each time.
+    if (next.isFriend && next.audioUrl && !playingUrlRef.current && mutedZoneRef.current !== next.username) {
+      const { audioUrl, username } = next;
+      getPref('zoneAutoplay').then((autoplay) => {
+        if (autoplay && !playingUrlRef.current) playZone(audioUrl, username);
+      });
+    }
+  }, [visibleNearby, friendIds, selfZone, selfProfile]);
 
   // Stop audio on unmount
   useEffect(() => {
@@ -1046,22 +1091,39 @@ export default function MapScreen() {
     }
   }
 
-  useEffect(() => {
-    console.log('[Map] step 4: first API calls made');
+  // Self data is refetched on every focus: a fetch that failed right after
+  // login would otherwise never retry (leaving the owner's zone invisible),
+  // and changes made in Zone Setup must show up when returning to the map.
+  const loadSelf = useCallback(() => {
+    console.log('[Map] step 4: loading self (me/profile/zone)');
     api.get<{ id: number; username: string }>('/api/users/me/')
       .then((r) => setCurrentUserId(r.data.id))
-      .catch(() => {});
+      .catch((e: any) => console.log('[Map] /users/me/ error:', e?.response?.status));
 
     api.get<{ username: string; profile_picture?: string }>('/api/users/profile/')
       .then((r) => setSelfProfile({ username: r.data.username, profile_picture: r.data.profile_picture }))
       .catch(() => {});
 
-    api.get<SelfZone>('/api/users/zone/')
-      .then((r) => setSelfZone(r.data))
-      .catch(() => {});
+    // The zone endpoint answers with either {zone_active, zone_radius, ...}
+    // or {active, custom_audio_url, ...} and may omit the radius — normalize
+    // so the owner's circle renders regardless of which shape arrives.
+    api.get<Record<string, any>>('/api/users/zone/')
+      .then((r) => {
+        const d = r.data ?? {};
+        const normalized: SelfZone = {
+          zone_active: Boolean(d.zone_active ?? d.active ?? false),
+          zone_radius: Number(d.zone_radius) > 0 ? Number(d.zone_radius) : 500,
+          zone_audio_url: d.zone_audio_url ?? d.custom_audio_url ?? undefined,
+        };
+        console.log('[Zone] self zone:', JSON.stringify(normalized));
+        setSelfZone(normalized);
+      })
+      .catch((e: any) => console.log('[Zone] self zone fetch error:', e?.response?.status));
 
     fetchFriends();
-  }, []);
+  }, [fetchFriends]);
+
+  useFocusEffect(useCallback(() => { loadSelf(); }, [loadSelf]));
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -1095,6 +1157,10 @@ export default function MapScreen() {
     const c = coordsRef.current;
     if (!c) return;
 
+    // Without our own id the nearby list stays hidden (we couldn't filter
+    // ourselves out of it), so keep retrying the identity fetch until it lands.
+    if (currentUserIdRef.current === null) loadSelf();
+
     const [, nearbyResult] = await Promise.allSettled([
       api.patch('/api/proximity/location/', {
         latitude: parseFloat(c.latitude.toFixed(6)),
@@ -1113,7 +1179,7 @@ export default function MapScreen() {
       setNearby(users);
     }
     await fetchFriends();
-  }, [fetchFriends]);
+  }, [fetchFriends, loadSelf]);
 
   useEffect(() => {
     if (!coords) return;
@@ -1296,10 +1362,18 @@ export default function MapScreen() {
       {activeZone && (
         <ZoneBanner
           username={activeZone.username}
-          canListen={activeZone.isFriend}
+          isSelf={activeZone.isSelf}
+          canListen={activeZone.isFriend || activeZone.isSelf}
           isPlaying={isPlaying}
-          onTap={() => activeZone.audioUrl && playZone(activeZone.audioUrl, activeZone.username)}
-          onMute={stopZone}
+          onTap={() => {
+            if (!activeZone.audioUrl) return;
+            mutedZoneRef.current = null;
+            playZone(activeZone.audioUrl, activeZone.username);
+          }}
+          onMute={() => {
+            mutedZoneRef.current = activeZone.username;
+            stopZone();
+          }}
         />
       )}
 
@@ -1590,6 +1664,7 @@ const styles = StyleSheet.create({
   },
   actions: { flexDirection: 'row', gap: 10 },
   actionBtn: { flex: 1 },
+  addFriendRow: { marginBottom: 10 },
 
   // ─── Story marker: surface card + tail + reaction pill (no gold, no shadows) ───
   storyCard: {
@@ -1751,6 +1826,9 @@ const styles = StyleSheet.create({
   svPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
   svPlaceName: { fontFamily: fonts.body, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
   svReplyRow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

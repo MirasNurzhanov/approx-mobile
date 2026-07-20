@@ -4,6 +4,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -29,6 +30,12 @@ export default function EditInterestsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleInterests = normalizedQuery
+    ? interests.filter((i) => i.name.toLowerCase().includes(normalizedQuery))
+    : interests;
 
   async function load() {
     setError(null);
@@ -135,29 +142,55 @@ export default function EditInterestsScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.bubbleContainer}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.bubbleWrap}>
-            {interests.map((item) => {
-              const isSelected = selected.has(item.id);
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[styles.bubble, isSelected && styles.bubbleSelected]}
-                  onPress={() => toggle(item.id)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={styles.bubbleIcon}>{item.icon}</Text>
-                  <Text style={[styles.bubbleName, isSelected && styles.bubbleNameSelected]}>
-                    {item.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+        <>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={18} color="#555" />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search interests..."
+              placeholderTextColor="#555"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {query.length > 0 && (
+              <TouchableOpacity onPress={() => setQuery('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color="#555" />
+              </TouchableOpacity>
+            )}
           </View>
-        </ScrollView>
+
+          <ScrollView
+            contentContainerStyle={styles.bubbleContainer}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {visibleInterests.length === 0 ? (
+              <Text style={styles.emptyText}>No interests match “{query.trim()}”</Text>
+            ) : (
+              <View style={styles.bubbleWrap}>
+                {visibleInterests.map((item) => {
+                  const isSelected = selected.has(item.id);
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.bubble, isSelected && styles.bubbleSelected]}
+                      onPress={() => toggle(item.id)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.bubbleIcon}>{item.icon}</Text>
+                      <Text style={[styles.bubbleName, isSelected && styles.bubbleNameSelected]}>
+                        {item.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+          </ScrollView>
+        </>
       )}
 
       {/* Footer */}
@@ -207,6 +240,26 @@ const styles = StyleSheet.create({
   headerText: { flex: 1 },
   title: { color: '#fff', fontSize: 22, fontWeight: '800' },
   subtitle: { color: '#555', fontSize: 13, marginTop: 2 },
+
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: '#1e1e1e',
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 14,
+  },
+  emptyText: { color: '#555', fontSize: 14, textAlign: 'center', marginTop: 32 },
 
   bubbleContainer: { paddingHorizontal: 20, paddingBottom: 16 },
   bubbleWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },

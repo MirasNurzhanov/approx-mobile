@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { setOnAuthFailure } from '@/services/api';
 import { getAccessToken, loginRequest } from '@/services/auth';
 
 interface AuthContextValue {
@@ -17,6 +18,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // When the api layer gives up on a session (refresh failed), it redirects
+    // to '/' — this keeps isAuthenticated in sync so index doesn't bounce the
+    // user straight back into the tabs.
+    setOnAuthFailure(() => setIsAuthenticated(false));
+
     Promise.all([
       getAccessToken(),
       new Promise<void>((resolve) => setTimeout(resolve, 2500)),

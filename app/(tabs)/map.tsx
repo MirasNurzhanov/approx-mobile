@@ -711,6 +711,17 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
   const relLabelColor = isFriend ? colors.blue : isConnected ? colors.orange : colors.t2;
   const dist          = fmtDistance(user.distance);
 
+  // The sheet stays mounted when tapping straight to another marker, so the
+  // sent state must reset per user.
+  const [requestSent, setRequestSent] = useState(false);
+  useEffect(() => { setRequestSent(false); }, [user.id]);
+
+  function sendFriendRequest() {
+    api.post(`/api/friends/request/${user.id}/`)
+      .then(() => setRequestSent(true))
+      .catch((e) => console.log('[Friend Request] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
+  }
+
   function sendHi() {
     api.post('/api/friends/hi/', { receiver_id: user.id })
       .then(() => onFriendChange())
@@ -777,6 +788,21 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
           </View>
         )}
 
+        {/* Connections can be promoted to friends right from the map; the
+            server rejects friend requests to anyone not connected yet. */}
+        {isConnected && (
+          <View style={styles.addFriendRow}>
+            <Button
+              label={requestSent ? 'Friend Request Sent ✓' : 'Add Friend'}
+              variant={requestSent ? 'secondary' : 'primary'}
+              size="md"
+              fullWidth
+              disabled={requestSent}
+              onPress={sendFriendRequest}
+            />
+          </View>
+        )}
+
         <View style={styles.actions}>
           <View style={styles.actionBtn}>
             {isStranger && (
@@ -786,7 +812,13 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
               <Button label="Hi Sent ✓" variant="secondary" size="md" fullWidth disabled />
             )}
             {(isFriend || isConnected) && (
-              <Button label="Message" variant="primary" size="md" fullWidth onPress={goToMessages} />
+              <Button
+                label="Message"
+                variant={isConnected ? 'secondary' : 'primary'}
+                size="md"
+                fullWidth
+                onPress={goToMessages}
+              />
             )}
           </View>
           <View style={styles.actionBtn}>
@@ -933,13 +965,15 @@ export default function MapScreen() {
   // from /api/users/zone/, not the nearby list, so the friends-only rule can
   // never lock the owner out of their own music.
   useEffect(() => {
+    // The server nulls zone_audio_url for non-friends, so presence of a URL
+    // can't be the "is there a zone here" test — zone_active/radius can.
     const insideZones = visibleNearby.filter((u) =>
-      u.zone_active && u.zone_audio_url && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
+      u.zone_active && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
     );
     console.log('[Zone] zones in range:', insideZones.map((u) => u.username),
       '| self zone active:', !!selfZone?.zone_active);
-    const friendZone = insideZones.find((u) => friendIds.has(Number(u.id)));
-    const strangerZone = insideZones[0];
+    const friendZone = insideZones.find((u) => friendIds.has(Number(u.id)) && u.zone_audio_url);
+    const strangerZone = insideZones.find((u) => !friendIds.has(Number(u.id)));
 
     let next: { username: string; audioUrl?: string; isFriend: boolean; isSelf: boolean } | null = null;
     if (friendZone) {
@@ -1630,6 +1664,7 @@ const styles = StyleSheet.create({
   },
   actions: { flexDirection: 'row', gap: 10 },
   actionBtn: { flex: 1 },
+  addFriendRow: { marginBottom: 10 },
 
   // ─── Story marker: surface card + tail + reaction pill (no gold, no shadows) ───
   storyCard: {

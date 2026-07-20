@@ -9,6 +9,14 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// AuthContext registers a handler so a forced logout here also flips
+// isAuthenticated — otherwise app/index.tsx still sees the stale in-memory
+// "logged in" state and bounces straight back into the tabs.
+let onAuthFailure: (() => void) | null = null;
+export function setOnAuthFailure(handler: () => void) {
+  onAuthFailure = handler;
+}
+
 api.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('access_token');
   if (token) {
@@ -17,11 +25,45 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// The backend rotates refresh tokens and blacklists the old one
+// (ROTATE_REFRESH_TOKENS + BLACKLIST_AFTER_ROTATION), so concurrent 401s must
+// share one refresh call — a second refresh with the same token would 401 and
+// log the user out.
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refresh = await AsyncStorage.getItem('refresh_token');
+  if (!refresh) return null;
+  try {
+    // Bare axios: the api instance's interceptors must not run on this call.
+    const { data } = await axios.post(`${BASE_URL}/api/users/token/refresh/`, { refresh });
+    await AsyncStorage.setItem('access_token', data.access);
+    if (data.refresh) await AsyncStorage.setItem('refresh_token', data.refresh);
+    return data.access as string;
+  } catch (e: any) {
+    console.log('[Auth] token refresh failed:', e?.response?.status);
+    return null;
+  }
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
+    const original = error.config;
+    if (error.response?.status === 401 && original && !original._retried) {
+      original._retried = true;
+      if (!refreshPromise) {
+        refreshPromise = refreshAccessToken().finally(() => {
+          refreshPromise = null;
+        });
+      }
+      const token = await refreshPromise;
+      if (token) {
+        // The request interceptor re-reads the new token from storage on retry.
+        return api(original);
+      }
       await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+      onAuthFailure?.();
       router.replace('/');
     }
     return Promise.reject(error);

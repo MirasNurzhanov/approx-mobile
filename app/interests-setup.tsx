@@ -14,6 +14,11 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/Button';
+import {
+  InterestChipIcon,
+  OtherInterestSheet,
+  type OtherInterestResult,
+} from '@/components/OtherInterestSheet';
 import { colors, fonts, radius } from '@/constants/theme';
 
 interface Interest {
@@ -31,6 +36,7 @@ export default function InterestsSetupScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [otherVisible, setOtherVisible] = useState(false);
 
   const normalizedQuery = query.trim().toLowerCase();
   const visibleInterests = normalizedQuery
@@ -54,6 +60,25 @@ export default function InterestsSetupScreen() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  }
+
+  async function handleOtherAdd({ name, matched }: OtherInterestResult) {
+    const existing = interests.find((i) => i.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setSelected((prev) => new Set(prev).add(existing.id));
+      setQuery('');
+      return;
+    }
+    try {
+      const { data } = await api.post<Interest>('/api/interests/other/', { name, matched });
+      setInterests((prev) =>
+        prev.some((i) => i.id === data.id) ? prev : [...prev, data]
+      );
+      setSelected((prev) => new Set(prev).add(data.id));
+      setQuery('');
+    } catch {
+      // Non-fatal during onboarding — the user can continue without it
+    }
   }
 
   async function handleContinue() {
@@ -112,27 +137,33 @@ export default function InterestsSetupScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {visibleInterests.length === 0 ? (
+            {visibleInterests.length === 0 && (
               <Text style={styles.emptyText}>No interests match “{query.trim()}”</Text>
-            ) : (
-              <View style={styles.chips}>
-                {visibleInterests.map((item) => {
-                  const sel = selected.has(item.id);
-                  return (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => toggle(item.id)}
-                      style={[styles.chip, sel && styles.chipSelected]}
-                    >
-                      <Text style={styles.chipIcon}>{item.icon}</Text>
-                      <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
-                        {item.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
             )}
+            <View style={styles.chips}>
+              {visibleInterests.map((item) => {
+                const sel = selected.has(item.id);
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => toggle(item.id)}
+                    style={[styles.chip, sel && styles.chipSelected]}
+                  >
+                    <InterestChipIcon name={item.name} icon={item.icon} />
+                    <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
+                      {item.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                onPress={() => setOtherVisible(true)}
+                style={({ pressed }) => [styles.chip, styles.chipOther, pressed && { opacity: 0.6 }]}
+              >
+                <Ionicons name="add" size={16} color={colors.t2} />
+                <Text style={styles.chipLabel}>Other</Text>
+              </Pressable>
+            </View>
           </ScrollView>
         </>
       )}
@@ -151,6 +182,12 @@ export default function InterestsSetupScreen() {
           onPress={handleContinue}
         />
       </View>
+
+      <OtherInterestSheet
+        visible={otherVisible}
+        onClose={() => setOtherVisible(false)}
+        onAdd={handleOtherAdd}
+      />
     </View>
   );
 }
@@ -229,7 +266,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.tealTint,
     borderColor: colors.tealLine,
   },
-  chipIcon: { fontSize: 17 },
+  chipOther: {
+    borderStyle: 'dashed',
+  },
   chipLabel: {
     fontFamily: fonts.body,
     fontSize: 14,

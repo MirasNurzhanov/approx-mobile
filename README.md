@@ -2,6 +2,27 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Hobby catalog (interests "Other" flow)
+
+The "Other" option on the interest screens autocompletes against a bundled
+catalog (`data/hobbies.json`, ~4,000 entries) and resolves free text via
+`services/interestResolver.ts`. The catalog is **generated — don't edit it by
+hand**:
+
+```bash
+npm run generate:hobbies   # regenerates data/hobbies.json + components/ui/hobbyIcons.generated.ts
+npm test                   # resolver unit tests
+```
+
+Sources are committed snapshots of public Wikipedia lists plus the in-repo
+seed — see `scripts/hobby-sources/SOURCES.md` for the list and how to refresh
+them. The script normalizes/dedupes entries, assigns categories, aliases
+(plurals, misspellings, common Russian variants), and a lucide icon per entry;
+it **fails** if any icon name doesn't exist in the installed
+`lucide-react-native`, so icon regressions can't slip through. Custom entries
+that don't match the catalog are stored server-side with `needs_review=True`
+(reviewable in the Django admin).
+
 ## Get started
 
 1. Install dependencies

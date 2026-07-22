@@ -70,6 +70,13 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Aura uses your camera so you can take photos for stories and messages.",
+          "photosPermission": "Aura accesses your photos so you can share them in stories and messages."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",

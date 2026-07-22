@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -13,7 +13,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
-import { ParticleBackground } from '@/components/ParticleBackground';
+import { Button } from '@/components/ui/Button';
+import { IconBack } from '@/components/ui/icons';
+import {
+  InterestChipIcon,
+  OtherInterestSheet,
+  type OtherInterestResult,
+} from '@/components/OtherInterestSheet';
+import { colors, fonts, radius } from '@/constants/theme';
 
 interface Interest {
   id: number;
@@ -31,6 +38,7 @@ export default function EditInterestsScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [otherVisible, setOtherVisible] = useState(false);
 
   const normalizedQuery = query.trim().toLowerCase();
   const visibleInterests = normalizedQuery
@@ -40,21 +48,22 @@ export default function EditInterestsScreen() {
   async function load() {
     setError(null);
     setLoading(true);
-    console.log('[Interests] fetching from:', '/api/interests/');
     try {
       const [allRes, profileRes] = await Promise.all([
         api.get<Interest[]>('/api/interests/'),
-        api.get<{ interests?: { name: string; icon: string }[] }>('/api/users/profile/'),
+        api.get<{ interests?: Interest[] }>('/api/users/profile/'),
       ]);
       const all = allRes.data;
-      console.log('[Interests] loaded:', all.length, 'interests');
-      const currentNames = new Set((profileRes.data.interests ?? []).map((i) => i.name));
-      const preSelected = new Set(all.filter((i) => currentNames.has(i.name)).map((i) => i.id));
-      setInterests(all);
+      const mine = profileRes.data.interests ?? [];
+      // Custom interests may not be in the shared list — merge them in so they
+      // show as chips and can be deselected.
+      const listedIds = new Set(all.map((i) => i.id));
+      const merged = [...all, ...mine.filter((i) => !listedIds.has(i.id))];
+      const preSelected = new Set(mine.map((i) => i.id));
+      setInterests(merged);
       setSelected(preSelected);
       setInitialSelected(preSelected);
-    } catch (error: any) {
-      console.log('[Interests] fetch error:', error.response?.status, error.message);
+    } catch {
       setError('Could not load interests. Please try again.');
     } finally {
       setLoading(false);
@@ -71,43 +80,40 @@ export default function EditInterestsScreen() {
     });
   }
 
-  async function handleSave() {
-    const selectedIds = Array.from(selected);
-    const currentSelected = Array.from(initialSelected);
-    const toDeselect = interests.filter((i) => initialSelected.has(i.id)).map((i) => i.id);
-    const toSelect = selectedIds;
+  async function handleOtherAdd({ name, matched }: OtherInterestResult) {
+    // Already in the list (canonical match or same custom) → just select it
+    const existing = interests.find((i) => i.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setSelected((prev) => new Set(prev).add(existing.id));
+      setQuery('');
+      return;
+    }
+    try {
+      const { data } = await api.post<Interest>('/api/interests/other/', { name, matched });
+      setInterests((prev) =>
+        prev.some((i) => i.id === data.id) ? prev : [...prev, data]
+      );
+      setSelected((prev) => new Set(prev).add(data.id));
+      setQuery('');
+    } catch {
+      setError('Could not add that interest. Please try again.');
+    }
+  }
 
-    console.log('[Interests] currently selected:', currentSelected);
-    console.log('[Interests] new selection:', selectedIds);
-    console.log('[Interests] to deselect:', toDeselect);
-    console.log('[Interests] to select:', toSelect);
+  async function handleSave() {
+    const toDeselect = interests.filter((i) => initialSelected.has(i.id)).map((i) => i.id);
+    const toSelect = Array.from(selected);
 
     setSaving(true);
     try {
       await Promise.all(
-        toDeselect.map(async (id) => {
-          console.log('[Interests] calling URL: DELETE', `/api/interests/${id}/select/`);
-          try {
-            const res = await api.delete(`/api/interests/${id}/select/`);
-            console.log('[Interests] DELETE', id, '→ status:', res.status);
-          } catch (e: any) {
-            console.log('[Interests] DELETE', id, '→ error:', e.response?.status, JSON.stringify(e.response?.data));
-          }
-        })
+        toDeselect.map((id) => api.delete(`/api/interests/${id}/select/`).catch(() => {}))
       );
       for (const id of toSelect) {
-        console.log('[Interests] calling URL: POST', `/api/interests/${id}/select/`);
-        try {
-          const res = await api.post(`/api/interests/${id}/select/`);
-          console.log('[Interests] POST', id, '→ status:', res.status);
-        } catch (e: any) {
-          console.log('[Interests] POST', id, '→ error:', e.response?.status, JSON.stringify(e.response?.data));
-          throw e;
-        }
+        await api.post(`/api/interests/${id}/select/`);
       }
       router.back();
-    } catch (error: any) {
-      console.log('[Interests] error:', error.response?.status, JSON.stringify(error.response?.data));
+    } catch {
       setError('Failed to save. Please try again.');
     } finally {
       setSaving(false);
@@ -116,130 +122,146 @@ export default function EditInterestsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <ParticleBackground />
-
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
-        </TouchableOpacity>
+        <Pressable
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
+          onPress={() => router.back()}
+          hitSlop={12}
+        >
+          <IconBack size={22} color={colors.t1} />
+        </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Edit Interests</Text>
+          <Text style={styles.title}>Edit interests</Text>
           <Text style={styles.subtitle}>Choose what you care about</Text>
         </View>
       </View>
 
-      {/* Body */}
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#00b4a6" size="large" />
+          <ActivityIndicator color={colors.teal} size="large" />
         </View>
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={load}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          <Button label="Retry" variant="ghost" size="sm" onPress={load} />
         </View>
       ) : (
         <>
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color="#555" />
+            <Ionicons name="search" size={18} color={colors.t3} />
             <TextInput
               style={styles.searchInput}
               value={query}
               onChangeText={setQuery}
               placeholder="Search interests..."
-              placeholderTextColor="#555"
+              placeholderTextColor={colors.t3}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
             />
             {query.length > 0 && (
-              <TouchableOpacity onPress={() => setQuery('')} hitSlop={10}>
-                <Ionicons name="close-circle" size={18} color="#555" />
-              </TouchableOpacity>
+              <Pressable onPress={() => setQuery('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color={colors.t3} />
+              </Pressable>
             )}
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.bubbleContainer}
+            contentContainerStyle={styles.grid}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {visibleInterests.length === 0 ? (
+            {visibleInterests.length === 0 && (
               <Text style={styles.emptyText}>No interests match “{query.trim()}”</Text>
-            ) : (
-              <View style={styles.bubbleWrap}>
-                {visibleInterests.map((item) => {
-                  const isSelected = selected.has(item.id);
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[styles.bubble, isSelected && styles.bubbleSelected]}
-                      onPress={() => toggle(item.id)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={styles.bubbleIcon}>{item.icon}</Text>
-                      <Text style={[styles.bubbleName, isSelected && styles.bubbleNameSelected]}>
-                        {item.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
             )}
+            <View style={styles.chips}>
+              {visibleInterests.map((item) => {
+                const sel = selected.has(item.id);
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => toggle(item.id)}
+                    style={[styles.chip, sel && styles.chipSelected]}
+                  >
+                    <InterestChipIcon name={item.name} icon={item.icon} />
+                    <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
+                      {item.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                onPress={() => setOtherVisible(true)}
+                style={({ pressed }) => [styles.chip, styles.chipOther, pressed && { opacity: 0.6 }]}
+              >
+                <Ionicons name="add" size={16} color={colors.t2} />
+                <Text style={styles.chipLabel}>Other</Text>
+              </Pressable>
+            </View>
           </ScrollView>
         </>
       )}
 
-      {/* Footer */}
       {!loading && !error && (
-        <View style={[styles.footer, { paddingBottom: bottom + 20 }]}>
-          {selected.size > 0 && (
-            <Text style={styles.countLabel}>{selected.size} selected</Text>
-          )}
-          <TouchableOpacity
-            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+        <View style={[styles.footer, { paddingBottom: bottom + 16 }]}>
+          <Text style={styles.count}>
+            {selected.size > 0 ? `${selected.size} selected` : ' '}
+          </Text>
+          <Button
+            label="Save changes"
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={saving}
             onPress={handleSave}
-            disabled={saving}
-            activeOpacity={0.85}
-          >
-            {saving ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.saveBtnText}>Save Changes</Text>
-            )}
-          </TouchableOpacity>
+          />
         </View>
       )}
+
+      <OtherInterestSheet
+        visible={otherVisible}
+        onClose={() => setOtherVisible(false)}
+        onAdd={handleOtherAdd}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  root: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 14,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 20,
+    paddingTop: 20,
+    paddingBottom: 24,
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerText: { flex: 1 },
-  title: { color: '#fff', fontSize: 22, fontWeight: '800' },
-  subtitle: { color: '#555', fontSize: 13, marginTop: 2 },
+  headerText: { flex: 1, gap: 4 },
+  title: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 24,
+    color: colors.t1,
+  },
+  subtitle: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t2,
+  },
+  pressed: { opacity: 0.6 },
 
   searchBar: {
     flexDirection: 'row',
@@ -248,74 +270,82 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 16,
     paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#111',
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: colors.border,
   },
   searchInput: {
     flex: 1,
     paddingVertical: 12,
-    color: '#fff',
+    fontFamily: fonts.body,
     fontSize: 14,
+    color: colors.t1,
   },
-  emptyText: { color: '#555', fontSize: 14, textAlign: 'center', marginTop: 32 },
+  emptyText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t3,
+    textAlign: 'center',
+    marginTop: 32,
+  },
 
-  bubbleContainer: { paddingHorizontal: 20, paddingBottom: 16 },
-  bubbleWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  bubble: {
+  grid: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 50,
-    backgroundColor: '#111',
+    borderRadius: radius.l,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: colors.border,
   },
-  bubbleSelected: {
-    backgroundColor: '#0d2420',
-    borderColor: '#00b4a6',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 3,
+  chipSelected: {
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
   },
-  bubbleIcon: { fontSize: 18 },
-  bubbleName: { color: '#666', fontSize: 14, fontWeight: '500' },
-  bubbleNameSelected: { color: '#00b4a6', fontWeight: '600' },
+  chipOther: {
+    borderStyle: 'dashed',
+  },
+  chipLabel: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.t2,
+  },
+  chipLabelSelected: {
+    color: colors.teal,
+    fontWeight: '600',
+  },
 
   footer: {
     paddingHorizontal: 24,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#141414',
-    gap: 10,
+    borderTopColor: colors.border,
+    gap: 8,
   },
-  countLabel: { color: '#00b4a6', fontSize: 13, textAlign: 'center', fontWeight: '500' },
-  saveBtn: {
-    backgroundColor: '#00b4a6',
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    shadowColor: '#00b4a6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 5,
+  count: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t3,
+    textAlign: 'center',
   },
-  saveBtnDisabled: { opacity: 0.6 },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.4 },
 
-  errorText: { color: '#e55', fontSize: 14, textAlign: 'center', marginBottom: 16 },
-  retryBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 28,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#00b4a6',
+  errorText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.red,
+    textAlign: 'center',
   },
-  retryText: { color: '#00b4a6', fontSize: 14, fontWeight: '600' },
 });

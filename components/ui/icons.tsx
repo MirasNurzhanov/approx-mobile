@@ -449,31 +449,465 @@ export function IconBall({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
-// Backend serves emoji for interests; this maps interest names to the designed
-// icon set instead (redesign rule 3 — no emoji anywhere).
-const INTEREST_ICONS: Record<string, IconComponent> = {
-  music: IconMusic,
-  hiking: IconHiking,
-  coffee: IconCoffee,
-  photography: IconCamera,
-  photo: IconCamera,
-  books: IconBook,
-  reading: IconBook,
-  gaming: IconGamepad,
-  games: IconGamepad,
-  art: IconBrush,
-  running: IconActivity,
-  fitness: IconActivity,
-  sport: IconActivity,
-  sports: IconActivity,
-  travel: IconPlane,
-  film: IconFilm,
-  movies: IconFilm,
-  cinema: IconFilm,
-  football: IconBall,
-  soccer: IconBall,
+export function IconDumbbell({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={4.5} y={8} width={3} height={8} />
+        <Rect x={16.5} y={8} width={3} height={8} />
+        <Path d="M7.5 12h9M2.5 12h2M19.5 12h2" />
+      </G>
+    </Svg>
+  )
 }
 
+export function IconMic({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={9.5} y={3} width={5} height={9.5} rx={2.5} />
+        <Path d="M6.5 11.5a5.5 5.5 0 0011 0M12 17v3.5M9 20.5h6" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconPiano({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={3.5} y={5.5} width={17} height={13} rx={1.5} />
+        <Path d="M7.75 5.5V13M12 5.5V13M16.25 5.5V13" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconHeadphones({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 15.5V12a7.5 7.5 0 0115 0v3.5" />
+        <Rect x={3.5} y={14} width={3.8} height={6} rx={1.6} />
+        <Rect x={16.7} y={14} width={3.8} height={6} rx={1.6} />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconUtensils({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M7 20.5V3.5M4.8 3.5v4.7a2.2 2.2 0 004.4 0V3.5" />
+        <Path d="M16.5 20.5V3.5a4 4 0 014 4V13h-4" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconGlass({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 4.5h15L12 12.5zM12 12.5v6M8.5 20.5h7" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconCake({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 20.5h15M5.5 20.5v-6.5a2 2 0 012-2h9a2 2 0 012 2v6.5" />
+        <Path d="M5.5 16.5c1.5 1.4 2.9 1.4 4.3 0 1.5 1.4 2.9 1.4 4.3 0 1.5 1.4 2.9 1.4 4.3 0" />
+        <Path d="M12 12V9.8M12 7.9c.9 0 1.6-.7 1.6-1.6 0-1.1-1.6-2.8-1.6-2.8s-1.6 1.7-1.6 2.8c0 .9.7 1.6 1.6 1.6z" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconFire({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M12 3.5c3 3 5.5 5.9 5.5 9.3a5.5 5.5 0 01-11 0c0-3.4 2.5-6.3 5.5-9.3z" />
+        <Path d="M12 11.5c1.3 1.3 2.2 2.4 2.2 3.7a2.2 2.2 0 01-4.4 0c0-1.3.9-2.4 2.2-3.7z" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconTent({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M12 4.5L21.5 19.5H2.5z" />
+        <Path d="M12 13l-3.8 6.5M12 13l3.8 6.5" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconLeaf({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M5.5 18.5C5.5 10 11 4.5 19.5 4.5c0 8.5-5.5 14-14 14z" />
+        <Path d="M5.5 18.5C8 13 11.5 9.5 15.5 7" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconPaw({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M12 12.3c2.7 0 4.9 1.9 4.9 4.2a3.1 3.1 0 01-3.1 3.1c-.7 0-1.3-.2-1.8-.5-.5.3-1.1.5-1.8.5a3.1 3.1 0 01-3.1-3.1c0-2.3 2.2-4.2 4.9-4.2z" />
+      </G>
+      <Circle cx={7} cy={10} r={1.4} fill={color} />
+      <Circle cx={12} cy={8.3} r={1.4} fill={color} />
+      <Circle cx={17} cy={10} r={1.4} fill={color} />
+    </Svg>
+  )
+}
+
+export function IconDice({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={4.5} y={4.5} width={15} height={15} rx={3} />
+      </G>
+      <Circle cx={8.7} cy={8.7} r={1.2} fill={color} />
+      <Circle cx={12} cy={12} r={1.2} fill={color} />
+      <Circle cx={15.3} cy={15.3} r={1.2} fill={color} />
+    </Svg>
+  )
+}
+
+export function IconCode({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M8 7L3.5 12 8 17M16 7l4.5 5L16 17M13.5 4.5l-3 15" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconChip({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={7} y={7} width={10} height={10} rx={1.5} />
+        <Rect x={10.2} y={10.2} width={3.6} height={3.6} />
+        <Path d="M9.5 7V3.5M14.5 7V3.5M9.5 20.5V17M14.5 20.5V17M7 9.5H3.5M7 14.5H3.5M20.5 9.5H17M20.5 14.5H17" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconRocket({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M12 3.5c3.2 1.9 4.8 5.1 4.8 8.6l-2.3 2.4h-5l-2.3-2.4c0-3.5 1.6-6.7 4.8-8.6z" />
+        <Circle cx={12} cy={9.5} r={1.8} />
+        <Path d="M7.2 12.1l-2.6 3.6 3.4-.3M16.8 12.1l2.6 3.6-3.4-.3M12 14.5V19M10 14.5l-.8 3.5M14 14.5l.8 3.5" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconChart({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 4.5v15h15" />
+        <Path d="M8.5 19.5V13M12.5 19.5V9M16.5 19.5v-5" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconTv({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={3.5} y={7.5} width={17} height={12} rx={2} />
+        <Path d="M8.5 3.5L12 7.5l3.5-4" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconGlobe({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={8.25} />
+        <Path d="M3.75 12h16.5M12 3.75c2.3 2.4 3.6 5.1 3.6 8.25S14.3 17.85 12 20.25c-2.3-2.4-3.6-5.1-3.6-8.25S9.7 6.15 12 3.75z" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconFlask({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M9.5 3.5h5M10.5 3.5v5.2l-4.9 8.8a2 2 0 001.8 3h9.2a2 2 0 001.8-3l-4.9-8.8V3.5" />
+        <Path d="M7.5 15h9" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconCar({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M5.5 12.5L7 8.4A2 2 0 018.9 7h6.2A2 2 0 0117 8.4l1.5 4.1M4.5 17.5h-1V14a1.5 1.5 0 011.5-1.5h14A1.5 1.5 0 0120.5 14v3.5h-1" />
+        <Path d="M9.6 17.5h4.8" />
+        <Circle cx={7.7} cy={17.5} r={1.8} />
+        <Circle cx={16.3} cy={17.5} r={1.8} />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconBike({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={6.3} cy={15.7} r={3.4} />
+        <Circle cx={17.7} cy={15.7} r={3.4} />
+        <Path d="M6.3 15.7L9.7 9.3h4.9l3.1 6.4M9.7 9.3L12 15.7H6.3M14.6 9.3L12 15.7M14.6 9.3L13.8 7h-1.8" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconTarget({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={8.25} />
+        <Circle cx={12} cy={12} r={4.4} />
+      </G>
+      <Circle cx={12} cy={12} r={1.3} fill={color} />
+    </Svg>
+  )
+}
+
+export function IconSnow({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9" />
+        <Path d="M9.8 4.4L12 6.6l2.2-2.2M9.8 19.6L12 17.4l2.2 2.2" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconShirt({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M8.5 4.5L3.5 7.8l2 3.2 2-1.4v10h9v-10l2 1.4 2-3.2-5-3.3a3.5 3.5 0 01-7 0z" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconWave({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M2.5 9.5c1.8-2.2 4.5-2.2 6.3 0 1.8 2.2 4.5 2.2 6.3 0 1.8-2.2 4.5-2.2 6.3 0" />
+        <Path d="M2.5 15.5c1.8-2.2 4.5-2.2 6.3 0 1.8 2.2 4.5 2.2 6.3 0 1.8-2.2 4.5-2.2 6.3 0" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconMask({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 4.5h15v7.2a7.5 7.5 0 01-15 0z" />
+        <Path d="M8.3 13a3.9 3.9 0 007.4 0" />
+      </G>
+      <Circle cx={9} cy={9} r={1.2} fill={color} />
+      <Circle cx={15} cy={9} r={1.2} fill={color} />
+    </Svg>
+  )
+}
+
+export function IconScissors({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={6} cy={7} r={2.2} />
+        <Circle cx={6} cy={17} r={2.2} />
+        <Path d="M7.9 8.2L20 17M7.9 15.8L20 7" />
+      </G>
+    </Svg>
+  )
+}
+
+// Backend serves emoji for interests; this maps interest names to the designed
+// icon set instead (redesign rule 3 — no emoji anywhere). Grouped by icon and
+// covering the full seed catalog (scripts/interests_seed.json) so nothing
+// falls back to the star.
+const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
+  [IconBall, [
+    'football', 'soccer', 'futsal', 'basketball', 'american football', 'baseball',
+    'softball', 'tennis', 'padel', 'squash', 'volleyball', 'beach volleyball',
+    'netball', 'rugby', 'cricket', 'ice hockey', 'field hockey', 'lacrosse',
+    'table tennis', 'pickleball', 'badminton', 'handball', 'golf', 'bowling',
+    'billiards', 'water polo', 'ultimate frisbee', 'disc golf', 'sport', 'sports',
+  ]],
+  [IconActivity, [
+    'boxing', 'kickboxing', 'mma', 'muay thai', 'karate', 'judo', 'taekwondo',
+    'jiu-jitsu', 'wrestling', 'sumo', 'fencing', 'running', 'marathon',
+    'trail running', 'track & field', 'walking', 'triathlon', 'gymnastics',
+    'parkour', 'cheerleading', 'calisthenics', 'skateboarding', 'roller skating',
+    'zumba', 'fitness',
+  ]],
+  [IconWave, [
+    'swimming', 'diving', 'scuba diving', 'snorkeling', 'rowing', 'kayaking',
+    'canoeing', 'paddleboarding', 'sailing', 'surfing', 'windsurfing',
+    'wakeboarding', 'kitesurfing', 'jet skiing', 'fishing', 'beach', 'cruises',
+    'aquariums',
+  ]],
+  [IconBike, ['cycling', 'mountain biking', 'bmx']],
+  [IconSnow, [
+    'ice skating', 'figure skating', 'skiing', 'snowboarding', 'sledding',
+    'curling', 'ice baths',
+  ]],
+  [IconHiking, [
+    'hiking', 'rock climbing', 'bouldering', 'mountaineering', 'backpacking',
+    'national parks',
+  ]],
+  [IconPlane, [
+    'travel', 'solo travel', 'adventure travel', 'train travel', 'aviation',
+    'paragliding', 'skydiving',
+  ]],
+  [IconCar, [
+    'cars', 'motorsport', 'karting', 'motocross', 'motorcycles', 'car tuning',
+    'off-roading', 'road trips', 'van life',
+  ]],
+  [IconDumbbell, ['gym', 'weightlifting', 'powerlifting', 'crossfit', 'bodybuilding']],
+  [IconLeaf, [
+    'yoga', 'pilates', 'meditation', 'massage & spa', 'veganism', 'vegetarian',
+    'healthy eating', 'nutrition', 'gardening', 'houseplants', 'beekeeping',
+    'farming', 'sustainability', 'flower arranging', 'fragrances', 'foraging',
+  ]],
+  [IconInsight, ['self-improvement', 'philosophy', 'psychology', 'mathematics', 'trivia']],
+  [IconMic, [
+    'singing', 'karaoke', 'rapping', 'beatboxing', 'hip-hop', 'choir',
+    'stand-up comedy', 'podcasts',
+  ]],
+  [IconPiano, ['piano', 'accordion']],
+  [IconHeadphones, ['djing', 'music production', 'electronic music', 'techno']],
+  [IconMusic, [
+    'music', 'guitar', 'bass guitar', 'ukulele', 'banjo', 'violin', 'cello',
+    'drums', 'saxophone', 'trumpet', 'songwriting', 'rock', 'metal', 'jazz',
+    'classical music', 'k-pop', 'country music', 'dancing', 'ballet',
+    'hip-hop dance', 'breakdancing', 'salsa', 'tango',
+  ]],
+  [IconSound, ['concerts', 'music festivals']],
+  [IconPencil, [
+    'drawing', 'calligraphy', 'writing', 'poetry', 'journaling', 'blogging',
+    'origami', 'architecture',
+  ]],
+  [IconBrush, [
+    'art', 'painting', 'digital art', 'graphic design', 'animation', 'sculpting',
+    'pottery', 'makeup artistry', 'nail art', 'tattoos', 'diy & crafts',
+    'woodworking', 'jewelry making', 'candle making', 'soap making',
+    'interior design', 'lego building', 'model building',
+  ]],
+  [IconScissors, [
+    'sewing', 'knitting', 'crochet', 'embroidery', 'fashion design', 'scrapbooking',
+  ]],
+  [IconCamera, ['photography', 'photo']],
+  [IconFilm, [
+    'film', 'movies', 'cinema', 'filmmaking', 'videography', 'documentaries', 'anime',
+  ]],
+  [IconMask, [
+    'theater', 'improv', 'cosplay', 'magic tricks', 'juggling', 'circus arts',
+  ]],
+  [IconUtensils, [
+    'cooking', 'foodie', 'fine dining', 'street food', 'sushi', 'pizza',
+    'burgers', 'ramen', 'brunch', 'cheese', 'picnics',
+  ]],
+  [IconCake, ['baking', 'bread making', 'desserts', 'chocolate', 'ice cream']],
+  [IconFire, ['bbq & grilling', 'sauna']],
+  [IconCoffee, ['coffee', 'tea', 'bubble tea', 'smoothies']],
+  [IconGlass, ['wine tasting', 'craft beer', 'cocktails', 'nightlife']],
+  [IconTent, ['camping']],
+  [IconPin, ['geocaching']],
+  [IconStar, ['stargazing', 'astronomy', 'astrology']],
+  [IconRocket, ['space exploration', 'sci-fi', 'startups', 'entrepreneurship']],
+  [IconEye, ['birdwatching', 'tarot']],
+  [IconGamepad, [
+    'gaming', 'games', 'retro gaming', 'vr gaming', 'game development', 'esports',
+  ]],
+  [IconDice, [
+    'board games', 'card games', 'poker', 'chess', 'puzzles', 'mahjong',
+    'd&d & tabletop rpgs', 'trading cards', 'escape rooms',
+  ]],
+  [IconCode, ['coding', 'web development']],
+  [IconChip, [
+    'ai & machine learning', 'robotics', 'pc building', '3d printing',
+    'electronics', 'drones',
+  ]],
+  [IconShield, ['cybersecurity']],
+  [IconChart, ['crypto', 'investing', 'personal finance', 'coin collecting']],
+  [IconTv, ['tv series', 'streaming']],
+  [IconGlobe, ['languages']],
+  [IconFlask, ['science']],
+  [IconBook, ['books', 'reading', 'manga', 'comics', 'history', 'fantasy']],
+  [IconSearch, ['true crime', 'antiques']],
+  [IconGhost, ['horror']],
+  [IconImage, ['museums & galleries']],
+  [IconPaw, [
+    'dogs', 'cats', 'pets', 'horses', 'horse riding', 'polo', 'reptiles',
+  ]],
+  [IconHeart, ['volunteering', 'skincare']],
+  [IconShirt, ['fashion', 'thrifting', 'sneakers', 'streetwear', 'vintage fashion']],
+  [IconTarget, ['darts', 'archery', 'watches']],
+  [IconMail, ['stamp collecting']],
+  [IconPeople, ['genealogy']],
+]
+
+const INTEREST_ICONS: Record<string, IconComponent> = {}
+for (const [icon, names] of INTEREST_ICON_GROUPS) {
+  for (const n of names) INTEREST_ICONS[n] = icon
+}
+
+// Loose keyword match so future backend interests still get a sensible icon.
+const KEYWORD_ICONS: [string, IconComponent][] = [
+  ['music', IconMusic],
+  ['dance', IconMusic],
+  ['gam', IconGamepad],
+  ['food', IconUtensils],
+  ['cook', IconUtensils],
+  ['ball', IconBall],
+  ['travel', IconPlane],
+  ['design', IconBrush],
+  ['tech', IconChip],
+  ['sport', IconBall],
+]
+
 export function iconForInterest(name: string): IconComponent {
-  return INTEREST_ICONS[name.trim().toLowerCase()] ?? IconStar
+  const key = name.trim().toLowerCase()
+  const exact = INTEREST_ICONS[key]
+  if (exact) return exact
+  const keyword = KEYWORD_ICONS.find(([word]) => key.includes(word))
+  return keyword ? keyword[1] : IconStar
 }

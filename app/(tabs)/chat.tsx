@@ -205,6 +205,34 @@ export default function ChatScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
+  const fetchUnreadBreakdown = useCallback(async () => {
+    try {
+      const res = await api.get<unknown>('/api/friends/messages/unread/breakdown/');
+      const data = res.data;
+      // Accept { [userId]: count } or [{ user_id, count }]
+      const countMap = new Map<number, number>();
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+          countMap.set(Number(k), Number(v) || 0);
+        }
+      } else if (Array.isArray(data)) {
+        for (const entry of data as any[]) {
+          const uid = entry.user_id ?? entry.id;
+          if (uid != null) countMap.set(Number(uid), Number(entry.count ?? entry.unread_count) || 0);
+        }
+      }
+      if (countMap.size === 0) return;
+      setFriendList((prev) => ({
+        connections: prev.connections.map((u) =>
+          countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
+        ),
+        friends: prev.friends.map((u) =>
+          countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
+        ),
+      }));
+    } catch {}
+  }, []);
+
   const fetchAll = useCallback(async () => {
     const [listRes, pendingRes, blockedRes] = await Promise.allSettled([
       api.get<FriendList>('/api/friends/list/'),
@@ -236,9 +264,10 @@ export default function ChatScreen() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useFocusEffect(useCallback(() => {
     fetchAll();
+    fetchUnreadBreakdown();
     pollRef.current = setInterval(fetchAll, 5_000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [fetchAll]));
+  }, [fetchAll, fetchUnreadBreakdown]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -317,6 +346,10 @@ export default function ChatScreen() {
   }
 
   function handleMessage(user: UserSummary) {
+    setFriendList((prev) => ({
+      connections: prev.connections.map((u) => u.id === user.id ? { ...u, unread_count: 0 } : u),
+      friends:     prev.friends.map((u)     => u.id === user.id ? { ...u, unread_count: 0 } : u),
+    }));
     router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } } as any);
   }
 

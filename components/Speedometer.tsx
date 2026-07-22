@@ -162,10 +162,15 @@ export function Speedometer() {
     return () => clearInterval(id);
   }, [fetchNotifBadge]);
 
-  // Re-fetch on tab focus
+  // Re-fetch on tab focus; optimistic clear when entering a message thread
   useEffect(() => {
     if (pathname.includes('chat'))          fetchChatBadge();
     if (pathname.includes('notification')) fetchNotifBadge();
+    if (pathname.includes('messages')) {
+      setChatBadge(0);
+      const t = setTimeout(() => fetchChatBadge(), 1500);
+      return () => clearTimeout(t);
+    }
   }, [pathname]);
 
   const needleAngle      = useSharedValue(SECTIONS[matchSection(pathname)].mid);

@@ -98,9 +98,12 @@ export default function MessagesScreen() {
   const ws = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
+
+
   useEffect(() => {
+    console.log("[Messages] fetching current user profile..")
     api.get<{ id: number | string }>('/api/users/profile/')
-      .then((r) => { currentUserIdRef.current = Number(r.data.id); })
+      .then((r) => {console.log("[Messages] User's current id:" , r.data.id) ,  currentUserIdRef.current = Number(r.data.id); })
       .catch(() => {});
 
     api.get<{ profile_picture?: string }>(`/api/users/profile/${id}/`)

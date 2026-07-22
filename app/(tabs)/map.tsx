@@ -39,6 +39,7 @@ import { Speedometer } from '@/components/Speedometer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import {
+  IconCamera,
   IconChevron,
   IconClose,
   IconFunny,
@@ -613,6 +614,19 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
     if (!result.canceled && result.assets[0]) setPhotoUri(result.assets[0].uri);
   }
 
+  async function takePhoto() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow camera access to take a photo.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'] as any,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) setPhotoUri(result.assets[0].uri);
+  }
+
   async function handlePost() {
     if (!text.trim()) {
       Alert.alert('Write something', 'Your story needs some text.');
@@ -663,9 +677,11 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
             </View>
           ) : null}
           <View style={styles.createModalActions}>
+            <TouchableOpacity style={styles.photoPickBtn} onPress={takePhoto} activeOpacity={0.75}>
+              <IconCamera size={20} color={colors.t2} />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.photoPickBtn} onPress={pickPhoto} activeOpacity={0.75}>
               <IconImage size={20} color={colors.t2} />
-              <Text style={styles.photoPickText}>Photo</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.postBtn, (!text.trim() || posting) && { opacity: 0.5 }]}
@@ -1985,17 +2001,15 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   photoPickBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderRadius: radius.m,
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: colors.border,
   },
-  photoPickText: { fontFamily: fonts.body, color: colors.t1, fontSize: 14, fontWeight: '600' },
   postBtn: {
     flex: 1,
     backgroundColor: colors.teal,

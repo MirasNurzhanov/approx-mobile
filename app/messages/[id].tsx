@@ -196,18 +196,7 @@ export default function MessagesScreen() {
     }
   }
 
-  async function handleAttach() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'] as any,
-      allowsEditing: true,
-      quality: 0.8,
-    });
-    if (result.canceled) return;
-
-    const asset = result.assets[0];
+  function sendImage(asset: ImagePicker.ImagePickerAsset) {
     const tempId = `temp-img-${Date.now()}`;
 
     setMessages((prev) => [
@@ -218,6 +207,32 @@ export default function MessagesScreen() {
     const formData = new FormData();
     formData.append('image', { uri: asset.uri, type: asset.mimeType ?? 'image/jpeg', name: 'attachment.jpg' } as any);
     api.post(`/api/friends/messages/${id}/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
+  }
+
+  async function handleAttach() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'] as any,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+    if (result.canceled) return;
+    sendImage(result.assets[0]);
+  }
+
+  async function handleCamera() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') return;
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'] as any,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+    if (result.canceled) return;
+    sendImage(result.assets[0]);
   }
 
   const canSend = text.trim().length > 0;
@@ -326,6 +341,10 @@ export default function MessagesScreen() {
 
       {/* Input bar */}
       <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
+        <Pressable style={styles.attachBtn} onPress={handleCamera} hitSlop={4}>
+          <Ionicons name="camera-outline" size={20} color={colors.t3} />
+        </Pressable>
+
         <Pressable style={styles.attachBtn} onPress={handleAttach} hitSlop={4}>
           <Ionicons name="image-outline" size={20} color={colors.t3} />
         </Pressable>

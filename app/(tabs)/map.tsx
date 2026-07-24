@@ -1380,7 +1380,7 @@ export default function MapScreen() {
         <ZoneBanner
           username={activeZone.username}
           isSelf={activeZone.isSelf}
-          canListen={activeZone.isFriend || activeZone.isSelf}
+          canListen={activeZone.isFriend}
           isPlaying={isPlaying}
           onTap={() => {
             if (!activeZone.audioUrl) return;

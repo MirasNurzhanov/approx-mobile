@@ -139,13 +139,11 @@ const DARK_MAP_STYLE = [
   { featureType: 'water', elementType: 'geometry',             stylers: [{ color: '#0A0A0D' }] },
   { featureType: 'water', elementType: 'labels.text.fill',     stylers: [{ color: '#5E5E68' }] },
   { featureType: 'poi', elementType: 'geometry',               stylers: [{ color: '#101312' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill',       stylers: [{ color: '#5E5E68' }] },
+  { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.business', elementType: 'labels', stylers: [{ visibility: 'off' }] },
   { featureType: 'transit', elementType: 'geometry',           stylers: [{ color: '#16161B' }] },
   { featureType: 'administrative', elementType: 'geometry',         stylers: [{ color: '#1A1A20' }] },
   { featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{ color: '#5E5E68' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.food_and_drink', stylers: [{ visibility: 'off' }] },
 ];
 const SHEET_H   = 400;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };

@@ -22,15 +22,13 @@ export async function registerForPushNotifications(): Promise<string | null> {
     });
   }
 
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  let finalStatus = existing;
-
-  if (existing !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-
-  if (finalStatus !== 'granted') {
+  // Deliberately does NOT request. This runs on login, and prompting here
+  // meant the very first thing a new user saw was an unexplained system
+  // dialog — iOS only ever shows it once, so a reflexive "Don't Allow" killed
+  // push for good. The ask now lives behind an explanation in
+  // Settings → Permissions; this only picks up a grant that already exists.
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') {
     return null;
   }
 

@@ -52,7 +52,13 @@ function AppShell() {
       <Stack.Screen name="profile/[id]"    options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="edit-profile"    options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="search"          options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="leaderboard"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="saved-stories"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="blocked-users"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="privacy"         options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="connections"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="permissions"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="nearby"          options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding"      options={{ headerShown: false }} />
       <Stack.Screen name="register"        options={{ headerShown: false }} />
       <Stack.Screen name="interests-setup" options={{ headerShown: false }} />

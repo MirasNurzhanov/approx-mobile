@@ -11,6 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -21,8 +22,17 @@ import { useAuth } from '@/context/AuthContext';
 import {
   startBackgroundLocationUpdates,
   stopBackgroundLocationUpdates,
+  syncBackgroundLocationSharing,
 } from '@/services/backgroundLocation';
+import { registerForPushNotifications } from '@/services/notifications';
 import { getPref, setPref } from '@/services/preferences';
+import { usePermissionPrimer } from '@/components/PermissionPrimer';
+import {
+  refreshPrivacy,
+  updatePrivacy,
+  usePrivacySettings,
+  type LocationSharing,
+} from '@/services/privacy';
 import { Speedometer } from '@/components/Speedometer';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -34,6 +44,7 @@ import {
   IconEyeOff,
   IconGhost,
   IconInfo,
+  IconLock,
   IconLogout,
   IconMail,
   IconMusic,
@@ -47,14 +58,6 @@ import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { colors, fonts, radius } from '@/constants/theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type PrivacyMode = 'active' | 'ghost' | 'invisible';
-
-interface Profile {
-  privacy_mode?: PrivacyMode;
-  privacy?: PrivacyMode;
-  status?: PrivacyMode;
-}
-
 interface SelfZone {
   zone_active?: boolean;
   zone_radius?: number;
@@ -62,16 +65,19 @@ interface SelfZone {
 
 const FEEDBACK_EMAIL = 'support@aura-app.com';
 
-// ─── Privacy mode definitions ─────────────────────────────────────────────────
-const PRIVACY_MODES: {
-  key: PrivacyMode;
+// ─── Location sharing ─────────────────────────────────────────────────────────
+// This replaces the old Active/Ghost/Invisible selector. Ghost was labelled
+// "Friends only" but actually hid coordinates from everyone including friends;
+// it is now Approximate, which is what people assumed it did all along.
+const LOCATION_MODES: {
+  key: LocationSharing;
   Icon: IconComponent;
   label: string;
   sub: string;
 }[] = [
-  { key: 'active',    Icon: IconEye,    label: 'Active',    sub: 'Visible to all' },
-  { key: 'ghost',     Icon: IconGhost,  label: 'Ghost',     sub: 'Friends only' },
-  { key: 'invisible', Icon: IconEyeOff, label: 'Invisible', sub: 'Hidden' },
+  { key: 'live',        Icon: IconEye,    label: 'Live',        sub: 'Exact position' },
+  { key: 'approximate', Icon: IconGhost,  label: 'Approximate', sub: 'Within ~500m' },
+  { key: 'paused',      Icon: IconEyeOff, label: 'Paused',      sub: 'Off the map' },
 ];
 
 // ─── SettingsRow ──────────────────────────────────────────────────────────────
@@ -136,9 +142,10 @@ export default function SettingsScreen() {
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
-  const [privacy, setPrivacy] = useState<PrivacyMode>('active');
-  const [loading, setLoading] = useState(true);
+  const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);
+  const [privacyFailed, setPrivacyFailed] = useState(false);
+  const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   const [zoneActive, setZoneActive] = useState<boolean | null>(null);
   const [zoneSaving, setZoneSaving] = useState(false);
@@ -166,13 +173,7 @@ export default function SettingsScreen() {
   }, [refreshNotifPermission]);
 
   useEffect(() => {
-    api.get<Profile>('/api/users/profile/')
-      .then((r) => {
-        const mode = r.data.privacy_mode ?? r.data.privacy ?? r.data.status ?? 'active';
-        setPrivacy(mode as PrivacyMode);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    refreshPrivacy().catch(() => setPrivacyFailed(true));
 
     api.get<SelfZone>('/api/users/zone/')
       .then((r) => setZoneActive(!!r.data.zone_active))
@@ -182,15 +183,15 @@ export default function SettingsScreen() {
     getPref('backgroundLocation').then(setBgLocation);
   }, []);
 
-  async function selectPrivacy(mode: PrivacyMode) {
-    if (mode === privacy || saving) return;
-    const prev = privacy;
-    setPrivacy(mode);
+  async function selectLocationSharing(mode: LocationSharing) {
+    if (mode === settings?.location_sharing || saving) return;
     setSaving(true);
     try {
-      await api.patch('/api/users/privacy/', { privacy_mode: mode });
+      await updatePrivacy({ location_sharing: mode });
+      // Pausing must stop OS tracking now, not at the next app launch.
+      await syncBackgroundLocationSharing();
     } catch {
-      setPrivacy(prev);
+      Alert.alert('Could not update', 'Your previous setting is still in effect.');
     } finally {
       setSaving(false);
     }
@@ -262,24 +263,11 @@ export default function SettingsScreen() {
       return;
     }
     try {
-      const current = await Notifications.getPermissionsAsync();
-      if (current.granted) {
-        setNotifAllowed(true);
-        return;
-      }
-      if (current.canAskAgain) {
-        const r = await Notifications.requestPermissionsAsync();
-        setNotifAllowed(r.granted);
-      } else {
-        Alert.alert(
-          'Permission needed',
-          'Enable notifications for Aura in system settings.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-          ],
-        );
-      }
+      // Primed rather than prompted cold, and the primer itself offers the
+      // route to system settings when the ask is no longer possible.
+      const granted = await ensurePermission('notifications');
+      setNotifAllowed(granted);
+      if (granted) registerForPushNotifications().catch(() => {});
     } catch {
       setNotifAllowed(false);
     }
@@ -327,36 +315,57 @@ export default function SettingsScreen() {
           {saving && <ActivityIndicator color={colors.teal} size="small" />}
         </View>
 
-        {/* Visibility */}
+        {/* Location sharing */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>VISIBILITY</Text>
-          {loading ? (
+          <Text style={styles.sectionLabel}>LOCATION SHARING</Text>
+          {!settings ? (
             <View style={styles.loadingWrap}>
-              <ActivityIndicator color={colors.teal} />
+              {privacyFailed ? (
+                <Pressable
+                  onPress={() => {
+                    setPrivacyFailed(false);
+                    refreshPrivacy().catch(() => setPrivacyFailed(true));
+                  }}
+                  style={({ pressed }) => pressed && styles.pressed}
+                >
+                  <Text style={styles.modeNote}>
+                    Couldn’t load your location setting. Tap to retry.
+                  </Text>
+                </Pressable>
+              ) : (
+                <ActivityIndicator color={colors.teal} />
+              )}
             </View>
           ) : (
-            <View style={styles.modeRow}>
-              {PRIVACY_MODES.map((mode) => {
-                const selected = privacy === mode.key;
-                return (
-                  <Pressable
-                    key={mode.key}
-                    onPress={() => selectPrivacy(mode.key)}
-                    style={({ pressed }) => [
-                      styles.modeCard,
-                      selected && styles.modeCardSelected,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <mode.Icon size={22} color={selected ? colors.teal : colors.t3} />
-                    <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
-                      {mode.label}
-                    </Text>
-                    <Text style={styles.modeSub}>{mode.sub}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <>
+              <View style={styles.modeRow}>
+                {LOCATION_MODES.map((mode) => {
+                  const selected = settings.location_sharing === mode.key;
+                  return (
+                    <Pressable
+                      key={mode.key}
+                      onPress={() => selectLocationSharing(mode.key)}
+                      style={({ pressed }) => [
+                        styles.modeCard,
+                        selected && styles.modeCardSelected,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <mode.Icon size={22} color={selected ? colors.teal : colors.t3} />
+                      <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
+                        {mode.label}
+                      </Text>
+                      <Text style={styles.modeSub}>{mode.sub}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {settings.is_private && (
+                <Text style={styles.modeNote}>
+                  Your account is private — this only controls where you appear on the map.
+                </Text>
+              )}
+            </>
           )}
         </View>
 
@@ -407,14 +416,20 @@ export default function SettingsScreen() {
             <SettingsRow
               icon={IconShield}
               label="Privacy & safety"
-              onPress={() => Linking.openURL('https://aura-app.com/privacy')}
+              onPress={() => router.push('/privacy')}
+              right={<IconChevron size={16} color={colors.t3} />}
+            />
+            <SettingsRow
+              icon={IconLock}
+              label="Permissions"
+              onPress={() => router.push('/permissions')}
               right={<IconChevron size={16} color={colors.t3} />}
             />
             <SettingsRow
               icon={IconBlocked}
               label="Blocked users"
               last
-              onPress={() => Alert.alert('Blocked users', 'Coming soon.')}
+              onPress={() => router.push('/blocked-users')}
               right={<IconChevron size={16} color={colors.t3} />}
             />
           </Card>
@@ -460,6 +475,8 @@ export default function SettingsScreen() {
           <Text style={styles.deleteText}>Delete account</Text>
         </Pressable>
       </ScrollView>
+
+      {primer}
 
       <Speedometer />
     </View>
@@ -527,6 +544,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 10,
     color: colors.t3,
+    textAlign: 'center',
+  },
+  modeNote: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.t3,
+    marginTop: 10,
   },
 
   // Settings rows card

@@ -16,7 +16,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { useScrollNav } from '@/context/ScrollNavContext';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
+import { MAX_SCALE_FIXED, type as typography } from '@/constants/theme';
 
 // ─── Animated SVG primitives ──────────────────────────────────────────────────
 const AnimatedLine   = Animated.createAnimatedComponent(Line);
@@ -86,6 +88,18 @@ function sectorPath(start: number, end: number, gap = 1.2): string {
   ].join(' ');
 }
 
+function badgeFor(index: number, chatBadge: number, notifBadge: number): number {
+  if (index === CHAT_IDX) return chatBadge;
+  if (index === NOTIF_IDX) return notifBadge;
+  return 0;
+}
+
+/** "Chat, 3 unread" rather than "Chat" followed by a bare "3". */
+function tabLabel(label: string, badge: number): string {
+  if (badge <= 0) return label;
+  return `${label}, ${badge > 99 ? 'over 99' : badge} unread`;
+}
+
 function matchSection(pathname: string): number {
   const idx = SECTIONS.findIndex(
     s => pathname === s.route || pathname.startsWith(s.route) || pathname.endsWith(`/${s.name}`),
@@ -114,6 +128,18 @@ export function Speedometer() {
   const [activeIdx, setActiveIdx] = useState(() => matchSection(pathname));
   const [chatBadge,  setChatBadge]  = useState(0);
   const [notifBadge, setNotifBadge] = useState(0);
+
+  // The needle sweep and the collapse spring are decorative. With Reduce
+  // Motion on they jump to the end state instead — the feedback is kept, the
+  // movement is not.
+  const reduceMotion = useReduceMotion();
+  const animate = useCallback(
+    <T,>(value: T, spring: boolean) => {
+      if (reduceMotion) return value;
+      return (spring ? withSpring(value as any, SPRING) : withTiming(value as any, FADE)) as T;
+    },
+    [reduceMotion],
+  );
 
   // ── Chat badge: pending Hi requests + unread messages ────────────────────────
   const fetchChatBadge = useCallback(async () => {
@@ -181,8 +207,8 @@ export function Speedometer() {
   useEffect(() => {
     const idx = matchSection(pathname);
     setActiveIdx(idx);
-    needleAngle.value = withSpring(SECTIONS[idx].mid, SPRING);
-  }, [pathname]);
+    needleAngle.value = animate(SECTIONS[idx].mid, true);
+  }, [pathname, animate]);
 
   // Animate transition when collapsed state or safeBottom changes
   const safeBottomRef = useRef(safeBottom);
@@ -196,15 +222,15 @@ export function Speedometer() {
   }, [safeBottom]);
 
   useEffect(() => {
-    containerH.value = withSpring(
+    containerH.value = animate(
       collapsed ? SLIM_H + safeBottomRef.current : SVG_H + safeBottomRef.current,
-      SPRING,
+      true,
     );
-    collapseProgress.value = withTiming(collapsed ? 1 : 0, FADE);
+    collapseProgress.value = animate(collapsed ? 1 : 0, false);
   }, [collapsed]);
 
   function handlePress(idx: number) {
-    needleAngle.value = withSpring(SECTIONS[idx].mid, SPRING);
+    needleAngle.value = animate(SECTIONS[idx].mid, true);
     setActiveIdx(idx);
     router.navigate(SECTIONS[idx].route as any);
   }
@@ -277,12 +303,19 @@ export function Speedometer() {
           {SECTIONS.map((s, i) => {
             const isActive = i === activeIdx;
             const pos = polar(R_ICO, s.mid);
+            const badge = badgeFor(i, chatBadge, notifBadge);
             return (
               <Pressable
                 key={i}
                 onPress={() => handlePress(i)}
                 style={[styles.iconBtn, { left: pos.x - 26, top: pos.y - 24 }]}
                 hitSlop={10}
+                // One node per tab, so the badge is read as part of the tab
+                // ("Chat, 3 unread") instead of as a stray number after it.
+                accessible
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isActive }}
+                accessibilityLabel={tabLabel(s.label, badge)}
               >
                 <Ionicons
                   name={isActive ? s.activeIcon : s.icon}
@@ -291,18 +324,18 @@ export function Speedometer() {
                 />
                 <Text
                   numberOfLines={1}
+                  // The arc geometry is fixed, so the label is capped rather
+                  // than allowed to scale until it clips.
+                  maxFontSizeMultiplier={MAX_SCALE_FIXED}
                   style={[styles.label, { color: isActive ? '#0a0a0a' : '#444' }]}
                 >
                   {s.label}
                 </Text>
-                {i === CHAT_IDX && chatBadge > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{chatBadge > 99 ? '99+' : String(chatBadge)}</Text>
-                  </View>
-                )}
-                {i === NOTIF_IDX && notifBadge > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{notifBadge > 99 ? '99+' : String(notifBadge)}</Text>
+                {badge > 0 && (
+                  <View style={styles.badge} importantForAccessibility="no-hide-descendants">
+                    <Text style={styles.badgeText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
+                      {badge > 99 ? '99+' : String(badge)}
+                    </Text>
                   </View>
                 )}
               </Pressable>
@@ -323,12 +356,19 @@ export function Speedometer() {
           <View style={styles.slimRow}>
             {SECTIONS.map((s, i) => {
               const isActive = i === activeIdx;
+              const badge = badgeFor(i, chatBadge, notifBadge);
               return (
                 <Pressable
                   key={i}
                   onPress={() => handlePress(i)}
                   style={styles.slimBtn}
                   hitSlop={10}
+                  // The collapsed bar has no visible text at all, so without
+                  // this it is six unnamed buttons to a screen reader.
+                  accessible
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: isActive }}
+                  accessibilityLabel={tabLabel(s.label, badge)}
                 >
                   <View style={{ position: 'relative' }}>
                     <Ionicons
@@ -336,14 +376,11 @@ export function Speedometer() {
                       size={22}
                       color={isActive ? '#00b4a6' : '#444'}
                     />
-                    {i === CHAT_IDX && chatBadge > 0 && (
-                      <View style={styles.badgeSlim}>
-                        <Text style={styles.badgeText}>{chatBadge > 99 ? '99+' : String(chatBadge)}</Text>
-                      </View>
-                    )}
-                    {i === NOTIF_IDX && notifBadge > 0 && (
-                      <View style={styles.badgeSlim}>
-                        <Text style={styles.badgeText}>{notifBadge > 99 ? '99+' : String(notifBadge)}</Text>
+                    {badge > 0 && (
+                      <View style={styles.badgeSlim} importantForAccessibility="no-hide-descendants">
+                        <Text style={styles.badgeText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
+                          {badge > 99 ? '99+' : String(badge)}
+                        </Text>
                       </View>
                     )}
                   </View>
@@ -412,7 +449,9 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   label: {
-    fontSize: 8,
+    // Was 8pt — below the legibility floor. 11 is the smallest size in the
+    // scale, and the arc has room for it.
+    fontSize: typography.micro,
     fontWeight: '700',
     marginTop: 1,
     letterSpacing: 0.2,
@@ -423,9 +462,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -5,
     right: -6,
-    minWidth: 14,
-    height: 14,
-    borderRadius: 7,
+    // Sized for 10pt text at the 1.4 cap; the old 14pt box clipped it.
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
@@ -435,13 +475,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -4,
     right: -7,
-    minWidth: 14,
-    height: 14,
-    borderRadius: 7,
+    // Sized for 10pt text at the 1.4 cap; the old 14pt box clipped it.
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 2,
   },
-  badgeText: { color: '#fff', fontSize: 8, fontWeight: '800' },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
 });

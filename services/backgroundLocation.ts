@@ -2,7 +2,9 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
+import { reportLocation } from './location';
 import { getPref } from './preferences';
+import { getCachedLocationSharing } from './privacy';
 
 export const BACKGROUND_LOCATION_TASK = 'aura-background-location';
 
@@ -18,13 +20,19 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     const location = data?.locations?.at(-1);
     if (!location) return;
 
-    const lat = parseFloat(location.coords.latitude.toFixed(6));
-    const lng = parseFloat(location.coords.longitude.toFixed(6));
     console.log('[BG Task] running, checking zones...');
-    console.log('[BG Location] update:', lat, lng);
 
     try {
-      await api.patch('/api/proximity/location/', { latitude: lat, longitude: lng });
+      // Honours the Location sharing setting: paused sends nothing at all,
+      // approximate coarsens before transmitting.
+      const sent = await reportLocation({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+      if (!sent) {
+        console.log('[BG Location] sharing paused, nothing sent');
+        return;
+      }
     } catch (e: any) {
       console.log('[BG Location] patch failed:', e?.response?.status);
     }
@@ -48,6 +56,15 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 export async function startBackgroundLocationUpdates(): Promise<void> {
   if (!(await getPref('backgroundLocation'))) {
     console.log('[BG Location] disabled by user preference, skipping');
+    return;
+  }
+
+  // "Pause location sharing entirely" should stop the phone tracking us at
+  // all, not just stop the uploads. The per-update check in the task is the
+  // correctness guarantee; this is the one that saves the battery.
+  if ((await getCachedLocationSharing()) === 'paused') {
+    console.log('[BG Location] sharing paused, not starting');
+    await stopBackgroundLocationUpdates();
     return;
   }
 
@@ -75,6 +92,17 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     },
   });
   console.log('[BG Location] started');
+}
+
+/** Start or stop OS-level tracking to match the current sharing mode. Call
+ * after changing Location sharing so pausing takes effect immediately rather
+ * than at the next app launch. */
+export async function syncBackgroundLocationSharing(): Promise<void> {
+  if ((await getCachedLocationSharing()) === 'paused') {
+    await stopBackgroundLocationUpdates();
+    return;
+  }
+  await startBackgroundLocationUpdates();
 }
 
 export async function stopBackgroundLocationUpdates(): Promise<void> {

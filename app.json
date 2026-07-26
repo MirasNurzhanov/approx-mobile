@@ -22,9 +22,14 @@
           "fetch",
           "remote-notification"
         ],
-        "NSLocationWhenInUseUsageDescription": "Aura uses your location to find nearby people with shared interests.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Aura uses your location in the background to notify you when you enter someone's zone.",
-        "NSLocationAlwaysUsageDescription": "Aura uses your location in the background to notify you when you enter someone's zone."
+        "NSLocationWhenInUseUsageDescription": "Aura shows you people within about 500m who share your interests, and places you on the map so they can find you. You choose whether your position is exact or rounded to a ~500m area, and you can pause sharing at any time in Settings.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
+        "NSLocationAlwaysUsageDescription": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
+        "NSCameraUsageDescription": "Aura uses the camera to take the photo that proves you completed a quest, and to take photos for stories and chat messages. Quest proof must be taken in the moment — a photo from your library cannot be used.",
+        "NSPhotoLibraryUsageDescription": "Aura lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Aura never reads your library."
+      },
+      "entitlements": {
+        "com.apple.developer.devicecheck.appattest-environment": "development"
       }
     },
     "android": {
@@ -45,11 +50,10 @@
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION"
+        "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.arcanix.aura"
     },
@@ -72,8 +76,9 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Aura uses your camera so you can take photos for stories and messages.",
-          "photosPermission": "Aura accesses your photos so you can share them in stories and messages."
+          "cameraPermission": "Aura uses the camera to take the photo that proves you completed a quest, and to take photos for stories and chat messages. Quest proof must be taken in the moment — a photo from your library cannot be used.",
+          "photosPermission": "Aura lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Aura never reads your library.",
+          "microphonePermission": false
         }
       ],
       [
@@ -94,7 +99,8 @@
       "router": {},
       "eas": {
         "projectId": "a07cd98a-5015-4f63-a367-4526c5a6a222"
-      }
+      },
+      "googleCloudProjectNumber": ""
     }
   }
 }

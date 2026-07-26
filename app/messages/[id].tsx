@@ -19,6 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { decodeStoryReply } from '@/services/storyReply';
+import { announce } from '@/hooks/useReduceMotion';
+import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
 import { colors, fonts, radius } from '@/constants/theme';
 
@@ -93,6 +95,7 @@ export default function MessagesScreen() {
   const [loading, setLoading] = useState(true);
   const [wsReady, setWsReady] = useState(false);
   const [otherUserPicture, setOtherUserPicture] = useState<string | null>(null);
+  const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   const currentUserIdRef = useRef<number | null>(null);
   const ws = useRef<WebSocket | null>(null);
@@ -149,6 +152,16 @@ export default function MessagesScreen() {
           const raw: RawMessage = JSON.parse(event.data);
           const incoming = normalise(raw);
           if (!incoming.text && !incoming.image) return;
+
+          // A message arriving only changes the list — there is no focus
+          // change, so a screen reader says nothing unless we announce it.
+          if (incoming.sender_id !== currentUserIdRef.current) {
+            announce(
+              incoming.text
+                ? `${username ?? 'New message'}: ${incoming.text}`
+                : `${username ?? 'Someone'} sent a photo`,
+            );
+          }
 
           setMessages((prev) => {
             if (incoming.id && prev.some((m) => m.id === incoming.id && !m.pending)) return prev;
@@ -213,9 +226,8 @@ export default function MessagesScreen() {
   }
 
   async function handleAttach() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
-
+    // The system picker needs no permission; asking would spend a prompt for
+    // nothing. See app/permissions.tsx.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'] as any,
       allowsEditing: true,
@@ -226,8 +238,10 @@ export default function MessagesScreen() {
   }
 
   async function handleCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') return;
+    // Explains itself first, and offers a route to Settings if the camera was
+    // refused earlier — previously this returned silently and the button just
+    // appeared broken.
+    if (!(await ensurePermission('camera'))) return;
 
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'] as any,
@@ -366,10 +380,15 @@ export default function MessagesScreen() {
           style={[styles.sendBtn, canSend && styles.sendBtnActive]}
           onPress={sendText}
           disabled={!canSend}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Send message"
+          accessibilityState={{ disabled: !canSend }}
         >
           <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
         </Pressable>
       </View>
+      {primer}
     </KeyboardAvoidingView>
   );
 }

@@ -299,12 +299,55 @@ export function IconBlocked({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
+export function IconList({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M9 7h11M9 12h11M9 17h11" />
+        <Path d="M4.5 7h.01M4.5 12h.01M4.5 17h.01" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconLock({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M5.5 10.5h13v9h-13z" />
+        <Path d="M8.5 10.5V7.75a3.5 3.5 0 017 0v2.75" />
+        <Path d="M12 14v2.5" />
+      </G>
+    </Svg>
+  )
+}
+
 export function IconTrash({ size = 24, color = colors.t2 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
       <G stroke={color} {...stroke}>
         <Path d="M4.5 6.5h15M9.5 6.5V4h5v2.5M6.5 6.5l1 13h9l1-13" />
         <Path d="M10 10.5v5.5M14 10.5v5.5" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconBookmark({ size = 24, color = colors.t2, filled = false }: IconProps & { filled?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke} fill={filled ? color : 'none'}>
+        <Path d="M6.5 3.5h11v17L12 16l-5.5 4.5z" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconCheck({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 12.5l5 5L19.5 7" />
       </G>
     </Svg>
   )

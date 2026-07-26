@@ -19,6 +19,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { api } from '@/services/api';
+import { blockUser, refreshBlocked, unblockUser, useBlockedUsers } from '@/services/blocked';
 import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
 import { storyReplyPreview } from '@/services/storyReply';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
@@ -200,7 +201,8 @@ export default function ChatScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('pending');
   const [friendList, setFriendList] = useState<FriendList>({ connections: [], friends: [] });
   const [pending, setPending] = useState<PendingRequest[]>([]);
-  const [blocked, setBlocked] = useState<UserSummary[]>([]);
+  // Shared with Settings → Blocked users: one store, one list.
+  const blocked = useBlockedUsers().list ?? [];
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
@@ -234,10 +236,10 @@ export default function ChatScreen() {
   }, []);
 
   const fetchAll = useCallback(async () => {
-    const [listRes, pendingRes, blockedRes] = await Promise.allSettled([
+    const [listRes, pendingRes] = await Promise.allSettled([
       api.get<FriendList>('/api/friends/list/'),
       api.get<PendingRequest[]>('/api/friends/requests/'),
-      api.get<UserSummary[]>('/api/friends/blocked/'),
+      refreshBlocked(),
     ]);
     if (listRes.status === 'fulfilled') {
       const data = listRes.value.data;
@@ -250,9 +252,6 @@ export default function ChatScreen() {
       const raw = pendingRes.value.data;
       console.log('[Chat] pending requests raw:', JSON.stringify(raw));
       setPending(Array.isArray(raw) ? raw : []);
-    }
-    if (blockedRes.status === 'fulfilled') {
-      setBlocked(Array.isArray(blockedRes.value.data) ? blockedRes.value.data : []);
     }
   }, []);
 
@@ -310,8 +309,12 @@ export default function ChatScreen() {
 
   function handleBlock(user: UserSummary) {
     removeFromLists(user.id);
-    setBlocked((prev) => (prev.some((u) => u.id === user.id) ? prev : [user, ...prev]));
-    api.post(`/api/friends/block/${user.id}/`).catch(() => {});
+    blockUser(user)
+      .then(() => triggerNearbyRefresh())
+      .catch(() => {
+        Alert.alert('Could not block', `Blocking @${user.username} failed. Please try again.`);
+        fetchAll();
+      });
   }
 
   function handleRemoveFriend(user: UserSummary) {
@@ -325,8 +328,15 @@ export default function ChatScreen() {
   }
 
   function handleUnblock(user: UserSummary) {
-    setBlocked((prev) => prev.filter((u) => u.id !== user.id));
-    api.post(`/api/friends/unblock/${user.id}/`).catch(() => {});
+    unblockUser(user.id)
+      .then(() => {
+        // A suspended friendship/connection comes back on unblock.
+        fetchAll();
+        triggerNearbyRefresh();
+      })
+      .catch(() => {
+        Alert.alert('Could not unblock', `Unblocking @${user.username} failed. Please try again.`);
+      });
   }
 
   function handleAddFriend(user: UserSummary) {

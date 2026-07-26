@@ -39,3 +39,34 @@ export const Colors = {
 export const radius = { s: 6, m: 12, l: 20 }
 
 export const fonts = { display: 'SpaceGrotesk', body: 'Inter' }
+
+// Type scale.
+//
+// React Native's <Text> already honours the OS font-size setting — the default
+// allowFontScaling is true and nothing in this app turns it off — so these are
+// base sizes that grow with Dynamic Type, not fixed pixels. The reason to name
+// them is the floor: nothing below `micro` (11) is legible, and the 8pt labels
+// in the old bottom nav were well under it.
+//
+// Never set allowFontScaling={false} to stop text overflowing. Where a layout
+// genuinely cannot grow — text on a fixed-geometry arc, a badge — cap the
+// growth with maxFontSizeMultiplier instead, so the text still scales, just
+// not unboundedly.
+export const type = {
+  /** Absolute floor. Badges, dense nav labels. */
+  micro: 11,
+  /** Timestamps, meta. */
+  caption: 12,
+  /** Secondary rows, hints. */
+  small: 13,
+  /** Default body. */
+  body: 15,
+  /** Card and sheet titles. */
+  title: 22,
+  /** Screen titles. */
+  display: 26,
+}
+
+/** Cap for text inside fixed-geometry containers that cannot reflow. Text
+ * still scales up to this multiple of the base size, then stops. */
+export const MAX_SCALE_FIXED = 1.4

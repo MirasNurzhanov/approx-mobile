@@ -15,8 +15,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
+import { blockUser } from '@/services/blocked';
 import { AuraMark } from '@/components/ui/AuraMark';
 import { IconBack, IconMore } from '@/components/ui/icons';
+import { RelationshipBadge } from '@/components/ui/RelationshipBadge';
+import { ProfileLinks } from '@/components/ProfileLinks';
+import type { ProfileLink } from '@/services/links';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'hi_received' | 'connected' | 'friend';
@@ -29,29 +33,33 @@ interface Interest {
 interface UserProfile {
   id: number;
   username: string;
+  is_private?: boolean;
   bio?: string;
   date_joined?: string;
   interests?: Interest[];
   relationship?: Relationship;
   aura_points?: number;
   profile_picture?: string;
+  stats?: { friends: number; connections: number; quests: number };
+  // Absent entirely when the viewer isn't allowed to see them.
+  links?: ProfileLink[];
+}
+
+// The server omits anything this viewer may not see, so "did the field arrive"
+// is the only question worth asking here — never "should I draw it".
+function isLocked(profile: UserProfile): boolean {
+  return !!profile.is_private && !('bio' in profile);
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+// Ring tint only. The label and glyph now come from RelationshipBadge, so
+// colour is no longer the sole carrier of the relationship.
 const REL_COLOR: Record<Relationship, string> = {
   stranger:    '#FFFFFF',
   hi_sent:     '#00b4a6',
   hi_received: '#00b4a6',
   connected:   '#FF9500',
   friend:      '#007AFF',
-};
-
-const REL_LABEL: Record<Relationship, string> = {
-  stranger:    'Nearby',
-  hi_sent:     'Hi Sent',
-  hi_received: 'Hi Received',
-  connected:   'Connected',
-  friend:      'Friend',
 };
 
 const AVATAR_COLORS = ['#7c3aed', '#0891b2', '#059669', '#d97706', '#be185d', '#0284c7'];
@@ -200,7 +208,11 @@ export default function UserProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await api.post(`/api/friends/block/${id}/`);
+              await blockUser({
+                id: Number(id),
+                username,
+                profile_picture: profile?.profile_picture,
+              });
               router.back();
             } catch (e: any) {
               Alert.alert('Error', e?.response?.data?.detail ?? 'Could not block user.');
@@ -258,25 +270,41 @@ export default function UserProfileScreen() {
   const bg = avatarBg(profile.username);
   const initial = profile.username.charAt(0).toUpperCase();
   const interests = profile.interests ?? [];
+  const locked = isLocked(profile);
 
   return (
     <View style={styles.root}>
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.headerBtn}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.headerBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
           <IconBack size={24} color="#00b4a6" />
         </TouchableOpacity>
 
-        <View style={styles.headerCenter}>
+        <View style={styles.headerCenter} accessible accessibilityRole="header">
           <Text style={styles.headerTitle} numberOfLines={1}>{profile.username}</Text>
+          {/* The relationship was a coloured dot plus grey text at 2.65:1 —
+              unreadable, and meaningless in greyscale. The badge carries a
+              glyph and a word as well as the colour. */}
           <View style={styles.relRow}>
-            <View style={[styles.relDot, { backgroundColor: relColor }]} />
-            <Text style={styles.relText}>{REL_LABEL[rel]}</Text>
+            <RelationshipBadge relationship={rel} />
           </View>
         </View>
 
-        <TouchableOpacity onPress={openMenu} hitSlop={12} style={styles.headerBtn}>
-          <IconMore size={22} color="#555" />
+        <TouchableOpacity
+          onPress={openMenu}
+          hitSlop={12}
+          style={styles.headerBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`More options for ${profile.username}`}
+          accessibilityHint="Block or report this account"
+        >
+          <IconMore size={22} color="#9C9CA6" />
         </TouchableOpacity>
       </View>
 
@@ -298,22 +326,35 @@ export default function UserProfileScreen() {
 
           <Text style={styles.username}>{profile.username}</Text>
 
-          {profile.bio ? (
-            <Text style={styles.bio}>{profile.bio}</Text>
-          ) : (
-            <Text style={styles.bioEmpty}>No bio</Text>
-          )}
-
-          {profile.aura_points != null && (
-            <View style={styles.auraRow}>
-              <AuraMark size={15} color="#8b5cf6" />
-              <Text style={styles.auraValue}>{profile.aura_points.toLocaleString()}</Text>
-              <Text style={styles.auraLabel}>Aura Points</Text>
+          {locked ? (
+            <View style={styles.lockedBox}>
+              <Text style={styles.lockedTitle}>This account is private</Text>
+              <Text style={styles.lockedBody}>
+                {rel === 'hi_sent'
+                  ? 'Your request is waiting for them to accept.'
+                  : 'Send a Hi to ask for access. If they accept, you’ll see their full profile.'}
+              </Text>
             </View>
-          )}
+          ) : (
+            <>
+              {profile.bio ? (
+                <Text style={styles.bio}>{profile.bio}</Text>
+              ) : (
+                <Text style={styles.bioEmpty}>No bio</Text>
+              )}
 
-          {profile.date_joined && (
-            <Text style={styles.joinDate}>Member since {fmtDate(profile.date_joined)}</Text>
+              {profile.aura_points != null && (
+                <View style={styles.auraRow}>
+                  <AuraMark size={15} color="#8b5cf6" />
+                  <Text style={styles.auraValue}>{profile.aura_points.toLocaleString()}</Text>
+                  <Text style={styles.auraLabel}>Aura Points</Text>
+                </View>
+              )}
+
+              {profile.date_joined && (
+                <Text style={styles.joinDate}>Member since {fmtDate(profile.date_joined)}</Text>
+              )}
+            </>
           )}
         </View>
 
@@ -328,6 +369,14 @@ export default function UserProfileScreen() {
                 </View>
               ))}
             </View>
+          </View>
+        )}
+
+        {/* ── Links ── */}
+        {(profile.links?.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Links</Text>
+            <ProfileLinks links={profile.links!} />
           </View>
         )}
 
@@ -409,7 +458,7 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   relRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
   relDot: { width: 6, height: 6, borderRadius: 3 },
-  relText: { color: '#444', fontSize: 11 },
+  relText: { color: '#9C9CA6', fontSize: 11 },
 
   scroll: { paddingHorizontal: 24, paddingTop: 32, paddingBottom: 60 },
 
@@ -435,19 +484,29 @@ const styles = StyleSheet.create({
   avatarImage: { width: 86, height: 86, borderRadius: 43 },
 
   username: { color: '#ffffff', fontSize: 22, fontWeight: '700', marginBottom: 8 },
-  bio: { color: '#888', fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 280, marginBottom: 12 },
-  bioEmpty: { color: '#2a2a2a', fontSize: 13, marginBottom: 12 },
+  bio: { color: '#9C9CA6', fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 280, marginBottom: 12 },
+  bioEmpty: { color: '#8A8A94', fontSize: 13, marginBottom: 12 },
+
+  lockedBox: {
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 12,
+    paddingHorizontal: 24,
+  },
+  lockedTitle: { color: '#F4F4F6', fontSize: 15, fontWeight: '600' },
+  lockedBody: { color: '#9C9CA6', fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
   auraRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 8 },
   auraValue: { color: '#8b5cf6', fontSize: 15, fontWeight: '700' },
-  auraLabel: { color: '#555', fontSize: 13 },
+  auraLabel: { color: '#9C9CA6', fontSize: 13 },
 
-  joinDate: { color: '#2e2e2e', fontSize: 12 },
+  joinDate: { color: '#8A8A94', fontSize: 12 },
 
   // ── Section ──
   section: { marginBottom: 28 },
   sectionTitle: {
-    color: '#444',
+    color: '#8A8A94',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
@@ -488,7 +547,7 @@ const styles = StyleSheet.create({
   btnOff: { opacity: 0.55 },
 
   // ── Error ──
-  errorText: { color: '#444', fontSize: 16, marginBottom: 16 },
+  errorText: { color: '#9C9CA6', fontSize: 16, marginBottom: 16 },
   backLink: { paddingVertical: 10 },
   backLinkText: { color: '#00b4a6', fontSize: 14 },
 });

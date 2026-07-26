@@ -1,68 +1,73 @@
-import * as Location from 'expo-location';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
-import Animated, {
-  FadeIn,
-  FadeOut,
-  type SharedValue,
-  cancelAnimation,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  PanResponder,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import Animated, {
+    FadeIn,
+    FadeOut,
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    type SharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
+import { REACTIONS, StoryViewer } from '@/components/StoryViewer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import {
-  IconCamera,
-  IconChevron,
-  IconClose,
-  IconFunny,
-  IconHi,
-  IconImage,
-  IconInsight,
-  IconLike,
-  IconMute,
-  IconPeople,
-  IconPin,
-  IconSearch,
-  IconShield,
-  IconSound,
-  IconStar,
-  type IconComponent,
+    IconCamera,
+    IconClose,
+    IconHi,
+    IconImage,
+    IconList,
+    IconMute,
+    IconPeople,
+    IconPin,
+    IconSearch,
+    IconShield,
+    IconSound,
+    type IconComponent,
 } from '@/components/ui/icons';
-import { api } from '@/services/api';
-import { recordNearbySightings, recordStoryReactions } from '@/services/activityFeed';
-import { encodeStoryReply } from '@/services/storyReply';
-import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
-import { getPref } from '@/services/preferences';
-import { registerNearbyRefresh } from '@/services/nearbyRefresh';
 import { colors, fonts, radius } from '@/constants/theme';
+import { recordNearbySightings, recordStoryReactions } from '@/services/activityFeed';
+import { api } from '@/services/api';
+import { usePermissionPrimer } from '@/components/PermissionPrimer';
+import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
+import { reportLocation } from '@/services/location';
+import {
+  check as checkPermission,
+  openAppSettings,
+  type PermissionState,
+} from '@/services/permissions';
+import { registerNearbyRefresh } from '@/services/nearbyRefresh';
+import { getPref } from '@/services/preferences';
+import {
+    recordOwnStory,
+    useStoryArchive,
+    type ReactionType,
+    type Story,
+} from '@/services/stories';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'connected' | 'friend';
@@ -80,6 +85,9 @@ interface NearbyUser {
   zone_active?: boolean;
   zone_radius?: number;
   zone_audio_url?: string;
+  /** 'approximate' means the position is snapped to a ~500m cell, so it should
+   * be drawn as an area rather than a point that looks exact. */
+  location_precision?: 'precise' | 'approximate';
 }
 
 interface SelfZone {
@@ -88,33 +96,13 @@ interface SelfZone {
   zone_audio_url?: string;
 }
 
-type ReactionType = 'like' | 'funny' | 'helpful' | 'interesting';
-
-interface StoryAuthor {
-  id: number;
-  username: string;
-  profile_picture?: string;
-}
-
-interface Story {
-  id: number;
-  author: StoryAuthor;
-  text?: string;
-  content?: string;
-  image?: string;
-  place_name?: string;
-  latitude: number;
-  longitude: number;
-  created_at: string;
-  expires_at: string;
-  reactions: { like: number; funny: number; helpful: number; interesting: number };
-  user_reaction?: ReactionType | null;
-}
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 const COLOR_FRIEND    = colors.blue;
 const COLOR_CONNECTED = colors.orange;
 const COLOR_STRANGER  = colors.t1;
+
+/** Matches APPROX_GRID_M on the server. */
+const APPROX_RADIUS_M = 500;
 
 const REL_LABEL: Record<Relationship, string> = {
   stranger:  'Nearby',
@@ -125,7 +113,6 @@ const REL_LABEL: Record<Relationship, string> = {
 
 const POLL_MS            = 10_000;
 const STORY_POLL_MS      = 10_000;
-const STORY_DURATION_MS  = 7_000;
 
 // Neutral dark map per the redesign: tonal grays only, muted labels, no accent color.
 const DARK_MAP_STYLE = [
@@ -161,24 +148,6 @@ function avatarBgColor(username: string): string {
 function fmtDistance(m?: number): string | null {
   if (m == null) return null;
   return m < 1000 ? `${Math.round(m)} m away` : `${(m / 1000).toFixed(1)} km away`;
-}
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function timeLeft(expiresAt: string): string {
-  const diff = new Date(expiresAt).getTime() - Date.now();
-  if (diff <= 0) return 'expired';
-  const hrs = Math.floor(diff / 3_600_000);
-  if (hrs < 1) return `${Math.floor(diff / 60_000)}m left`;
-  return `${hrs}h left`;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -303,24 +272,70 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
 }
 
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
-function TopBar({ nearby, onPrivacy, onSearch }: { nearby: number; onPrivacy: () => void; onSearch: () => void }) {
+function TopBar({
+  nearby,
+  onPrivacy,
+  onSearch,
+  onList,
+}: {
+  nearby: number;
+  onPrivacy: () => void;
+  onSearch: () => void;
+  onList: () => void;
+}) {
   const { top } = useSafeAreaInsets();
   return (
     <View style={[styles.topBar, { paddingTop: top + 6 }]}>
-      <Text style={styles.topLogoText}>AURA</Text>
+      <Text style={styles.topLogoText} accessibilityRole="header">AURA</Text>
 
-      <View style={styles.nearbyBadge}>
+      {/* The count is the only part of the map a screen reader can reach, so
+          it carries the plural and the unit rather than a bare number. */}
+      <View
+        style={styles.nearbyBadge}
+        accessible
+        accessibilityLabel={`${nearby} ${nearby === 1 ? 'person' : 'people'} nearby`}
+      >
         <IconPeople size={16} color={colors.t2} />
-        <Text style={styles.nearbyBadgeText}>{nearby} nearby</Text>
+        <Text style={styles.nearbyBadgeText} importantForAccessibility="no">
+          {nearby} nearby
+        </Text>
       </View>
 
       <View style={styles.topSpacer} />
 
-      <TouchableOpacity onPress={onSearch} activeOpacity={0.7} style={styles.iconBtn} hitSlop={6}>
+      {/* Markers on a map cannot be focused or read. This is the same data as
+          a linear list — the non-visual equivalent of the map itself. */}
+      <TouchableOpacity
+        onPress={onList}
+        activeOpacity={0.7}
+        style={styles.iconBtn}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="People nearby, list view"
+        accessibilityHint="Opens a readable list of everyone shown on the map"
+      >
+        <IconList size={20} color={colors.t2} />
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={onSearch}
+        activeOpacity={0.7}
+        style={styles.iconBtn}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Search for people"
+      >
         <IconSearch size={20} color={colors.t2} />
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={onPrivacy} activeOpacity={0.7} style={styles.iconBtn} hitSlop={6}>
+      <TouchableOpacity
+        onPress={onPrivacy}
+        activeOpacity={0.7}
+        style={styles.iconBtn}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Privacy and safety settings"
+      >
         <IconShield size={20} color={colors.t2} />
       </TouchableOpacity>
     </View>
@@ -352,8 +367,8 @@ function ZoneBanner({
     >
       <IconSound size={20} color={colors.teal} />
       <Text style={styles.zoneBannerText} numberOfLines={1}>
-        {isPlaying ? 'Playing ' : "You're in "}
-        <Text style={styles.zoneBannerUser}>{isSelf ? 'your' : `@${username}`}</Text>
+        {isPlaying ? 'Playing ' : "You are in "}
+        <Text style={styles.zoneBannerUser}>{isSelf ? "no one's" : `@${username}`}</Text>
         {isSelf ? ' zone' : "'s zone"}
       </Text>
       {isPlaying ? (
@@ -371,229 +386,6 @@ function ZoneBanner({
   );
 }
 
-// ─── Story Viewer (full-screen, Instagram-style) ──────────────────────────────
-const REACTIONS: { type: ReactionType; Icon: IconComponent }[] = [
-  { type: 'like',        Icon: IconLike },
-  { type: 'funny',       Icon: IconFunny },
-  { type: 'helpful',     Icon: IconInsight },
-  { type: 'interesting', Icon: IconStar },
-];
-
-function ProgressBar({ active, past, progress }: {
-  active: boolean;
-  past: boolean;
-  progress: SharedValue<number>;
-}) {
-  const style = useAnimatedStyle(() => {
-    const pct = active ? progress.value : past ? 1 : 0;
-    return { width: `${pct * 100}%` };
-  });
-  return (
-    <View style={styles.svTrack}>
-      <Animated.View style={[styles.svFill, style]} />
-    </View>
-  );
-}
-
-interface StoryViewerProps {
-  stories: Story[];
-  onClose: () => void;
-  onReact: (storyId: number, reaction: ReactionType) => void;
-  /** When set (author is a friend), shows the reply bar that DMs the comment. */
-  replyTo?: { id: number; username: string } | null;
-}
-
-function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
-  const { top, bottom } = useSafeAreaInsets();
-  const [index, setIndex] = useState(0);
-  const indexRef = useRef(0);
-  const progress = useSharedValue(0);
-  const [replyText, setReplyText] = useState('');
-  const [replyFocused, setReplyFocused] = useState(false);
-  const [sendingReply, setSendingReply] = useState(false);
-  const [replySent, setReplySent] = useState(false);
-
-  function goTo(i: number) {
-    if (i >= stories.length) { onClose(); return; }
-    if (i < 0) return;
-    indexRef.current = i;
-    setIndex(i);
-  }
-
-  const goToRef = useRef(goTo);
-  goToRef.current = goTo;
-
-  // Auto-advance, paused while the reply input is focused.
-  useEffect(() => {
-    if (replyFocused) {
-      cancelAnimation(progress);
-      return;
-    }
-    progress.value = 0;
-    progress.value = withTiming(1, { duration: STORY_DURATION_MS });
-    const timer = setTimeout(() => goToRef.current(indexRef.current + 1), STORY_DURATION_MS);
-    return () => {
-      cancelAnimation(progress);
-      clearTimeout(timer);
-    };
-  }, [index, replyFocused]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy),
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dx < -40) goToRef.current(indexRef.current + 1);
-        else if (gs.dx > 40) goToRef.current(indexRef.current - 1);
-      },
-    })
-  ).current;
-
-  const story = stories[index];
-  if (!story) return null;
-
-  console.log('[Story viewer] current story:', story.content, 'photo:', story.image);
-  console.log('[Story] full object:', JSON.stringify(story));
-
-  const hasPhoto = !!story.image;
-  const hasText  = !!(story.text || story.content);
-
-  async function sendReply() {
-    const trimmed = replyText.trim();
-    if (!trimmed || !replyTo || sendingReply) return;
-    setSendingReply(true);
-    try {
-      const context = story.content ?? story.text;
-      const content = encodeStoryReply({
-        image: story.image,
-        excerpt: context ? `${context.slice(0, 80)}${context.length > 80 ? '…' : ''}` : undefined,
-        comment: trimmed,
-      });
-      await api.post(`/api/friends/messages/${replyTo.id}/`, { content });
-      setReplyText('');
-      Keyboard.dismiss();
-      setReplySent(true);
-      setTimeout(() => setReplySent(false), 1600);
-    } catch (e: any) {
-      console.log('[Story reply] error:', e?.response?.status, JSON.stringify(e?.response?.data));
-      Alert.alert('Could not send', 'Please try again.');
-    } finally {
-      setSendingReply(false);
-    }
-  }
-
-  return (
-    <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={styles.svContainer} {...panResponder.panHandlers}>
-        {/* Background — photo fills entire screen or solid dark for text-only */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
-        {hasPhoto && (
-          <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        )}
-
-
-        {/* Nav tap zones — cover full screen, interactive elements rendered after override them */}
-        <TouchableOpacity style={styles.svNavLeft}  activeOpacity={1} onPress={() => goTo(index - 1)} />
-        <TouchableOpacity style={styles.svNavRight} activeOpacity={1} onPress={() => goTo(index + 1)} />
-
-        {/* Progress bars */}
-        <View style={[styles.svProgressRow, { top: top + 8 }]} pointerEvents="none">
-          {stories.map((_, i) => (
-            <ProgressBar key={i} active={i === index} past={i < index} progress={progress} />
-          ))}
-        </View>
-
-        {/* Header: avatar + username + time + close */}
-        <View style={[styles.svHeader, { top: top + 22 }]}>
-          <Avatar uri={story.author.profile_picture} name={story.author.username} size="xs" />
-          <View style={styles.svAuthorInfo}>
-            <Text style={styles.svAuthorName}>{story.author.username}</Text>
-            <Text style={styles.svTimeAgo}>{timeAgo(story.created_at)}</Text>
-          </View>
-          <Text style={styles.svTimeLeft}>{timeLeft(story.expires_at)}</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.svCloseBtn}>
-            <IconClose size={18} color={colors.t1} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Story text above reactions */}
-        {hasText && (
-          <View style={[styles.svTextBlock, { bottom: bottom + (replyTo ? 152 : 96) }]} pointerEvents="none">
-            {story.place_name ? (
-              <View style={styles.svPlaceRow}>
-                <IconPin size={12} color={colors.t2} />
-                <Text style={styles.svPlaceName} numberOfLines={1}>{story.place_name}</Text>
-              </View>
-            ) : null}
-            <Text style={styles.svTextLarge}>{story.content ?? story.text}</Text>
-          </View>
-        )}
-
-        {/* Reply to a friend's story — the comment lands in your chat */}
-        {replyTo && (
-          <View style={[styles.svReplyRow, { bottom: bottom + 90 }]}>
-            <TextInput
-              style={styles.svReplyInput}
-              value={replyText}
-              onChangeText={setReplyText}
-              placeholder={`Reply to ${replyTo.username}…`}
-              placeholderTextColor={colors.t3}
-              maxLength={500}
-              onFocus={() => setReplyFocused(true)}
-              onBlur={() => setReplyFocused(false)}
-              onSubmitEditing={sendReply}
-              returnKeyType="send"
-            />
-            <TouchableOpacity
-              style={[styles.svReplySend, replyText.trim().length > 0 && styles.svReplySendActive]}
-              onPress={sendReply}
-              disabled={replyText.trim().length === 0 || sendingReply}
-              activeOpacity={0.8}
-            >
-              {sendingReply ? (
-                <ActivityIndicator size="small" color={colors.bg} />
-              ) : (
-                <IconChevron size={16} color={replyText.trim() ? colors.bg : colors.t3} />
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Sent confirmation */}
-        {replySent && replyTo && (
-          <View style={[styles.svSentToast, { bottom: bottom + 150 }]} pointerEvents="none">
-            <Text style={styles.svSentToastText}>Sent to @{replyTo.username}</Text>
-          </View>
-        )}
-
-        {/* Reactions */}
-        <View style={[styles.svReactions, { bottom: bottom + 20 }]}>
-          {REACTIONS.map(({ type, Icon }) => {
-            const count = story.reactions?.[type] ?? 0;
-            const isActive = story.user_reaction === type;
-            return (
-              <Pressable
-                key={type}
-                style={[styles.svReactionBtn, isActive && styles.svReactionBtnActive]}
-                onPress={() => onReact(story.id, type)}
-              >
-                <Icon size={20} color={isActive ? colors.teal : colors.t2} />
-                {count > 0 && (
-                  <Text style={[styles.svReactionCount, isActive && styles.svReactionCountActive]}>
-                    {count}
-                  </Text>
-                )}
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 // ─── Create Story Modal ───────────────────────────────────────────────────────
 interface CreateStoryModalProps {
   visible: boolean;
@@ -606,6 +398,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
+  const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   async function pickPhoto() {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -616,11 +409,9 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
   }
 
   async function takePhoto() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow camera access to take a photo.');
-      return;
-    }
+    // Primed, and offers a route into Settings when previously refused —
+    // the old alert was a dead end.
+    if (!(await ensurePermission('camera'))) return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'] as any,
       quality: 0.8,
@@ -654,10 +445,16 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
           <View style={styles.sheetHandle} />
           <View style={styles.createModalHeader}>
             <Text style={styles.createModalTitle}>Drop a Story</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={12}>
+            <TouchableOpacity
+              onPress={onClose}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
               <IconClose size={20} color={colors.t3} />
             </TouchableOpacity>
           </View>
+          {primer}
           <TextInput
             style={styles.storyInput}
             placeholder="What's happening here?"
@@ -678,10 +475,24 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
             </View>
           ) : null}
           <View style={styles.createModalActions}>
-            <TouchableOpacity style={styles.photoPickBtn} onPress={takePhoto} activeOpacity={0.75}>
+            <TouchableOpacity
+              style={styles.photoPickBtn}
+              onPress={takePhoto}
+              activeOpacity={0.75}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Take a photo"
+            >
               <IconCamera size={20} color={colors.t2} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.photoPickBtn} onPress={pickPhoto} activeOpacity={0.75}>
+            <TouchableOpacity
+              style={styles.photoPickBtn}
+              onPress={pickPhoto}
+              activeOpacity={0.75}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Choose a photo from your library"
+            >
               <IconImage size={20} color={colors.t2} />
             </TouchableOpacity>
             <TouchableOpacity
@@ -854,7 +665,8 @@ export default function MapScreen() {
   const { top: topInset } = useSafeAreaInsets();
   const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
   const [nearby, setNearby]           = useState<NearbyUser[]>([]);
-  const [permError, setPermError]     = useState('');
+  const [permState, setPermState]     = useState<PermissionState | null>(null);
+  const { ensure: ensurePermission, primer } = usePermissionPrimer();
   const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
@@ -881,18 +693,23 @@ export default function MapScreen() {
 
   const sheetY = useSharedValue(SHEET_H);
 
+  // Stories deleted from the archive screen vanish here immediately instead of
+  // waiting for the next poll.
+  const { deletedIds } = useStoryArchive();
+
   // Stories are friends-only: the backend returns everyone nearby, so drop
   // anything not authored by the current user or one of their friends.
   const storiesByAuthor = useMemo(() => {
     const map = new Map<number, Story[]>();
     for (const story of stories) {
+      if (deletedIds.has(story.id)) continue;
       const id = Number(story.author.id);
       if (id !== currentUserId && !friendIds.has(id)) continue;
       if (!map.has(id)) map.set(id, []);
       map.get(id)!.push(story);
     }
     return map;
-  }, [stories, currentUserId, friendIds]);
+  }, [stories, currentUserId, friendIds, deletedIds]);
 
   // Interest matching: friends and connections are always visible; strangers
   // only appear when at least one interest is shared. The backend includes
@@ -982,8 +799,9 @@ export default function MapScreen() {
   // from /api/users/zone/, not the nearby list, so the friends-only rule can
   // never lock the owner out of their own music.
   useEffect(() => {
-    // The server nulls zone_audio_url for non-friends, so presence of a URL
-    // can't be the "is there a zone here" test — zone_active/radius can.
+    // The server omits zone_audio_url for anyone the owner's Zone audio
+    // setting excludes, so presence of a URL can't be the "is there a zone
+    // here" test — zone_active/radius stay visible and can.
     const insideZones = visibleNearby.filter((u) =>
       u.zone_active && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
     );
@@ -1104,6 +922,7 @@ export default function MapScreen() {
       const newStory = response.data;
       console.log('[Story] success:', newStory);
       setStories(prev => [...prev, newStory]);
+      recordOwnStory(newStory);
       setTimeout(() => fetchStories(), 500);
     } catch (error: any) {
       console.log('[Story] error:', error.response?.status, JSON.stringify(error.response?.data));
@@ -1149,17 +968,21 @@ export default function MapScreen() {
     let sub: Location.LocationSubscription | null = null;
 
     (async () => {
-      console.log('[Map] step 2: location permission requested');
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setPermError('Location permission is required to find nearby people.');
+      // Primed, not cold. The old code fired the system dialog the instant the
+      // map mounted, and then fired the *background* location dialog straight
+      // after it — two unexplained prompts back to back, with iOS allowing
+      // exactly one chance at each.
+      const granted = await ensurePermission('location');
+      if (!granted) {
+        const info = await checkPermission('location');
+        setPermState(info.state);
         return;
       }
-      const isExpoGo = Constants.appOwnership === 'expo';
-      if (!isExpoGo) {
-        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
-        console.log('[Location] background permission status:', bgStatus);
-      }
+      setPermState('granted');
+
+      // Background location is optional and is *not* asked for here. It now
+      // lives in Settings → Permissions, where the user can opt in knowingly
+      // rather than being ambushed on first launch.
       await startBackgroundLocationUpdates();
       const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
@@ -1182,10 +1005,8 @@ export default function MapScreen() {
     if (currentUserIdRef.current === null) loadSelf();
 
     const [, nearbyResult] = await Promise.allSettled([
-      api.patch('/api/proximity/location/', {
-        latitude: parseFloat(c.latitude.toFixed(6)),
-        longitude: parseFloat(c.longitude.toFixed(6)),
-      }),
+      // Honours the Location sharing setting; sends nothing when paused.
+      reportLocation({ latitude: c.latitude, longitude: c.longitude }),
       api.get<NearbyUser[]>('/api/proximity/nearby/'),
     ]);
 
@@ -1253,12 +1074,45 @@ export default function MapScreen() {
 
   return (
     <View style={styles.container}>
-      {permError ? (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{permError}</Text>
+      {permState && permState !== 'granted' ? (
+        // An explicit dead end with a way out, rather than a spinner that
+        // never resolves or a sentence with no action attached.
+        <View style={styles.center} accessible accessibilityRole="alert">
+          <Text style={styles.emptyTitle}>The map needs location access</Text>
+          <Text style={styles.errorText}>
+            {permState === 'blocked'
+              ? 'Location is turned off for Aura in system settings. The map can’t show anyone nearby until it’s back on.'
+              : 'Aura shows people with shared interests near you right now. Without location there’s nothing to show.'}
+          </Text>
+          <Pressable
+            onPress={async () => {
+              if (permState === 'blocked') {
+                openAppSettings();
+                return;
+              }
+              if (await ensurePermission('location')) setPermState('granted');
+            }}
+            style={({ pressed }) => [styles.emptyBtn, pressed && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel={
+              permState === 'blocked' ? 'Open system settings' : 'Allow location access'
+            }
+          >
+            <Text style={styles.emptyBtnText}>
+              {permState === 'blocked' ? 'Open Settings' : 'Allow location'}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/nearby')}
+            style={({ pressed }) => [styles.emptyLink, pressed && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Open the nearby people list instead"
+          >
+            <Text style={styles.emptyLinkText}>See nearby people as a list</Text>
+          </Pressable>
         </View>
       ) : !coords ? (
-        <View style={styles.center}>
+        <View style={styles.center} accessible accessibilityLabel="Finding your location">
           <ActivityIndicator color={colors.teal} size="large" />
           <Text style={styles.loadingText}>Locating you…</Text>
         </View>
@@ -1308,6 +1162,21 @@ export default function MapScreen() {
               strokeWidth={1.5}
             />
           )}
+
+          {/* Approximate sharers get a haze instead of a precise-looking pin —
+              the marker would otherwise imply accuracy the data doesn't have. */}
+          {visibleNearby
+            .filter((u) => u.location_precision === 'approximate' && u.latitude != null && u.longitude != null)
+            .map((u) => (
+              <Circle
+                key={`approx-${u.id}`}
+                center={{ latitude: u.latitude, longitude: u.longitude }}
+                radius={APPROX_RADIUS_M}
+                fillColor="rgba(244,244,246,0.06)"
+                strokeColor="rgba(244,244,246,0.18)"
+                strokeWidth={1}
+              />
+            ))}
 
           {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
             const uid = Number(user.id);
@@ -1376,6 +1245,7 @@ export default function MapScreen() {
         nearby={visibleNearby.length}
         onPrivacy={() => router.push('/zone')}
         onSearch={() => router.push('/search')}
+        onList={() => router.push('/nearby')}
       />
 
       {/* Zone banner */}
@@ -1422,6 +1292,7 @@ export default function MapScreen() {
             onClose={() => setStoryViewer(null)}
             onReact={reactToStory}
             replyTo={replyTo}
+            currentUserId={currentUserId}
           />
         );
       })()}
@@ -1448,6 +1319,8 @@ export default function MapScreen() {
         </View>
       )}
 
+      {primer}
+
       <Speedometer />
     </View>
   );
@@ -1459,7 +1332,34 @@ const styles = StyleSheet.create({
   map: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: 16 },
   loadingText: { fontFamily: fonts.body, color: colors.t3, fontSize: 14 },
-  errorText: { fontFamily: fonts.body, color: colors.red, fontSize: 15, textAlign: 'center', padding: 24 },
+  emptyTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 20,
+    color: colors.t1,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+  },
+  errorText: {
+    fontFamily: fonts.body,
+    color: colors.t2,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyBtn: {
+    backgroundColor: colors.teal,
+    borderRadius: radius.m,
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    minHeight: 48,
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  emptyBtnText: { fontFamily: fonts.body, fontWeight: '700', fontSize: 15, color: colors.bg },
+  emptyLink: { paddingVertical: 12, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
+  emptyLinkText: { fontFamily: fonts.body, fontWeight: '600', fontSize: 14, color: colors.teal },
 
   // ── Non-friend marker: small relationship-colored dot ──
   userDot: {
@@ -1762,171 +1662,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.t1,
   },
-
-  // ─── Full-screen story viewer (Instagram-style) ───
-  svContainer: { flex: 1, backgroundColor: '#000' },
-  svNavLeft: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: '30%',
-  },
-  svNavRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: '30%',
-  },
-  svProgressRow: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  svTrack: {
-    flex: 1,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    borderRadius: 1,
-    overflow: 'hidden',
-  },
-  svFill: {
-    height: '100%',
-    backgroundColor: colors.t1,
-    borderRadius: 1,
-  },
-  svHeader: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  svAuthorInfo: { flex: 1, marginLeft: 8 },
-  svAuthorName: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 13,
-    color: colors.t1,
-  },
-  svTimeAgo: { fontFamily: fonts.body, fontSize: 11, color: 'rgba(255,255,255,0.7)' },
-  svTimeLeft: { fontFamily: fonts.body, fontSize: 11, color: 'rgba(255,255,255,0.7)', marginRight: 10 },
-  svCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  svTextBlock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
-  },
-  svTextLarge: {
-    fontFamily: fonts.body,
-    fontSize: 18,
-    fontWeight: '500',
-    color: colors.t1,
-    lineHeight: 26,
-  },
-  svPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
-  svPlaceName: { fontFamily: fonts.body, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
-  svReplyRow: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    backgroundColor: 'rgba(10,10,11,0.82)',
-  },
-  svReplyInput: {
-    flex: 1,
-    height: 40,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    paddingHorizontal: 16,
-    fontFamily: fonts.body,
-    fontSize: 14,
-    color: colors.t1,
-  },
-  svReplySend: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  svReplySendActive: {
-    backgroundColor: colors.teal,
-    borderColor: colors.teal,
-  },
-  svSentToast: {
-    position: 'absolute',
-    alignSelf: 'center',
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 100,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  svSentToastText: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.t1,
-  },
-  svReactions: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 12,
-  },
-  svReactionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: radius.m,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  svReactionBtnActive: {
-    backgroundColor: colors.tealTint,
-    borderColor: colors.tealLine,
-  },
-  svReactionCount: { fontFamily: fonts.body, color: colors.t3, fontSize: 13, fontWeight: '500' },
-  svReactionCountActive: { color: colors.teal },
 
   // ─── Create story modal ───
   createModalBackdrop: {

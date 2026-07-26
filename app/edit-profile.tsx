@@ -60,11 +60,8 @@ export default function EditProfileScreen() {
   }, []);
 
   async function pickImage() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow photo library access to change your profile picture.');
-      return;
-    }
+    // The system photo picker needs no permission — it runs out of process
+    // and returns only the chosen image. See app/permissions.tsx.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,

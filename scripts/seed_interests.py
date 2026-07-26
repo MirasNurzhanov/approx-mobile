@@ -1,24 +1,34 @@
 """Seed the backend Interest table from interests_seed.json.
 
 The mobile app fetches interests from GET /api/interests/, so new interests
-must be added in the backend database. Run this in the BACKEND repo:
+must be added in the backend database. A copy of this file and
+interests_seed.json lives in the backend repo root (next to manage.py) —
+run it there:
 
-  1. Copy this file and interests_seed.json into the backend project root
-     (next to manage.py).
-  2. Adjust the Interest import below to match the backend app
-     (e.g. `from interests.models import Interest`).
-  3. Run:  python manage.py shell < seed_interests.py
+  python manage.py shell < seed_interests.py
+
+(Against prod: `railway run python manage.py shell < seed_interests.py`.)
 
 Existing interests are kept (matched by name, case-insensitive); only
 missing ones are created, so it is safe to run more than once.
+
+This copy is the source of truth alongside the generated seed JSON; the
+import below only resolves inside the backend project, so the editor flags
+it here — that is expected.
 """
 import json
 import os
 
-# TODO: adjust to the backend app that defines the Interest model
-from interests.models import Interest  # noqa: E402
+from interests.models import Interest  # type: ignore  # backend (project-x) app
 
-path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'interests_seed.json')
+# `__file__` is undefined when piped into `manage.py shell`, so fall back to
+# the working directory (the backend root, where the JSON is copied).
+try:
+    here = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    here = os.getcwd()
+
+path = os.path.join(here, 'interests_seed.json')
 with open(path, encoding='utf-8') as f:
     catalog = json.load(f)
 

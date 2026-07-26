@@ -17,6 +17,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
+import { ProfileLinks } from '@/components/ProfileLinks';
+import type { ProfileLink } from '@/services/links';
 import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
 import { AuraMark } from '@/components/ui/AuraMark';
@@ -27,12 +29,12 @@ import { Input } from '@/components/ui/Input';
 import {
   IconCamera,
   IconChevron,
+  IconGlobe,
   IconHeart,
   IconImage,
   IconLogout,
   IconPencil,
   IconSound,
-  IconTrophy,
   iconForInterest,
   type IconComponent,
 } from '@/components/ui/icons';
@@ -45,6 +47,7 @@ interface Profile {
   username: string;
   bio?: string;
   aura_points?: number;
+  links?: ProfileLink[];
   date_joined?: string;
   interests?: { icon: string; name: string }[];
   profile_picture?: string;
@@ -132,11 +135,9 @@ export default function ProfileScreen() {
   }, []);
 
   async function pickImage() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow photo library access to change your profile picture.');
-      return;
-    }
+    // No permission request: the system photo picker runs out of process and
+    // hands back only the image the user chose, so asking for library access
+    // would spend a prompt and buy nothing.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'] as any,
       allowsEditing: true,
@@ -284,14 +285,22 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Links */}
+        {(profile?.links?.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>LINKS</Text>
+            <ProfileLinks links={profile!.links!} />
+          </View>
+        )}
+
         {/* Action rows */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>MORE</Text>
           <View style={styles.rowGroup}>
-            <ActionRow icon={IconTrophy} label="Leaderboard"    onPress={() => router.push('/leaderboard')} />
             <ActionRow icon={IconSound}  label="My zone"        onPress={() => router.push('/zone')} />
             <ActionRow icon={IconHeart}  label="Edit interests" onPress={() => router.push('/interests')} />
-            <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/(tabs)/map')} />
+            <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/saved-stories')} />
+            <ActionRow icon={IconGlobe}  label="Links"          onPress={() => router.push('/edit-links')} />
           </View>
         </View>
 

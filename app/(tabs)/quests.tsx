@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -11,12 +12,18 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 
 import { api } from '@/services/api';
+import { buildAttestation } from '@/services/attestation';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
+import { Leaderboard } from '@/components/Leaderboard';
+import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Speedometer } from '@/components/Speedometer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+type ProofStatus = 'pending' | 'approved' | 'rejected';
+
 interface Quest {
   id: number;
   title: string;
@@ -26,6 +33,8 @@ interface Quest {
   condition_type?: string;
   completed?: boolean;
   is_completed?: boolean;
+  proof_status?: ProofStatus | null;
+  proof_rejection_reason?: string | null;
 }
 
 interface Profile {
@@ -37,23 +46,20 @@ function isCompleted(q: Quest): boolean {
   return !!(q.completed || q.is_completed);
 }
 
-function isFriendQuest(q: Quest): boolean {
-  return q.condition_type === 'meet_friend_in_person';
-}
-
 // ─── QuestCard ────────────────────────────────────────────────────────────────
 function QuestCard({
   quest,
-  onVerify,
-  verifying,
+  onSubmitProof,
+  submitting,
 }: {
   quest: Quest;
-  onVerify: (id: number) => void;
-  verifying: boolean;
+  onSubmitProof: (quest: Quest) => void;
+  submitting: boolean;
 }) {
   const done = isCompleted(quest);
-  const friend = isFriendQuest(quest);
   const points = quest.reward_points ?? 0;
+  const pending = quest.proof_status === 'pending';
+  const rejected = quest.proof_status === 'rejected';
 
   return (
     <View style={[styles.card, done && styles.cardDone]}>
@@ -62,8 +68,6 @@ function QuestCard({
         <View style={[styles.questIconWrap, done && styles.questIconWrapDone]}>
           {done ? (
             <Ionicons name="checkmark" size={18} color="#00b4a6" />
-          ) : friend ? (
-            <Text style={styles.questEmoji}>📍</Text>
           ) : (
             <Ionicons name="flash-outline" size={18} color="#00b4a6" />
           )}
@@ -88,18 +92,31 @@ function QuestCard({
         </View>
       </View>
 
-      {/* Verify button — only for incomplete friend quests */}
-      {friend && !done && (
+      {/* Photo proof flow — daily/weekly quests complete via camera only */}
+      {!done && pending && (
+        <View style={styles.reviewPill}>
+          <Ionicons name="time-outline" size={13} color="#c9a227" />
+          <Text style={styles.reviewPillText}>Photo under review</Text>
+        </View>
+      )}
+      {!done && rejected && quest.proof_rejection_reason ? (
+        <Text style={styles.rejectionText} numberOfLines={2}>
+          Rejected: {quest.proof_rejection_reason}
+        </Text>
+      ) : null}
+      {!done && !pending && (
         <TouchableOpacity
-          style={[styles.verifyBtn, verifying && styles.verifyBtnOff]}
-          onPress={() => onVerify(quest.id)}
-          disabled={verifying}
+          style={[styles.verifyBtn, submitting && styles.verifyBtnOff]}
+          onPress={() => onSubmitProof(quest)}
+          disabled={submitting}
           activeOpacity={0.75}
         >
-          {verifying ? (
+          {submitting ? (
             <ActivityIndicator color="#0a0a0a" size="small" />
           ) : (
-            <Text style={styles.verifyText}>Verify Meetup 📍</Text>
+            <Text style={styles.verifyText}>
+              {rejected ? 'Try again with a new photo 📷' : 'Complete with photo 📷'}
+            </Text>
           )}
         </TouchableOpacity>
       )}
@@ -108,11 +125,11 @@ function QuestCard({
 }
 
 // ─── Section ─────────────────────────────────────────────────────────────────
-function Section({ title, quests, onVerify, verifyingId }: {
+function Section({ title, quests, onSubmitProof, submittingId }: {
   title: string;
   quests: Quest[];
-  onVerify: (id: number) => void;
-  verifyingId: number | null;
+  onSubmitProof: (quest: Quest) => void;
+  submittingId: number | null;
 }) {
   if (quests.length === 0) return null;
   const done = quests.filter(isCompleted).length;
@@ -132,8 +149,8 @@ function Section({ title, quests, onVerify, verifyingId }: {
           <QuestCard
             key={q.id}
             quest={q}
-            onVerify={onVerify}
-            verifying={verifyingId === q.id}
+            onSubmitProof={onSubmitProof}
+            submitting={submittingId === q.id}
           />
         ))}
       </View>
@@ -150,7 +167,10 @@ export default function QuestsScreen() {
   const [auraPoints, setAuraPoints] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [verifyingId, setVerifyingId] = useState<number | null>(null);
+  const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [cameraDenied, setCameraDenied] = useState(false);
+  const { ensure: ensurePermission, primer } = usePermissionPrimer();
+  const [activeTab, setActiveTab] = useState<'quests' | 'leaderboard'>('quests');
 
   async function fetchAll() {
     const [questsRes, profileRes] = await Promise.allSettled([
@@ -189,60 +209,128 @@ export default function QuestsScreen() {
     setRefreshing(false);
   }, []);
 
-  async function handleVerify(id: number) {
-    setVerifyingId(id);
+  // Quest proof is camera-only by design: no gallery picker exists in this
+  // flow, and the server rejects stale-EXIF photos anyway.
+  async function handleSubmitProof(quest: Quest) {
+    // Primed: the sheet explains that quests are verified from a live photo
+    // before the OS dialog appears, so a refusal is an informed one.
+    if (!(await ensurePermission('camera'))) {
+      setCameraDenied(true);
+      return;
+    }
+    setCameraDenied(false);
+
+    // Full quality, no editing — recompression/cropping can strip the EXIF
+    // the server needs to check the capture time.
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'] as any,
+      quality: 1,
+    });
+    if (result.canceled || !result.assets[0]) return;
+
+    setSubmittingId(quest.id);
     try {
-      await api.post(`/api/quests/${id}/verify-meetup/`);
-      // Mark quest complete locally and refresh points
+      const uri = result.assets[0].uri;
+      const form = new FormData();
+      form.append('image', {
+        uri,
+        name: uri.split('/').pop() ?? 'proof.jpg',
+        type: 'image/jpeg',
+      } as any);
+
+      // Proves this upload came from a genuine, unmodified build — the only
+      // thing that distinguishes a camera shot from a gallery pick, since the
+      // EXIF is identical. Never throws; the server decides how strict to be.
+      const attestation = await buildAttestation();
+      for (const [key, value] of Object.entries(attestation)) {
+        if (value) form.append(key, value);
+      }
+
+      await api.post(`/api/quests/${quest.id}/submit-proof/`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
       setQuests((prev) =>
-        prev.map((q) => (q.id === id ? { ...q, completed: true, is_completed: true } : q))
+        prev.map((q) =>
+          q.id === quest.id ? { ...q, proof_status: 'pending', proof_rejection_reason: null } : q,
+        ),
       );
-      const { data } = await api.get<Profile>('/api/users/profile/');
-      setAuraPoints(data.aura_points ?? 0);
     } catch (e: any) {
-      const msg = e?.response?.data?.detail ?? 'Could not verify meetup. Make sure you\'re nearby.';
-      Alert.alert('Verification Failed', msg);
+      Alert.alert(
+        'Submission failed',
+        e?.response?.data?.detail ?? 'Could not upload your photo. Please try again.',
+      );
     } finally {
-      setVerifyingId(null);
+      setSubmittingId(null);
     }
   }
 
-  const daily = quests.filter((q) => q.quest_type === 'daily' && !isFriendQuest(q));
-  const weekly = quests.filter((q) => q.quest_type === 'weekly' && !isFriendQuest(q));
-  const friend = quests.filter(isFriendQuest);
-
-  if (loading) {
-    return (
-      <View style={[styles.root, styles.center]}>
-        <ActivityIndicator color="#00b4a6" size="large" />
-        <Speedometer />
-      </View>
-    );
-  }
+  const daily = quests.filter((q) => q.quest_type === 'daily');
+  const weekly = quests.filter((q) => q.quest_type === 'weekly');
 
   return (
     <View style={styles.root}>
+      {/* ── Header (shared by both tabs) ── */}
+      <View style={[styles.pageHeader, { paddingTop: top + 20 }]}>
+        <View>
+          <Text style={styles.pageTitle}>Quests</Text>
+          <Text style={styles.pageSubtitle}>Complete challenges, earn Aura Points</Text>
+        </View>
+        <View style={styles.auraOrb}>
+          <Text style={styles.auraOrbIcon}>◉</Text>
+          <Text style={styles.auraOrbValue}>
+            {auraPoints != null ? auraPoints.toLocaleString() : '—'}
+          </Text>
+        </View>
+      </View>
+
+      {/* ── Tabs ── */}
+      <View style={styles.tabBar}>
+        {(['quests', 'leaderboard'] as const).map((tab) => {
+          const isActive = activeTab === tab;
+          return (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.tabItem, isActive && styles.tabItemActive]}
+              onPress={() => setActiveTab(tab)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                {tab === 'quests' ? 'Quests' : 'Leaderboard'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {activeTab === 'leaderboard' ? (
+        <Leaderboard bottomInset={bottom} scrollProps={scrollProps} />
+      ) : loading ? (
+        // Scoped to this tab so a slow quests fetch never blocks the leaderboard.
+        <View style={[styles.center, { flex: 1 }]}>
+          <ActivityIndicator color="#00b4a6" size="large" />
+        </View>
+      ) : (
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: bottom + 110 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: 16, paddingBottom: bottom + 110 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00b4a6" />
         }
         {...scrollProps}
       >
-        {/* ── Header ── */}
-        <View style={styles.pageHeader}>
-          <View>
-            <Text style={styles.pageTitle}>Quests</Text>
-            <Text style={styles.pageSubtitle}>Complete challenges, earn Aura Points</Text>
-          </View>
-          <View style={styles.auraOrb}>
-            <Text style={styles.auraOrbIcon}>◉</Text>
-            <Text style={styles.auraOrbValue}>
-              {auraPoints != null ? auraPoints.toLocaleString() : '—'}
+        {/* Camera permission denied — quests need the camera, explain how to fix */}
+        {cameraDenied && (
+          <View style={styles.cameraBanner}>
+            <Ionicons name="camera-outline" size={18} color="#e5484d" />
+            <Text style={styles.cameraBannerText}>
+              Quests are completed with a live photo, but camera access is off. Enable it in
+              Settings to continue.
             </Text>
+            <TouchableOpacity onPress={() => Linking.openSettings()} hitSlop={8}>
+              <Text style={styles.cameraBannerAction}>Open Settings</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        )}
 
         {quests.length === 0 ? (
           <View style={styles.emptyWrap}>
@@ -255,24 +343,21 @@ export default function QuestsScreen() {
             <Section
               title="Daily Quests"
               quests={daily}
-              onVerify={handleVerify}
-              verifyingId={verifyingId}
+              onSubmitProof={handleSubmitProof}
+              submittingId={submittingId}
             />
             <Section
               title="Weekly Quests"
               quests={weekly}
-              onVerify={handleVerify}
-              verifyingId={verifyingId}
-            />
-            <Section
-              title="Friend Quests"
-              quests={friend}
-              onVerify={handleVerify}
-              verifyingId={verifyingId}
+              onSubmitProof={handleSubmitProof}
+              submittingId={submittingId}
             />
           </>
         )}
       </ScrollView>
+      )}
+
+      {primer}
 
       <Speedometer />
     </View>
@@ -290,8 +375,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 28,
+    paddingHorizontal: 20,
+    marginBottom: 18,
   },
+
+  // ── Tabs (Quests / Leaderboard) ──
+  tabBar: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#1e1e1e',
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 11,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabItemActive: { borderBottomColor: '#00b4a6' },
+  tabLabel: { color: '#444', fontSize: 13, fontWeight: '600' },
+  tabLabelActive: { color: '#ffffff' },
   pageTitle: { color: '#ffffff', fontSize: 26, fontWeight: '700' },
   pageSubtitle: { color: '#444', fontSize: 13, marginTop: 3 },
 
@@ -370,7 +473,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0d1f1e',
     borderColor: '#00b4a640',
   },
-  questEmoji: { fontSize: 18 },
 
   cardInfo: { flex: 1 },
   cardTitle: { color: '#e0e0e0', fontSize: 14, fontWeight: '600', lineHeight: 19 },
@@ -381,6 +483,45 @@ const styles = StyleSheet.create({
   pointsBadge: { alignItems: 'center' },
   pointsIcon: { color: '#8b5cf6', fontSize: 11 },
   pointsValue: { color: '#8b5cf6', fontSize: 13, fontWeight: '700' },
+
+  // ── Photo proof states ──
+  reviewPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginHorizontal: 14,
+    marginBottom: 14,
+    paddingVertical: 9,
+    borderRadius: 11,
+    backgroundColor: '#1f1a0d',
+    borderWidth: 1,
+    borderColor: '#c9a22730',
+  },
+  reviewPillText: { color: '#c9a227', fontSize: 13, fontWeight: '600' },
+  rejectionText: {
+    color: '#e5484d',
+    fontSize: 12,
+    lineHeight: 16,
+    marginHorizontal: 14,
+    marginBottom: 10,
+  },
+
+  // ── Camera permission banner ──
+  cameraBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#1f0d0e',
+    borderWidth: 1,
+    borderColor: '#e5484d30',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 20,
+  },
+  cameraBannerText: { flex: 1, color: '#e0e0e0', fontSize: 12, lineHeight: 17 },
+  cameraBannerAction: { color: '#e5484d', fontSize: 13, fontWeight: '700' },
 
   // ── Verify button ──
   verifyBtn: {

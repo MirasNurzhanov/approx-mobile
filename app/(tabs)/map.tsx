@@ -455,10 +455,12 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
 
   console.log('[Story viewer] current story:', story.content, 'photo:', story.image);
   console.log('[Story] full object:', JSON.stringify(story));
+  console.log('[Story viewer] story.image value:', story.image, 'typeof:', typeof story.image, 'index:', index);
 
   console.log('[StoryViewer] story.image:', story.image);
   console.log('[StoryViewer] hasPhoto:', !!story.image);
   const hasPhoto = !!story.image;
+  console.log('[Story viewer] hasPhoto:', hasPhoto);
   const hasText  = !!(story.text || story.content);
 
   async function sendReply() {

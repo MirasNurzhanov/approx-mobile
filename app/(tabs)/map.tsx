@@ -1046,6 +1046,9 @@ export default function MapScreen() {
       console.log('[Stories] first story coords:', data[0]?.latitude, data[0]?.longitude);
       console.log('[Stories] after reaction fetch:', JSON.stringify(data.map(s => ({ id: s.id, reactions: s.reactions }))));
       setStories(data);
+      data.forEach(story => {
+        if (story.image) Image.prefetch(story.image);
+      });
     } catch {}
   }, []);
 

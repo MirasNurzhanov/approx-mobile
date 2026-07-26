@@ -17,7 +17,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
-  Image,
+  Image as RNImage,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -31,6 +31,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -240,7 +241,7 @@ function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex,
     >
       <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
         {uri && !imageFailed ? (
-          <Image
+          <RNImage
             source={{ uri }}
             style={{ width: inner, height: inner, borderRadius: inner / 2 }}
             onLoad={() => setTimeout(() => setImageReady(true), 250)}
@@ -278,7 +279,7 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
       <View style={styles.storyCard}>
         <View style={styles.storyAvatarWrap}>
           {story.author.profile_picture ? (
-            <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
+            <RNImage source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
           ) : (
             <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
               <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
@@ -455,6 +456,8 @@ function StoryViewer({ stories, onClose, onReact, replyTo }: StoryViewerProps) {
   console.log('[Story viewer] current story:', story.content, 'photo:', story.image);
   console.log('[Story] full object:', JSON.stringify(story));
 
+  console.log('[StoryViewer] story.image:', story.image);
+  console.log('[StoryViewer] hasPhoto:', !!story.image);
   const hasPhoto = !!story.image;
   const hasText  = !!(story.text || story.content);
 
@@ -671,7 +674,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
           <Text style={styles.charCount}>{text.length}/280</Text>
           {photoUri ? (
             <View style={styles.photoPreviewContainer}>
-              <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
+              <RNImage source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
               <TouchableOpacity style={styles.removePhotoBtn} onPress={() => setPhotoUri(null)} hitSlop={8}>
                 <IconClose size={14} color={colors.t1} />
               </TouchableOpacity>
@@ -1047,7 +1050,10 @@ export default function MapScreen() {
       console.log('[Stories] after reaction fetch:', JSON.stringify(data.map(s => ({ id: s.id, reactions: s.reactions }))));
       setStories(data);
       data.forEach(story => {
-        if (story.image) Image.prefetch(story.image);
+        if (story.image) {
+          console.log('[Prefetch] prefetching:', story.image);
+          Image.prefetch(story.image);
+        }
       });
     } catch {}
   }, []);

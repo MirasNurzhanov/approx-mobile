@@ -39,6 +39,30 @@ const SLIM_H = 56; // slim tab bar row height
 const SPRING = { damping: 18, stiffness: 150, mass: 0.9 };
 const FADE   = { duration: 200, easing: Easing.out(Easing.cubic) };
 
+/**
+ * How far above the safe-area inset a control of `width`, inset `fromRight`
+ * points from the right edge, has to sit to clear the nav arc.
+ *
+ * Takes the control's whole footprint rather than a single x on purpose: the
+ * arc rises toward the middle of the screen, so a control near the right edge
+ * is tallest under its *inner* edge. Measuring at its centre leaves the arc
+ * cutting through the bottom corner nearest the middle.
+ *
+ * Measured against the expanded arc, not the collapsed slim bar: overshooting
+ * while collapsed only leaves a larger gap, whereas undershooting overlaps.
+ */
+export function navArcClearance(fromRight: number, width: number): number {
+  const centre = W / 2;
+  const near = fromRight;          // the control's right side
+  const far = fromRight + width;   // its left side
+  // Closest the footprint gets to the arc's apex, where the arc is tallest.
+  const d =
+    near <= centre && far >= centre
+      ? 0
+      : Math.min(Math.abs(centre - near), Math.abs(centre - far));
+  return d >= R_OUT ? 0 : Math.sqrt(R_OUT * R_OUT - d * d);
+}
+
 // ─── Badge indices ────────────────────────────────────────────────────────────
 const CHAT_IDX  = 2; // 'Chat'   is index 2
 const NOTIF_IDX = 3; // 'Alerts' is index 3

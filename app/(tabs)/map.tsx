@@ -21,8 +21,9 @@ import {
 } from 'react-native';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, {
-    FadeIn,
-    FadeOut,
+    FadeInUp,
+    FadeOutUp,
+    ReduceMotion,
     runOnJS,
     useAnimatedStyle,
     useSharedValue,
@@ -31,7 +32,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Speedometer } from '@/components/Speedometer';
+import { navArcClearance, Speedometer } from '@/components/Speedometer';
 import { REACTIONS, StoryViewer } from '@/components/StoryViewer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -41,6 +42,9 @@ import {
     IconHi,
     IconImage,
     IconList,
+    IconLocate,
+    IconLocateFixed,
+    IconLocateOff,
     IconMute,
     IconPeople,
     IconPin,
@@ -50,18 +54,23 @@ import {
     type IconComponent,
 } from '@/components/ui/icons';
 import { colors, fonts, radius } from '@/constants/theme';
+import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { recordNearbySightings, recordStoryReactions } from '@/services/activityFeed';
 import { api } from '@/services/api';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
-import { reportLocation } from '@/services/location';
+import { atSharingPrecision, reportLocation, type Coordinates } from '@/services/location';
 import {
+  bindForegroundRefresh,
   check as checkPermission,
   openAppSettings,
+  refreshPermissions,
+  usePermissionStore,
   type PermissionState,
 } from '@/services/permissions';
 import { registerNearbyRefresh } from '@/services/nearbyRefresh';
 import { getPref } from '@/services/preferences';
+import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
 import {
     recordOwnStory,
     useStoryArchive,
@@ -90,10 +99,11 @@ interface NearbyUser {
   location_precision?: 'precise' | 'approximate';
 }
 
+/** Only what the owner's own zone circle needs. Their own audio is no longer
+ * surfaced on the map — see the zone-detection effect. */
 interface SelfZone {
   zone_active: boolean;
   zone_radius: number;
-  zone_audio_url?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -134,6 +144,23 @@ const DARK_MAP_STYLE = [
 ];
 const SHEET_H   = 400;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
+
+// ── Locate control ──
+/** Street-level, close enough to tell which side of the road you're on. */
+const FOCUS_DELTA = 0.006;
+/** Long enough to read as travel between two places rather than a cut. */
+const RECENTER_MS = 450;
+const LOCATE_SIZE = 48;   // ≥ 44pt target
+const LOCATE_INSET = 20;  // matches the top bar's horizontal padding
+/**
+ * How old the last fix may be before recentering re-reads it rather than
+ * trusting it. The watcher only fires every 10m, so a still user's fix is old
+ * and correct — age is not shown as staleness anywhere, it only decides
+ * whether to ask the OS again first. Coming back from a long backgrounding is
+ * the case this exists for: the alternative is confidently centring on where
+ * the phone was an hour ago.
+ */
+const STALE_FIX_MS = 30_000;
 
 // Muted avatar hues from the redesign (hue1–hue6), dark text on top.
 const AVATAR_COLORS = ['#7FB8A4', '#A48FD1', '#C9A06B', '#8FA9D1', '#C98A8A', '#9BBF7F'];
@@ -230,6 +257,49 @@ function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex,
   );
 }
 
+/**
+ * The owner's own marker.
+ *
+ * Everyone else on this map is either a bare dot or an avatar in a coloured
+ * ring, so "me" cannot just be one more of those in a different colour — at a
+ * glance it reads as another person standing where you are. It gets the halo
+ * idiom every map uses for self instead: a soft disc under a ringed core,
+ * which nothing else on this map has, in the same purple as the owner's own
+ * zone circle.
+ */
+function SelfMarker({ coordinate, uri, username }: {
+  coordinate: { latitude: number; longitude: number };
+  uri?: string;
+  username: string;
+}) {
+  const [imageReady, setImageReady] = useState(!uri);
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
+
+  return (
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={10} tracksViewChanges={!imageReady}>
+      <View style={styles.selfHalo}>
+        <View style={styles.selfCore}>
+          {uri && !imageFailed ? (
+            <Image
+              source={{ uri }}
+              style={styles.selfAvatar}
+              onLoad={() => setTimeout(() => setImageReady(true), 250)}
+              onError={() => { setImageFailed(true); setImageReady(true); }}
+            />
+          ) : (
+            <View style={[styles.selfAvatar, styles.selfInitialWrap]}>
+              <Text style={styles.selfInitial}>
+                {username ? username.charAt(0).toUpperCase() : '·'}
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Marker>
+  );
+}
+
 function StoryBubble({ story, count }: { story: Story; count: number }) {
   const avatarBg = avatarBgColor(story.author.username);
 
@@ -268,6 +338,72 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
         </View>
       )}
     </View>
+  );
+}
+
+// ─── Locate control ───────────────────────────────────────────────────────────
+type LocateState =
+  /** Camera is free — wherever the user last left it. */
+  | 'off'
+  /** Camera tracks each new fix. */
+  | 'following'
+  /** No fix yet, or one is being resolved. */
+  | 'locating'
+  /** No permission, so there is nothing to centre on. */
+  | 'unavailable';
+
+/** Written as what tapping does, since that is what changes on activation. */
+const LOCATE_LABEL: Record<LocateState, string> = {
+  off:         'Center on my location',
+  following:   'Following your location, tap to stop',
+  locating:    'Finding your location',
+  unavailable: 'Location unavailable, tap to find out why',
+};
+
+const LOCATE_HINT: Record<LocateState, string | undefined> = {
+  off:         'Moves the map to where you are and keeps it there as you move',
+  following:   undefined,
+  locating:    undefined,
+  unavailable: 'Aura does not have permission to use your location',
+};
+
+function LocateButton({
+  state,
+  bottom,
+  onPress,
+}: {
+  state: LocateState;
+  bottom: number;
+  onPress: () => void;
+}) {
+  const following = state === 'following';
+
+  // The icon carries the state as a shape — a filled centre when tracking, a
+  // slash when unavailable — so following is still legible without the teal.
+  const Icon = following ? IconLocateFixed : state === 'unavailable' ? IconLocateOff : IconLocate;
+  const tint = following ? colors.teal : state === 'unavailable' ? colors.t3 : colors.t2;
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.75}
+      disabled={state === 'locating'}
+      hitSlop={8}
+      style={[styles.locateBtn, following && styles.locateBtnActive, { bottom }]}
+      accessibilityRole="button"
+      accessibilityLabel={LOCATE_LABEL[state]}
+      accessibilityHint={LOCATE_HINT[state]}
+      // `selected` is what makes a screen reader say "on"/"off" for the two
+      // live states. Unavailable is deliberately not `disabled`: it is still
+      // the thing you tap to find out why, and disabled controls are skipped.
+      accessibilityState={{ selected: following, busy: state === 'locating' }}
+    >
+      {state === 'locating' ? (
+        <ActivityIndicator size="small" color={colors.t2} />
+      ) : (
+        <Icon size={22} color={tint} />
+      )}
+    </TouchableOpacity>
   );
 }
 
@@ -343,44 +479,56 @@ function TopBar({
 }
 
 // ─── Zone Banner ──────────────────────────────────────────────────────────────
+/**
+ * Only ever a friend's zone — see the zone-detection effect. There is no
+ * locked state and no self state left to render, because a banner you cannot
+ * listen to is just a notification that you are not allowed to do something.
+ */
 function ZoneBanner({
   username,
   isPlaying,
-  canListen,
-  isSelf,
   onTap,
   onMute,
 }: {
   username: string;
   isPlaying: boolean;
-  canListen: boolean;
-  isSelf: boolean;
   onTap: () => void;
   onMute: () => void;
 }) {
   const { top } = useSafeAreaInsets();
   return (
     <Animated.View
-      entering={FadeIn.duration(200)}
-      exiting={FadeOut.duration(200)}
+      // Drops in from under the top bar rather than materialising in place, so
+      // it reads as arriving. `reduceMotion` is reanimated's own system-setting
+      // check, which drops the slide on the UI thread when it's on.
+      entering={FadeInUp.duration(260).reduceMotion(ReduceMotion.System)}
+      exiting={FadeOutUp.duration(200).reduceMotion(ReduceMotion.System)}
       style={[styles.zoneBanner, { top: top + 62 }]}
     >
       <IconSound size={20} color={colors.teal} />
       <Text style={styles.zoneBannerText} numberOfLines={1}>
-        {isPlaying ? 'Playing ' : "You are in "}
-        <Text style={styles.zoneBannerUser}>{isSelf ? "no one's" : `@${username}`}</Text>
-        {isSelf ? ' zone' : "'s zone"}
+        {isPlaying ? 'Playing ' : 'You are in '}
+        <Text style={styles.zoneBannerUser}>@{username}</Text>
+        {"'s zone"}
       </Text>
       {isPlaying ? (
-        <TouchableOpacity onPress={onMute} hitSlop={12}>
+        <TouchableOpacity
+          onPress={onMute}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={`Mute ${username}'s zone music`}
+        >
           <IconMute size={20} color={colors.teal} />
         </TouchableOpacity>
-      ) : canListen ? (
-        <TouchableOpacity onPress={onTap} hitSlop={12}>
+      ) : (
+        <TouchableOpacity
+          onPress={onTap}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={`Listen to ${username}'s zone music`}
+        >
           <Text style={styles.zoneBannerAction}>Listen</Text>
         </TouchableOpacity>
-      ) : (
-        <Text style={styles.zoneBannerLocked}>Friends only</Text>
       )}
     </Animated.View>
   );
@@ -662,7 +810,7 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
 export default function MapScreen() {
   useEffect(() => { console.log('[Map] step 1: component mounted'); }, []);
   const router = useRouter();
-  const { top: topInset } = useSafeAreaInsets();
+  const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
   const [nearby, setNearby]           = useState<NearbyUser[]>([]);
   const [permState, setPermState]     = useState<PermissionState | null>(null);
@@ -672,7 +820,8 @@ export default function MapScreen() {
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [selfProfile, setSelfProfile] = useState<{ username: string; profile_picture?: string } | null>(null);
-  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl?: string; isFriend: boolean; isSelf: boolean } | null>(null);
+  /** Always a friend's zone with playable audio, or null. */
+  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl: string } | null>(null);
   const [isPlaying, setIsPlaying]     = useState(false);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
   const [hiToast, setHiToast]           = useState(false);
@@ -681,6 +830,9 @@ export default function MapScreen() {
   const [storyViewer, setStoryViewer]   = useState<{ stories: Story[] } | null>(null);
   const [createStoryCoord, setCreateStoryCoord] = useState<{ latitude: number; longitude: number } | null>(null);
 
+  const [following, setFollowing]     = useState(false);
+  const [locating, setLocating]       = useState(false);
+
   const coordsRef          = useRef(coords);
   const hiToastTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -688,10 +840,51 @@ export default function MapScreen() {
   const currentUserIdRef   = useRef<number | null>(null);
   const playingUrlRef      = useRef<string | null>(null);
   const mutedZoneRef       = useRef<string | null>(null);
+  const announcedZoneRef   = useRef<string | null>(null);
+  const mapRef             = useRef<MapView | null>(null);
+  /** Last region the map settled on, so recentering can keep the user's zoom
+   * instead of snapping back to the default every time they move. */
+  const regionRef          = useRef<Region | null>(null);
+  /** The position the camera was last sent to, so a fix that rounds to the
+   * same approximate point doesn't re-issue an animation. */
+  const centeredOnRef      = useRef<Coordinates | null>(null);
+  /** When `coords` was last measured, not when it was last rendered. */
+  const fixAtRef           = useRef(0);
+  const followingRef       = useRef(false);
+  const watchRef           = useRef<Location.LocationSubscription | null>(null);
+  const startingWatchRef   = useRef(false);
   coordsRef.current = coords;
   currentUserIdRef.current = currentUserId;
+  followingRef.current = following;
 
   const sheetY = useSharedValue(SHEET_H);
+  const reduceMotion = useReduceMotion();
+
+  // ── Location accuracy ──
+  // The owner's own view is the easiest place to leak the precise position of
+  // someone sharing approximately, so everything drawn for them — the marker,
+  // their zone circle, and where the locate button centres — goes through the
+  // same rounding the network layer applies. Until the mode is known we draw
+  // nothing rather than guess, which is why the map waits on `displayCoords`
+  // and not on `coords`.
+  const sharing = useLocationSharing();
+  const displayCoords = useMemo(
+    () => (coords && sharing ? atSharingPrecision(coords, sharing) : null),
+    [coords, sharing],
+  );
+
+  // ── Location permission, re-read on every foreground ──
+  // A grant seen when the map mounted is not a grant now: iOS "Allow Once"
+  // lapses the moment the app is backgrounded, and either OS can revoke from
+  // Settings while we are suspended. This is the same store Settings →
+  // Permissions reads, so the two can't disagree.
+  const permissions = usePermissionStore();
+  useEffect(() => {
+    refreshPermissions(['location']).catch(() => {});
+    return bindForegroundRefresh();
+  }, []);
+  const locationState = permissions.location?.state ?? permState;
+  const locationGranted = locationState === 'granted';
 
   // Stories deleted from the archive screen vanish here immediately instead of
   // waiting for the next poll.
@@ -793,55 +986,65 @@ export default function MapScreen() {
     }
   }
 
-  // Detect which zone the banner/audio should follow.
-  // Priority: a friend's zone we're standing in → the owner's own active zone
-  // → a non-friend zone (shown locked, never played). The owner's zone comes
-  // from /api/users/zone/, not the nearby list, so the friends-only rule can
-  // never lock the owner out of their own music.
+  // Detect the zone the banner and audio follow.
+  //
+  // A friend's zone, or nothing. The banner exists to offer you music you can
+  // actually play, so the two cases that used to reach it no longer do:
+  //
+  //   A stranger's or connection's zone — including an interest match, which
+  //   is the only kind of stranger the map draws at all — used to appear as a
+  //   locked "Friends only" row. That is a banner announcing something you
+  //   can't do, in the one place you can't act on it.
+  //
+  //   The owner's own zone used to appear too, captioned "You are in no one's
+  //   zone". It is your own music, you already know it's there, and it was
+  //   never autoplayed anyway.
   useEffect(() => {
     // The server omits zone_audio_url for anyone the owner's Zone audio
-    // setting excludes, so presence of a URL can't be the "is there a zone
-    // here" test — zone_active/radius stay visible and can.
-    const insideZones = visibleNearby.filter((u) =>
-      u.zone_active && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
+    // setting excludes, so a friend without a URL is a friend whose audio we
+    // are not allowed to play — that's a no-banner case too, not a locked one.
+    const friendZone = visibleNearby.find((u) =>
+      u.zone_active &&
+      friendIds.has(Number(u.id)) &&
+      u.zone_audio_url &&
+      (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
     );
-    console.log('[Zone] zones in range:', insideZones.map((u) => u.username),
-      '| self zone active:', !!selfZone?.zone_active);
-    const friendZone = insideZones.find((u) => friendIds.has(Number(u.id)) && u.zone_audio_url);
-    const strangerZone = insideZones.find((u) => !friendIds.has(Number(u.id)));
+    console.log('[Zone] friend zone in range:', friendZone?.username ?? 'none');
 
-    let next: { username: string; audioUrl?: string; isFriend: boolean; isSelf: boolean } | null = null;
-    if (friendZone) {
-      next = { username: friendZone.username, audioUrl: friendZone.zone_audio_url, isFriend: true, isSelf: false };
-    } else if (selfZone?.zone_active && selfZone.zone_audio_url) {
-      next = { username: selfProfile?.username ?? 'you', audioUrl: selfZone.zone_audio_url, isFriend: false, isSelf: true };
-    } else if (strangerZone) {
-      next = { username: strangerZone.username, audioUrl: undefined, isFriend: false, isSelf: false };
-    }
-
-    if (!next) {
+    if (!friendZone?.zone_audio_url) {
       setActiveZone(null);
       mutedZoneRef.current = null;
+      announcedZoneRef.current = null;
       if (playingUrlRef.current) stopZone();
       return;
     }
 
+    const next = { username: friendZone.username, audioUrl: friendZone.zone_audio_url };
     setActiveZone(next);
+
+    // The banner slides in on its own as you walk into a zone, with no focus
+    // change to hint at it. Announced from here rather than via
+    // accessibilityLiveRegion, which is Android-only — and guarded, because
+    // this effect re-runs on every 10s poll.
+    if (announcedZoneRef.current !== next.username) {
+      announcedZoneRef.current = next.username;
+      announce(`You are in ${next.username}'s zone. Their music is available.`);
+    }
     if (mutedZoneRef.current && mutedZoneRef.current !== next.username) mutedZoneRef.current = null;
 
     // Stop stale audio when the zone (or its track) changed.
     if (playingUrlRef.current && playingUrlRef.current !== next.audioUrl) stopZone();
 
-    // Autoplay only a friend's zone, and only when nothing is playing yet and
-    // the user hasn't muted it — the nearby poll re-runs this effect every
-    // 10s, and an unguarded playZone() here restarts the track each time.
-    if (next.isFriend && next.audioUrl && !playingUrlRef.current && mutedZoneRef.current !== next.username) {
+    // Only when nothing is playing yet and the user hasn't muted it — the
+    // nearby poll re-runs this effect every 10s, and an unguarded playZone()
+    // here restarts the track each time.
+    if (!playingUrlRef.current && mutedZoneRef.current !== next.username) {
       const { audioUrl, username } = next;
       getPref('zoneAutoplay').then((autoplay) => {
         if (autoplay && !playingUrlRef.current) playZone(audioUrl, username);
       });
     }
-  }, [visibleNearby, friendIds, selfZone, selfProfile]);
+  }, [visibleNearby, friendIds]);
 
   // Stop audio on unmount
   useEffect(() => {
@@ -943,16 +1146,15 @@ export default function MapScreen() {
       .then((r) => setSelfProfile({ username: r.data.username, profile_picture: r.data.profile_picture }))
       .catch(() => {});
 
-    // The zone endpoint answers with either {zone_active, zone_radius, ...}
-    // or {active, custom_audio_url, ...} and may omit the radius — normalize
-    // so the owner's circle renders regardless of which shape arrives.
+    // The zone endpoint answers with either {zone_active, zone_radius, ...} or
+    // {active, ...} and may omit the radius — normalize so the owner's circle
+    // renders regardless of which shape arrives.
     api.get<Record<string, any>>('/api/users/zone/')
       .then((r) => {
         const d = r.data ?? {};
         const normalized: SelfZone = {
           zone_active: Boolean(d.zone_active ?? d.active ?? false),
           zone_radius: Number(d.zone_radius) > 0 ? Number(d.zone_radius) : 500,
-          zone_audio_url: d.zone_audio_url ?? d.custom_audio_url ?? undefined,
         };
         console.log('[Zone] self zone:', JSON.stringify(normalized));
         setSelfZone(normalized);
@@ -964,9 +1166,42 @@ export default function MapScreen() {
 
   useFocusEffect(useCallback(() => { loadSelf(); }, [loadSelf]));
 
-  useEffect(() => {
-    let sub: Location.LocationSubscription | null = null;
+  /**
+   * The one location subscription on this screen. The locate control and
+   * follow mode read from it rather than opening a second one — two GPS
+   * subscriptions on a screen people leave open is a real battery cost for no
+   * extra information.
+   *
+   * Guarded so it can be called from both the mount effect and the
+   * permission-regained effect without ever ending up with two watchers.
+   */
+  const startWatching = useCallback(async () => {
+    if (watchRef.current || startingWatchRef.current) return;
+    startingWatchRef.current = true;
+    try {
+      // Background location is optional and is *not* asked for here. It now
+      // lives in Settings → Permissions, where the user can opt in knowingly
+      // rather than being ambushed on first launch.
+      await startBackgroundLocationUpdates();
+      const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
+      fixAtRef.current = init.timestamp;
+      setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
+      watchRef.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
+        (loc) => {
+          fixAtRef.current = loc.timestamp;
+          setCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        },
+      );
+    } catch (e: any) {
+      console.log('[Map] location watch failed:', e?.message);
+    } finally {
+      startingWatchRef.current = false;
+    }
+  }, []);
 
+  useEffect(() => {
     (async () => {
       // Primed, not cold. The old code fired the system dialog the instant the
       // map mounted, and then fired the *background* location dialog straight
@@ -979,22 +1214,22 @@ export default function MapScreen() {
         return;
       }
       setPermState('granted');
-
-      // Background location is optional and is *not* asked for here. It now
-      // lives in Settings → Permissions, where the user can opt in knowingly
-      // rather than being ambushed on first launch.
-      await startBackgroundLocationUpdates();
-      const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
-      setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
-      sub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
-        (loc) => setCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }),
-      );
+      await startWatching();
     })();
 
-    return () => { sub?.remove(); };
-  }, []);
+    return () => {
+      watchRef.current?.remove();
+      watchRef.current = null;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Permission can come back mid-session — from the locate button's primer, or
+  // from the user flipping it in Settings and returning. The subscription died
+  // with the revocation, so it has to be re-armed here or follow mode would
+  // track a position that never updates again.
+  useEffect(() => {
+    if (locationGranted) startWatching();
+  }, [locationGranted, startWatching]);
 
   const tick = useCallback(async () => {
     const c = coordsRef.current;
@@ -1068,8 +1303,155 @@ export default function MapScreen() {
     });
   }
 
-  const region: Region | undefined = coords
-    ? { latitude: coords.latitude, longitude: coords.longitude, latitudeDelta: 0.012, longitudeDelta: 0.012 }
+  // ── Locate / follow ─────────────────────────────────────────────────────────
+  //
+  // This is a camera control and nothing else. It deliberately never calls
+  // reportLocation or tick: a button that made the phone transmit its position
+  // would be a way to broadcast location while sharing is paused, which is the
+  // one thing pausing is supposed to guarantee. Recentering while paused moves
+  // the camera and sends nothing.
+  //
+  // It also reuses the map's existing watchPositionAsync subscription rather
+  // than opening its own. A second GPS subscription on a screen people leave
+  // open is a real battery cost for no new information.
+  const centerOnSelf = useCallback(
+    (target: Coordinates, resetZoom: boolean) => {
+      const map = mapRef.current;
+      if (!map) return;
+      const current = regionRef.current;
+      const zoomed = resetZoom || !current;
+      centeredOnRef.current = target;
+      map.animateToRegion(
+        {
+          ...target,
+          latitudeDelta:  zoomed ? FOCUS_DELTA : current!.latitudeDelta,
+          longitudeDelta: zoomed ? FOCUS_DELTA : current!.longitudeDelta,
+        },
+        // Both platforms treat a zero duration as an instant move, so Reduce
+        // Motion gets a real jump rather than a very fast animation.
+        reduceMotion ? 0 : RECENTER_MS,
+      );
+    },
+    [reduceMotion],
+  );
+
+  // Guarded through a ref, not through the state updater: onPanDrag fires on
+  // every frame of a drag, and announcing from inside a setState callback
+  // would repeat for each one.
+  const stopFollowing = useCallback((reason: 'gesture' | 'tap') => {
+    if (!followingRef.current) return;
+    followingRef.current = false;
+    setFollowing(false);
+    announce(
+      reason === 'gesture'
+        ? 'Stopped following your location, map moved'
+        : 'Stopped following your location',
+    );
+  }, []);
+
+  // Track each new fix while following. The guard matters in approximate mode,
+  // where consecutive fixes usually round to the same point and would
+  // otherwise re-animate the camera to where it already is.
+  useEffect(() => {
+    if (!following || !displayCoords) return;
+    const last = centeredOnRef.current;
+    if (last && last.latitude === displayCoords.latitude && last.longitude === displayCoords.longitude) return;
+    centerOnSelf(displayCoords, false);
+  }, [following, displayCoords, centerOnSelf]);
+
+  // Losing permission while following leaves the camera locked to a position
+  // that will never update again.
+  useEffect(() => {
+    if (!locationGranted && following) setFollowing(false);
+  }, [locationGranted, following]);
+
+  async function explainUnavailable() {
+    // The primer already covers both shapes of this: the reason plus the OS
+    // dialog while we may still ask, and the reason plus Linking.openSettings()
+    // once it has been permanently refused. A second explanation of our own
+    // here would only be a worse copy of it.
+    if (await ensurePermission('location')) {
+      setPermState('granted');
+      await refreshPermissions(['location']);
+    }
+  }
+
+  /** Ask the OS for a fresh fix and feed it into the shared position state. */
+  const refreshFix = useCallback(async (): Promise<Coordinates | null> => {
+    try {
+      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const next = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
+      fixAtRef.current = fix.timestamp;
+      setCoords(next);
+      return atSharingPrecision(next, sharing ?? (await getCachedLocationSharing()));
+    } catch {
+      return null;
+    }
+  }, [sharing]);
+
+  function startFollowing(target: Coordinates) {
+    centerOnSelf(target, true);
+    // Set before the re-render: stopFollowing reads the ref, and onPanDrag can
+    // fire a frame ahead of the state update.
+    followingRef.current = true;
+    setFollowing(true);
+    announce('Following your location');
+  }
+
+  async function handleLocatePress() {
+    if (!locationGranted) {
+      explainUnavailable();
+      return;
+    }
+    if (following) {
+      stopFollowing('tap');
+      return;
+    }
+
+    // Move on the fix we already have. The watcher only fires every 10m, so a
+    // still user's fix is minutes old and perfectly accurate — blocking on the
+    // GPS first made the button do nothing for the second or two a fresh fix
+    // takes, which reads as broken.
+    if (displayCoords) {
+      startFollowing(displayCoords);
+      // If it really is old enough to predate a backgrounding, re-read in the
+      // background; follow mode moves the camera the moment the fix lands.
+      if (Date.now() - fixAtRef.current > STALE_FIX_MS) refreshFix();
+      return;
+    }
+
+    // Nothing to centre on at all. This is the only case that waits, and it
+    // waits rather than falling back to a hardcoded coordinate.
+    setLocating(true);
+    const target = await refreshFix();
+    setLocating(false);
+    if (!target) {
+      Alert.alert(
+        'Can’t find you yet',
+        'Aura couldn’t get a location fix. Move somewhere with a clearer view of the sky and try again.',
+      );
+      return;
+    }
+    startFollowing(target);
+  }
+
+  const locateState: LocateState =
+    !locationGranted ? 'unavailable'
+    : locating || !displayCoords ? 'locating'
+    : following ? 'following'
+    : 'off';
+
+  /** The control belongs to the map, not to the states that replace it: over
+   * the permission dead end it duplicates the Allow button, and over the
+   * full-screen "Locating you…" it is a spinner on top of a spinner. */
+  const mapVisible = !(permState && permState !== 'granted') && !!displayCoords;
+
+  // The nav arc spans the full width, so there is no free bottom corner: the
+  // button clears whatever height the arc reaches across its own footprint.
+  const locateBottom = bottomInset + navArcClearance(LOCATE_INSET, LOCATE_SIZE) + 12;
+
+  const region: Region | undefined = displayCoords
+    ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
 
   return (
@@ -1111,13 +1493,14 @@ export default function MapScreen() {
             <Text style={styles.emptyLinkText}>See nearby people as a list</Text>
           </Pressable>
         </View>
-      ) : !coords ? (
+      ) : !displayCoords ? (
         <View style={styles.center} accessible accessibilityLabel="Finding your location">
           <ActivityIndicator color={colors.teal} size="large" />
           <Text style={styles.loadingText}>Locating you…</Text>
         </View>
       ) : (
         <MapView
+          ref={mapRef}
           onLayout={() => console.log('[Map] step 5: map rendering')}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
@@ -1127,6 +1510,12 @@ export default function MapScreen() {
           showsMyLocationButton={false}
           rotateEnabled={false}
           pitchEnabled={false}
+          // Dragging the map is the user taking the camera back. Follow mode
+          // drops out rather than fighting the gesture and snapping away from
+          // wherever they just moved to. Pinch-zoom is not a pan, so zooming
+          // in on yourself keeps following, the way it does in Google Maps.
+          onPanDrag={() => stopFollowing('gesture')}
+          onRegionChangeComplete={(r) => { regionRef.current = r; }}
           onLongPress={() => {
             if (!coords) return;
             setCreateStoryCoord(coords);
@@ -1155,7 +1544,7 @@ export default function MapScreen() {
           {/* Zone circle for self */}
           {selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
             <Circle
-              center={coords}
+              center={displayCoords}
               radius={selfZone.zone_radius}
               fillColor="rgba(139,92,246,0.07)"
               strokeColor="rgba(139,92,246,0.35)"
@@ -1202,26 +1591,24 @@ export default function MapScreen() {
             );
           })}
 
-          {selfProfile ? (
-            <AvatarMarker
-              coordinate={coords}
-              uri={selfProfile.profile_picture}
-              username={selfProfile.username}
-              ringColor={colors.purple}
-              size={38}
-              zIndex={10}
+          {/* Approximate sharers see their own fuzz too. A bare point would
+              tell them they are pinned exactly where they stand, which is the
+              opposite of what they chose. */}
+          {sharing === 'approximate' && (
+            <Circle
+              center={displayCoords}
+              radius={APPROX_RADIUS_M}
+              fillColor="rgba(139,92,246,0.06)"
+              strokeColor="rgba(139,92,246,0.22)"
+              strokeWidth={1}
             />
-          ) : (
-            <Marker
-              coordinate={coords}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
-            >
-              <View style={styles.selfRing}>
-                <View style={styles.selfDot} />
-              </View>
-            </Marker>
           )}
+
+          <SelfMarker
+            coordinate={displayCoords}
+            uri={selfProfile?.profile_picture}
+            username={selfProfile?.username ?? ''}
+          />
 
           {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => {
             const first = authorStories[0];
@@ -1252,11 +1639,8 @@ export default function MapScreen() {
       {activeZone && (
         <ZoneBanner
           username={activeZone.username}
-          isSelf={activeZone.isSelf}
-          canListen={activeZone.isFriend}
           isPlaying={isPlaying}
           onTap={() => {
-            if (!activeZone.audioUrl) return;
             mutedZoneRef.current = null;
             playZone(activeZone.audioUrl, activeZone.username);
           }}
@@ -1322,6 +1706,22 @@ export default function MapScreen() {
       {primer}
 
       <Speedometer />
+
+      {/* Locate / follow control.
+          Rendered after the nav on purpose. The Speedometer's root is a
+          full-width absolutely-positioned View with default pointerEvents and
+          elevation 10, so it swallows every touch inside its ~200pt-tall
+          rectangle that doesn't land on one of its own tabs — anything drawn
+          behind it there is visible but dead. It has to absorb those touches
+          (otherwise drags on the opaque arc would pan the map underneath), so
+          the button sits above it instead.
+
+          Hidden while a sheet or full-screen overlay owns the screen: the user
+          sheet reaches 400pt up with a backdrop over everything below it, so a
+          button left there is both covered and unreachable. */}
+      {mapVisible && !selectedUser && !storyViewer && createStoryCoord === null && (
+        <LocateButton state={locateState} bottom={locateBottom} onPress={handleLocatePress} />
+      )}
     </View>
   );
 }
@@ -1388,22 +1788,41 @@ const styles = StyleSheet.create({
     color: colors.bg,
   },
 
-  // ── Self marker: purple core, bg gap, thin purple ring — no glow ──
-  selfRing: {
-    width: 25,
-    height: 25,
-    borderRadius: 12.5,
-    borderWidth: 1.5,
+  // ── Self marker: purple halo, bg gap, purple ring — the halo is what makes
+  // it read as "me" rather than as another avatar in another colour ──
+  selfHalo: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: 'rgba(139,92,246,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selfCore: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
     borderColor: colors.purple,
     backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  selfDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+  selfAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+  },
+  selfInitialWrap: {
     backgroundColor: colors.purple,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selfInitial: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 12,
+    color: colors.bg,
   },
 
   // ── Top bar (flat, no blur) ──
@@ -1455,6 +1874,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
+  // ── Locate control (tonal surface, teal tint while following) ──
+  locateBtn: {
+    position: 'absolute',
+    right: LOCATE_INSET,
+    width: LOCATE_SIZE,
+    height: LOCATE_SIZE,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Above the nav (zIndex 100 / elevation 10). Android orders hit-testing by
+    // elevation independently of zIndex, so both are needed for the tap to
+    // land — this is the one elevation on the screen, not a stacked shadow.
+    zIndex: 110,
+    elevation: 12,
+  },
+  locateBtnActive: {
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
+  },
+
   // ── Zone banner (solid card) ──
   zoneBanner: {
     position: 'absolute',
@@ -1483,12 +1925,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.teal,
-  },
-  zoneBannerLocked: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.t2,
   },
 
 

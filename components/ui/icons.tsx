@@ -802,6 +802,46 @@ export function IconScissors({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
+// The three states of the map's locate control. They differ in shape, not just
+// in tint, so "following" is still distinguishable when the teal is not — the
+// centre fills in when tracking, and a slash marks it unavailable.
+export function IconLocate({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={4.25} />
+        <Path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconLocateFixed({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={4.25} />
+        <Path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+      </G>
+      <Circle cx={12} cy={12} r={2} fill={color} />
+    </Svg>
+  )
+}
+
+export function IconLocateOff({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={4.25} />
+        <Path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+        {/* Same diagonal as IconEyeOff, so "off" reads the same way across
+            the set rather than as a different gesture each time. */}
+        <Path d="M5 19L19 5" />
+      </G>
+    </Svg>
+  )
+}
+
 // Backend serves emoji for interests; this maps interest names to the designed
 // icon set instead (redesign rule 3 — no emoji anywhere). Grouped by icon and
 // covering the full seed catalog (scripts/interests_seed.json) so nothing

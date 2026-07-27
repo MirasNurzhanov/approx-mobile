@@ -1,5 +1,5 @@
 import { api } from './api';
-import { getCachedLocationSharing } from './privacy';
+import { getCachedLocationSharing, type LocationSharing } from './privacy';
 
 // The one place location leaves this device.
 //
@@ -28,16 +28,31 @@ function round(value: number, decimals: number): number {
   return parseFloat(value.toFixed(decimals));
 }
 
-/** What we are willing to transmit, or null when sharing is paused. */
-export async function prepareCoordinates(coords: Coordinates): Promise<Coordinates | null> {
-  const mode = await getCachedLocationSharing();
-  if (mode === 'paused') return null;
-
+/**
+ * The coordinates at the precision `mode` is willing to transmit.
+ *
+ * `paused` has no precision of its own because it transmits nothing:
+ * `prepareCoordinates` rejects it before it ever reaches here, and the owner's
+ * own map — which sends nothing either — keeps full precision so they can
+ * still see themselves while invisible to everyone else.
+ *
+ * The owner's map draws their marker through this too, so an approximate
+ * sharer is never shown a precise position we would not transmit. Otherwise
+ * their own screen becomes the one place the exact value is still on display.
+ */
+export function atSharingPrecision(coords: Coordinates, mode: LocationSharing): Coordinates {
   const decimals = mode === 'approximate' ? APPROX_DECIMALS : LIVE_DECIMALS;
   return {
     latitude: round(coords.latitude, decimals),
     longitude: round(coords.longitude, decimals),
   };
+}
+
+/** What we are willing to transmit, or null when sharing is paused. */
+export async function prepareCoordinates(coords: Coordinates): Promise<Coordinates | null> {
+  const mode = await getCachedLocationSharing();
+  if (mode === 'paused') return null;
+  return atSharingPrecision(coords, mode);
 }
 
 /** Send a position update, honouring the user's sharing mode. Resolves to

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { api } from './api';
 
@@ -83,6 +83,31 @@ function subscribe(listener: () => void): () => void {
 
 export function usePrivacySettings(): State {
   return useSyncExternalStore(subscribe, () => state);
+}
+
+/**
+ * The sharing mode, for screens that only read it. `null` means "not known
+ * yet" — a caller that draws the owner's position should wait rather than
+ * assume, because assuming 'live' for one frame draws the precise point an
+ * approximate sharer asked us not to show.
+ *
+ * No fetch: the privacy screen writes every change into this store and mirrors
+ * it to disk, so reading the mirror is enough and costs nothing on a screen
+ * that is already polling.
+ */
+export function useLocationSharing(): LocationSharing | null {
+  const { settings } = usePrivacySettings();
+  const [mirrored, setMirrored] = useState<LocationSharing | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getCachedLocationSharing()
+      .then((mode) => { if (active) setMirrored(mode); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  return settings?.location_sharing ?? mirrored;
 }
 
 export async function refreshPrivacy(): Promise<PrivacySettings | null> {

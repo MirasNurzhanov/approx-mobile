@@ -19,7 +19,9 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import ClusterMap from 'react-native-map-clustering';
 import Animated, {
     FadeInUp,
     FadeOutUp,
@@ -1068,7 +1070,7 @@ export default function MapScreen() {
       console.log('[Stories] after reaction fetch:', JSON.stringify(data.map(s => ({ id: s.id, reactions: s.reactions }))));
       setStories(data);
       data.forEach(s => {
-        if (s.image) Image.prefetch(s.image);
+        if (s.image) ExpoImage.prefetch(s.image);
       });
     } catch {}
   }, []);
@@ -1499,7 +1501,7 @@ export default function MapScreen() {
           <Text style={styles.loadingText}>Locating you…</Text>
         </View>
       ) : (
-        <MapView
+        <ClusterMap
           ref={mapRef}
           onLayout={() => console.log('[Map] step 5: map rendering')}
           style={styles.map}
@@ -1624,7 +1626,7 @@ export default function MapScreen() {
               </Marker>
             );
           })}
-        </MapView>
+        </ClusterMap>
       )}
 
       {/* Top bar */}

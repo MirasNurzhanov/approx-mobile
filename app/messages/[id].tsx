@@ -23,6 +23,11 @@ import { announce } from '@/hooks/useReduceMotion';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
 import { colors, fonts, radius } from '@/constants/theme';
+import { PresenceDot } from '@/components/PresenceDot';
+import type { Presence } from '@/services/presence';
+
+/** Slow on purpose: one request, on one focused screen. */
+const PRESENCE_POLL_MS = 30_000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Message {
@@ -95,6 +100,7 @@ export default function MessagesScreen() {
   const [loading, setLoading] = useState(true);
   const [wsReady, setWsReady] = useState(false);
   const [otherUserPicture, setOtherUserPicture] = useState<string | null>(null);
+  const [presence, setPresence] = useState<Presence | undefined>(undefined);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   const currentUserIdRef = useRef<number | null>(null);
@@ -109,9 +115,24 @@ export default function MessagesScreen() {
       .then((r) => {console.log("[Messages] User's current id:" , r.data.id) ,  currentUserIdRef.current = Number(r.data.id); })
       .catch(() => {});
 
-    api.get<{ profile_picture?: string }>(`/api/users/profile/${id}/`)
-      .then((r) => setOtherUserPicture(r.data.profile_picture ?? null))
-      .catch(() => {});
+    // Presence rides the profile fetch this screen already makes. Refreshed on
+    // a slow timer while the thread is open — this is the one screen where
+    // "are they there right now" is the actual question being asked, and it is
+    // a single request on a single focused screen rather than a background
+    // loop competing with the map's.
+    const load = () =>
+      api.get<{ profile_picture?: string; presence?: Presence }>(`/api/users/profile/${id}/`)
+        .then((r) => {
+          setOtherUserPicture(r.data.profile_picture ?? null);
+          // undefined, not null: absent means "not ours to show", and
+          // PresenceDot renders nothing for it.
+          setPresence(r.data.presence);
+        })
+        .catch(() => {});
+
+    load();
+    const timer = setInterval(load, PRESENCE_POLL_MS);
+    return () => clearInterval(timer);
   }, [id]);
 
   useEffect(() => {
@@ -271,13 +292,20 @@ export default function MessagesScreen() {
           name={username ?? 'C'}
           size="sm"
           ringColor={colors.t3}
+          presence={presence}
         />
 
         <View style={styles.headerInfo}>
           <View style={styles.headerNameRow}>
             <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
-            {wsReady && <View style={styles.onlineDot} />}
           </View>
+          {/* Two different facts, previously conflated: this line is the other
+              person's presence, and the one below is our own socket. The old
+              green dot was driven by `wsReady` — it lit up when *we* connected,
+              regardless of whether they were anywhere near the app. */}
+          {presence ? (
+            <PresenceDot presence={presence} size={7} withText />
+          ) : null}
           {!wsReady && (
             <Text style={styles.statusText}>Reconnecting…</Text>
           )}
@@ -417,12 +445,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: colors.t1,
     flexShrink: 1,
-  },
-  onlineDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#22c55e',
   },
   statusText: {
     fontFamily: fonts.body,

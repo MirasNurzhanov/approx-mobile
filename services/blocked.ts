@@ -34,6 +34,12 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/** Forget who the signed-out user had blocked, so the next account on this
+ * device does not start out hiding strangers it has no relationship with. */
+export function resetBlocked(): void {
+  setState({ list: null });
+}
+
 export function useBlockedUsers(): BlockedState {
   return useSyncExternalStore(subscribe, () => state);
 }

@@ -71,6 +71,11 @@ import {
   type PermissionState,
 } from '@/services/permissions';
 import { registerNearbyRefresh } from '@/services/nearbyRefresh';
+import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
+import { MotionTrail } from '@/components/MotionTrail';
+import { PresenceDot } from '@/components/PresenceDot';
+import { useMotionTrails } from '@/hooks/useMotionTrails';
+import { recordSpeed, shouldQuietPrompts, useOwnMotion } from '@/services/ownMotion';
 import { getPref } from '@/services/preferences';
 import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
 import {
@@ -99,6 +104,11 @@ interface NearbyUser {
   /** 'approximate' means the position is snapped to a ~500m cell, so it should
    * be drawn as an area rather than a point that looks exact. */
   location_precision?: 'precise' | 'approximate';
+  /** Absent when the viewer is not allowed to see it — which is not the same
+   * as offline. Render nothing at all rather than a grey dot. */
+  presence?: Presence;
+  /** Coarse bucket, friends and connections only. Absent means no trail. */
+  motion_class?: MotionClass;
 }
 
 /** Only what the owner's own zone circle needs. Their own audio is no longer
@@ -181,23 +191,34 @@ function fmtDistance(m?: number): string | null {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function DotMarker({ coordinate, color, onPress }: {
+function DotMarker({ coordinate, color, presence, onPress }: {
   coordinate: { latitude: number; longitude: number };
   color: string;
+  presence?: Presence;
   onPress?: () => void;
 }) {
   // Re-arm tracking briefly when the color changes (friend data arrives after
   // the first nearby fetch), then freeze the rasterized marker again.
+  // Presence is in the same bucket: it changes the rasterized bitmap, so it has
+  // to re-arm too, but only when it actually flips — not on every poll.
+  const online = presence?.is_online;
   const [settling, setSettling] = useState(true);
   useEffect(() => {
     setSettling(true);
     const t = setTimeout(() => setSettling(false), 400);
     return () => clearTimeout(t);
-  }, [color]);
+  }, [color, online]);
 
   return (
     <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={settling} onPress={onPress}>
-      <View style={[styles.userDot, { backgroundColor: color }]} />
+      <View>
+        <View style={[styles.userDot, { backgroundColor: color }]} />
+        {/* Absent presence renders nothing — PresenceDot returns null — so a
+            hidden state never becomes a visible "offline". */}
+        <View style={styles.markerPresence}>
+          <PresenceDot presence={presence} size={9} haloColor={colors.bg} />
+        </View>
+      </View>
     </Marker>
   );
 }
@@ -209,10 +230,12 @@ interface AvatarMarkerProps {
   ringColor: string;
   size?: number;
   zIndex?: number;
+  presence?: Presence;
+  motion?: MotionClass;
   onPress?: () => void;
 }
 
-function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex, onPress }: AvatarMarkerProps) {
+function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex, presence, motion, onPress }: AvatarMarkerProps) {
   // Markers rasterize their children: keep tracking until the remote image is
   // drawn, and re-arm briefly when the ring color changes (friend data arrives
   // after the first nearby fetch).
@@ -220,12 +243,24 @@ function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex,
   const [imageFailed, setImageFailed] = useState(false);
   const [ringSettling, setRingSettling] = useState(true);
 
+  const online = presence?.is_online;
+
   useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
   useEffect(() => {
     setRingSettling(true);
     const t = setTimeout(() => setRingSettling(false), 400);
     return () => clearTimeout(t);
-  }, [ringColor]);
+    // Presence changes the bitmap too, so it re-arms tracking — but keyed on
+    // the boolean, not the object, so a poll that returns an equal presence
+    // does not re-rasterize every avatar on the map.
+  }, [ringColor, online]);
+
+  // The trail is decorative and hidden from assistive tech, so the state it
+  // conveys is spelled out here instead — motion must never be carried by the
+  // effect alone.
+  const label = [username, presenceLabel(presence), motionLabel(motion)]
+    .filter(Boolean)
+    .join(', ');
 
   const inner = size - 6;
   return (
@@ -234,6 +269,7 @@ function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex,
       anchor={{ x: 0.5, y: 0.5 }}
       tracksViewChanges={!imageReady || ringSettling}
       zIndex={zIndex}
+      accessibilityLabel={label}
       onPress={onPress}
     >
       <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
@@ -254,6 +290,9 @@ function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex,
             <Text style={styles.avatarMarkerInitial}>{username ? username.charAt(0).toUpperCase() : '?'}</Text>
           </View>
         )}
+        <View style={styles.markerPresence}>
+          <PresenceDot presence={presence} size={10} haloColor={colors.bg} />
+        </View>
       </View>
     </Marker>
   );
@@ -746,6 +785,22 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
                 <Text style={styles.relBadgeText}>{dist}</Text>
               </View>
             )}
+            {/* Absent presence renders nothing, so a viewer who is not in the
+                audience sees no badge rather than a false "offline". */}
+            {user.presence && (
+              <View style={styles.relBadge}>
+                <PresenceDot presence={user.presence} size={8} withText />
+              </View>
+            )}
+            {/* The trail on the map is decorative and hidden from screen
+                readers, so the state it conveys is also stated in words. */}
+            {motionLabel(user.motion_class) && (
+              <View style={styles.relBadge} accessible accessibilityLabel={motionLabel(user.motion_class)!}>
+                <Text style={[styles.relBadgeText, { color: colors.teal }]} importantForAccessibility="no">
+                  {user.motion_class === 'fast' ? 'Moving fast' : 'On the move'}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -852,6 +907,9 @@ export default function MapScreen() {
   const centeredOnRef      = useRef<Coordinates | null>(null);
   /** When `coords` was last measured, not when it was last rendered. */
   const fixAtRef           = useRef(0);
+  /** Latest platform speed estimate, in m/s; null when it has none. A ref, not
+   * state — it changes on every fix and only the next poll reads it. */
+  const speedRef           = useRef<number | null>(null);
   const followingRef       = useRef(false);
   const watchRef           = useRef<Location.LocationSubscription | null>(null);
   const startingWatchRef   = useRef(false);
@@ -921,10 +979,22 @@ export default function MapScreen() {
     });
   }, [nearby, currentUserId, friendIds, connectionIds]);
 
+  // Speed trails. Fed from the same list the markers render, so a person who
+  // disappears from `visibleNearby` takes their trail history with them.
+  const motionTrails = useMotionTrails(visibleNearby);
+
   // Feed the local notification feed: friends nearby (with distance) and
   // interest matches. The feed itself dedupes with a per-user cooldown.
+  //
+  // Held back entirely while the user is moving at vehicle speed. Someone doing
+  // 40km/h is driving or being driven, and we cannot tell which — telling a
+  // driver that a stranger with shared interests is 200m away is asking them to
+  // look at their phone. Deferred rather than dropped: this effect re-runs on
+  // the next poll, so whatever is still nearby when they stop is recorded then.
+  const ownMotion = useOwnMotion();
   useEffect(() => {
     if (visibleNearby.length === 0) return;
+    if (shouldQuietPrompts()) return;
     recordNearbySightings(
       visibleNearby.map((u) => ({
         id: Number(u.id),
@@ -934,7 +1004,9 @@ export default function MapScreen() {
         distanceKm: u.distance_km ?? (u.distance != null ? u.distance / 1000 : undefined),
       })),
     );
-  }, [visibleNearby, friendIds]);
+    // `ownMotion` is a dependency so the deferred batch lands as soon as the
+    // user comes to a stop, rather than waiting for the next position change.
+  }, [visibleNearby, friendIds, ownMotion]);
 
   // Detect new reactions on the current user's own stories.
   useEffect(() => {
@@ -1189,11 +1261,18 @@ export default function MapScreen() {
       console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
       fixAtRef.current = init.timestamp;
       setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
+      recordSpeed(init.coords.speed);
       watchRef.current = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
         (loc) => {
           fixAtRef.current = loc.timestamp;
           setCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+          // The platform's own fused speed, which this watcher was already
+          // receiving and discarding. Kept in a ref rather than state: it
+          // changes on every fix and nothing renders from it directly, so
+          // setting state here would re-render the whole map for nothing.
+          speedRef.current = loc.coords.speed ?? null;
+          recordSpeed(loc.coords.speed);
         },
       );
     } catch (e: any) {
@@ -1243,7 +1322,9 @@ export default function MapScreen() {
 
     const [, nearbyResult] = await Promise.allSettled([
       // Honours the Location sharing setting; sends nothing when paused.
-      reportLocation({ latitude: c.latitude, longitude: c.longitude }),
+      // Speed rides along on the same request — the server buckets it into a
+      // coarse class and never stores the figure itself.
+      reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current),
       api.get<NearbyUser[]>('/api/proximity/nearby/'),
     ]);
 
@@ -1569,6 +1650,14 @@ export default function MapScreen() {
               />
             ))}
 
+          {/* Speed trails, drawn before the markers so they sit underneath and
+              read as something the avatar is leaving behind. Only ever built
+              from positions already observed — never extrapolated ahead of the
+              last known point, which on a 10s poll is already stale. */}
+          {Array.from(motionTrails.entries()).map(([id, path]) => (
+            <MotionTrail key={`trail-${id}`} path={path} reduceMotion={reduceMotion} />
+          ))}
+
           {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
             const uid = Number(user.id);
             const isFriend = friendIds.has(uid);
@@ -1581,6 +1670,8 @@ export default function MapScreen() {
                 uri={user.profile_picture}
                 username={user.username}
                 ringColor={color}
+                presence={user.presence}
+                motion={user.motion_class}
                 onPress={() => openSheet(user)}
               />
             ) : (
@@ -1588,6 +1679,7 @@ export default function MapScreen() {
                 key={user.id}
                 coordinate={{ latitude: user.latitude, longitude: user.longitude }}
                 color={color}
+                presence={user.presence}
                 onPress={() => openSheet(user)}
               />
             );
@@ -1770,6 +1862,14 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     borderWidth: 2,
     borderColor: colors.bg,
+  },
+
+  /** Presence badge, pinned to the marker's lower-right so it reads as
+   * attached to that person rather than as a second pin beside them. */
+  markerPresence: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
   },
 
   // ── Avatar markers: photo/initial core, bg gap, relationship-colored ring ──

@@ -55,11 +55,25 @@ export async function prepareCoordinates(coords: Coordinates): Promise<Coordinat
   return atSharingPrecision(coords, mode);
 }
 
-/** Send a position update, honouring the user's sharing mode. Resolves to
- * false when nothing was sent. */
-export async function reportLocation(coords: Coordinates): Promise<boolean> {
+/**
+ * Send a position update, honouring the user's sharing mode. Resolves to false
+ * when nothing was sent.
+ *
+ * `speed` is the platform's own estimate in m/s, passed straight through. It
+ * rides this request rather than getting one of its own, and the server buckets
+ * it into a coarse class and discards the figure — no numeric speed is ever
+ * stored or served. Omitted entirely when paused, along with everything else.
+ */
+export async function reportLocation(
+  coords: Coordinates,
+  speed?: number | null,
+): Promise<boolean> {
   const payload = await prepareCoordinates(coords);
   if (!payload) return false;
-  await api.patch('/api/proximity/location/', payload);
+  // Absent rather than null when there is no estimate: the server treats a
+  // missing speed as "no new information" and leaves the previous class alone,
+  // which is the honest reading of a fix that could not measure it.
+  const body = speed == null || speed < 0 ? payload : { ...payload, speed };
+  await api.patch('/api/proximity/location/', body);
   return true;
 }

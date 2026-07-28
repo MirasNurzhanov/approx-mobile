@@ -13,6 +13,10 @@ export const colors = {
   blue: '#4D8DFF',
   orange: '#F97316',
   red: '#E5484D',
+  // Presence. Deliberately not `teal`: teal means "selected / active control"
+  // everywhere else, and reusing it for "this person is online" would make two
+  // unrelated states look identical. Never the only cue — see PresenceDot.
+  green: '#30D158',
 }
 
 // Legacy light/dark palette kept for the Expo template components

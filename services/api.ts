@@ -4,6 +4,10 @@ import { router } from 'expo-router';
 
 export const BASE_URL = 'https://project-x-production-3261.up.railway.app';
 
+/** Kept here rather than imported from ./presence: that module imports this
+ * one, and the interceptor below needs the name at module scope. */
+const PRESENCE_HEADER = 'X-Aura-Presence';
+
 export const api = axios.create({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
@@ -21,6 +25,19 @@ api.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem('access_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Presence rides existing traffic rather than a loop of its own. Only a
+  // foregrounded app claims it: the background location task keeps calling the
+  // API every 30s with the app closed, and counting that would leave those
+  // users showing as online indefinitely.
+  //
+  // Required lazily — services/presence imports this module, and pulling it in
+  // at the top would be a cycle. An explicit header already set by the caller
+  // (the going-to-background beacon) is left alone.
+  if (config.headers[PRESENCE_HEADER] === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isForeground } = require('./presence') as typeof import('./presence');
+    if (isForeground()) config.headers[PRESENCE_HEADER] = 'foreground';
   }
   return config;
 });

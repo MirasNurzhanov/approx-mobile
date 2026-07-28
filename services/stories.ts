@@ -75,6 +75,27 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/**
+ * Drop the archive, in memory and on disk.
+ *
+ * The persisted caches exist so the archive screen opens instantly and works
+ * offline, which also means they would show the previous account's own and
+ * saved stories to whoever signs in next.
+ */
+export async function resetArchive(): Promise<void> {
+  setState({
+    mine: null,
+    saved: null,
+    mineTotal: null,
+    savedTotal: null,
+    savedIds: new Set(),
+    deletedIds: new Set(),
+  });
+  try {
+    await AsyncStorage.multiRemove([MINE_KEY, SAVED_KEY]);
+  } catch {}
+}
+
 /** Reactive snapshot of the archive for components. */
 export function useStoryArchive(): StoryArchive {
   return useSyncExternalStore(subscribe, () => state);

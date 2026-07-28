@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
 import { Avatar } from '@/components/ui/Avatar';
+import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
 import { IconBack } from '@/components/ui/icons';
 import {
@@ -37,6 +38,9 @@ interface NearbyUser {
   shared_interests?: string[];
   is_private?: boolean;
   location_precision?: 'precise' | 'approximate';
+  /** Absent when this viewer may not see it — render no indicator, not grey. */
+  presence?: Presence;
+  motion_class?: MotionClass;
 }
 
 function distanceText(user: NearbyUser): string {
@@ -50,6 +54,14 @@ function distanceText(user: NearbyUser): string {
 /** One sentence containing everything the map conveys visually. */
 function summarise(user: NearbyUser): string {
   const parts = [user.username, relationshipLabel(user.relationship), distanceText(user)];
+  // Both omitted when the API omitted them. Presence is stated in words here
+  // because the dot alone is no use to a screen reader, and motion because the
+  // map's trail is decorative and hidden from one entirely — this list is where
+  // that state becomes readable.
+  const presence = presenceLabel(user.presence);
+  if (presence) parts.push(presence);
+  const motion = motionLabel(user.motion_class);
+  if (motion) parts.push(motion.charAt(0).toUpperCase() + motion.slice(1));
   const shared = user.shared_interests ?? [];
   if (shared.length) {
     parts.push(`${shared.length} shared interest${shared.length === 1 ? '' : 's'}: ${shared.join(', ')}`);
@@ -149,10 +161,21 @@ export default function NearbyListScreen() {
                 accessibilityLabel={summarise(item)}
                 accessibilityHint="Opens their profile"
               >
-                <Avatar uri={item.profile_picture} name={item.username} size="md" />
+                <Avatar uri={item.profile_picture} name={item.username} size="md" presence={item.presence} />
                 <View style={styles.info}>
                   <Text style={styles.name} numberOfLines={1}>{item.username}</Text>
                   <Text style={styles.meta}>{distanceText(item)}</Text>
+                  {/* The row is one accessible node carrying `summarise`, so
+                      these are visual only — importantForAccessibility="no"
+                      keeps them from being read a second time. */}
+                  {(item.presence || item.motion_class) && (
+                    <Text style={styles.meta} numberOfLines={1} importantForAccessibility="no">
+                      {[
+                        item.presence?.is_online ? 'Online' : null,
+                        item.motion_class === 'fast' ? 'Moving fast' : null,
+                      ].filter(Boolean).join(' · ')}
+                    </Text>
+                  )}
                   {!!item.shared_interests?.length && (
                     <Text style={styles.meta} numberOfLines={1}>
                       {item.shared_interests.join(' · ')}

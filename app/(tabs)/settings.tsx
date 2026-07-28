@@ -138,7 +138,7 @@ function PrefSwitch({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
-  const { logout } = useAuth();
+  const { logout, confirmLogout } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
@@ -462,7 +462,7 @@ export default function SettingsScreen() {
             variant="dangerTint"
             size="lg"
             fullWidth
-            onPress={() => logout()}
+            onPress={confirmLogout}
           />
         </View>
 

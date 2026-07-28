@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
 import { Avatar } from '@/components/ui/Avatar';
+import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
 import { IconBack } from '@/components/ui/icons';
 import { colors, fonts, radius } from '@/constants/theme';
@@ -29,6 +30,8 @@ interface Person {
   username: string;
   profile_picture?: string;
   tier: 'friend' | 'connection';
+  /** Absent when this viewer may not see it — render no indicator, not grey. */
+  presence?: Presence;
 }
 
 export default function ConnectionsScreen() {
@@ -39,8 +42,8 @@ export default function ConnectionsScreen() {
 
   const load = useCallback(async () => {
     const { data } = await api.get<{
-      friends: { id: number; username: string; profile_picture?: string }[];
-      connections: { id: number; username: string; profile_picture?: string }[];
+      friends: { id: number; username: string; profile_picture?: string; presence?: Presence }[];
+      connections: { id: number; username: string; profile_picture?: string; presence?: Presence }[];
     }>('/api/friends/list/');
 
     const friendIds = new Set(data.friends.map((f) => f.id));
@@ -132,7 +135,7 @@ export default function ConnectionsScreen() {
           renderItem={({ item }) => (
             <Card>
               <View style={styles.row}>
-                <Avatar uri={item.profile_picture} name={item.username} size="md" />
+                <Avatar uri={item.profile_picture} name={item.username} size="md" presence={item.presence} />
                 <View style={styles.rowText}>
                   <Text style={styles.name} numberOfLines={1}>{item.username}</Text>
                   <Text style={styles.tier}>

@@ -138,7 +138,7 @@ function PrefSwitch({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
-  const { logout, confirmLogout } = useAuth();
+  const { logout, confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
@@ -462,13 +462,20 @@ export default function SettingsScreen() {
             variant="dangerTint"
             size="lg"
             fullWidth
+            loading={isSigningOut}
             onPress={confirmLogout}
           />
         </View>
 
         {/* Delete account */}
         <Pressable
-          style={({ pressed }) => [styles.deleteRow, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.deleteRow,
+            (pressed || isSigningOut) && styles.pressed,
+          ]}
+          // Teardown has already cleared the tokens by the time it navigates,
+          // so a delete fired mid-sign-out just 401s into the auth redirect.
+          disabled={isSigningOut}
           onPress={confirmDeleteAccount}
         >
           <IconTrash size={16} color={colors.red} />

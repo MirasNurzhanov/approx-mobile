@@ -125,6 +125,24 @@ const COLOR_STRANGER  = colors.t1;
 /** Matches APPROX_GRID_M on the server. */
 const APPROX_RADIUS_M = 500;
 
+/** Non-friend marker: opaque core, and the translucent disc around it. */
+const DOT_CORE = 20;
+const DOT_HALO = 32;
+
+/**
+ * Marker draw order.
+ *
+ * Self sits at the *bottom*. It is the biggest thing on the map — a 54 px halo
+ * — and at the default zoom (~2 m per pixel) that covers everyone within about
+ * 50 m of you. Drawing it on top meant a stranger standing right next to you
+ * was hidden behind your own marker until you zoomed in far enough to pull the
+ * two apart. You always know where you are; the map is for everyone else.
+ */
+const Z_SELF = 1;
+const Z_STRANGER = 4;
+const Z_FRIEND = 5;
+const Z_STORY = 7;
+
 const REL_LABEL: Record<Relationship, string> = {
   stranger:  'Nearby',
   hi_sent:   'Hi Sent',
@@ -190,10 +208,11 @@ function fmtDistance(m?: number): string | null {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function DotMarker({ coordinate, color, presence, onPress }: {
+function DotMarker({ coordinate, color, presence, zIndex, onPress }: {
   coordinate: { latitude: number; longitude: number };
   color: string;
   presence?: Presence;
+  zIndex?: number;
   onPress?: () => void;
 }) {
   // Re-arm tracking briefly when the color changes (friend data arrives after
@@ -209,12 +228,22 @@ function DotMarker({ coordinate, color, presence, onPress }: {
   }, [color, online]);
 
   return (
-    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={settling} onPress={onPress}>
-      <View>
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={settling}
+      zIndex={zIndex}
+      onPress={onPress}
+    >
+      {/* The wrapper is the full halo box rather than the dot with the halo
+          bleeding out of it: Android clips marker children to their parent
+          when it rasterizes, so anything outside these bounds would vanish. */}
+      <View style={styles.dotWrap}>
+        <View style={[styles.dotHalo, { backgroundColor: color }]} />
         <View style={[styles.userDot, { backgroundColor: color }]} />
         {/* Absent presence renders nothing — PresenceDot returns null — so a
             hidden state never becomes a visible "offline". */}
-        <View style={styles.markerPresence}>
+        <View style={styles.dotPresence}>
           <PresenceDot presence={presence} size={9} haloColor={colors.bg} />
         </View>
       </View>
@@ -234,7 +263,7 @@ interface AvatarMarkerProps {
   onPress?: () => void;
 }
 
-function AvatarMarker({ coordinate, uri, username, ringColor, size = 32, zIndex, presence, motion, onPress }: AvatarMarkerProps) {
+function AvatarMarker({ coordinate, uri, username, ringColor, size = 40, zIndex, presence, motion, onPress }: AvatarMarkerProps) {
   // Markers rasterize their children: keep tracking until the remote image is
   // drawn, and re-arm briefly when the ring color changes (friend data arrives
   // after the first nearby fetch).
@@ -317,7 +346,7 @@ function SelfMarker({ coordinate, uri, username }: {
   useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
 
   return (
-    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={10} tracksViewChanges={!imageReady}>
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={!imageReady}>
       <View style={styles.selfHalo}>
         <View style={styles.selfCore}>
           {uri && !imageFailed ? (
@@ -1671,6 +1700,7 @@ export default function MapScreen() {
                 ringColor={color}
                 presence={user.presence}
                 motion={user.motion_class}
+                zIndex={Z_FRIEND}
                 onPress={() => openSheet(user)}
               />
             ) : (
@@ -1679,6 +1709,7 @@ export default function MapScreen() {
                 coordinate={{ latitude: user.latitude, longitude: user.longitude }}
                 color={color}
                 presence={user.presence}
+                zIndex={Z_STRANGER}
                 onPress={() => openSheet(user)}
               />
             );
@@ -1711,6 +1742,9 @@ export default function MapScreen() {
                 coordinate={{ latitude: first.latitude, longitude: first.longitude }}
                 anchor={{ x: 0.5, y: 1 }}
                 tracksViewChanges={false}
+                // Above the people markers, which now claim a zIndex of their
+                // own — a bubble is drawn above its point, so it covers nobody.
+                zIndex={Z_STORY}
                 onPress={() => openStoryViewer(authorStories)}
               >
                 <StoryBubble story={first} count={authorStories.length} />
@@ -1854,17 +1888,46 @@ const styles = StyleSheet.create({
   emptyLink: { paddingVertical: 12, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
   emptyLinkText: { fontFamily: fonts.body, fontWeight: '600', fontSize: 14, color: colors.teal },
 
-  // ── Non-friend marker: small relationship-colored dot ──
+  // ── Non-friend marker: relationship-colored dot in a soft halo ──
+  //
+  // Sized against the default viewport, not against how it looks in isolation.
+  // At latitudeDelta 0.012 the map shows roughly 2 m per pixel, so a person
+  // standing 30 m away lands ~15 px from you — the old 14 px dot was both easy
+  // to miss and small enough to disappear under a neighbouring marker.
+  dotWrap: {
+    width: DOT_HALO,
+    height: DOT_HALO,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** Widens the target without inflating the dot itself: the marker keeps
+   * reading as a point, but one with enough presence to catch the eye against
+   * map texture. */
+  dotHalo: {
+    position: 'absolute',
+    width: DOT_HALO,
+    height: DOT_HALO,
+    borderRadius: DOT_HALO / 2,
+    opacity: 0.22,
+  },
   userDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
+    width: DOT_CORE,
+    height: DOT_CORE,
+    borderRadius: DOT_CORE / 2,
+    borderWidth: 2.5,
     borderColor: colors.bg,
   },
 
-  /** Presence badge, pinned to the marker's lower-right so it reads as
-   * attached to that person rather than as a second pin beside them. */
+  /** Presence badge, pinned to the dot's lower-right so it reads as attached
+   * to that person rather than as a second pin beside them. Offset from the
+   * halo box's edge, since that is what the badge is positioned against. */
+  dotPresence: {
+    position: 'absolute',
+    right: (DOT_HALO - DOT_CORE) / 2 - 2,
+    bottom: (DOT_HALO - DOT_CORE) / 2 - 2,
+  },
+
+  /** Same idiom on the avatar markers, where the ring is the parent box. */
   markerPresence: {
     position: 'absolute',
     right: -2,
@@ -1885,7 +1948,8 @@ const styles = StyleSheet.create({
   avatarMarkerInitial: {
     fontFamily: fonts.display,
     fontWeight: '600',
-    fontSize: 12,
+    // Tracks the 34 px fallback circle the larger marker leaves behind it.
+    fontSize: 15,
     color: colors.bg,
   },
 

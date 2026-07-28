@@ -86,7 +86,7 @@ function fmtJoined(iso: string): string {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const router = useRouter();
-  const { confirmLogout } = useAuth();
+  const { confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
@@ -313,6 +313,7 @@ export default function ProfileScreen() {
             variant="dangerTint"
             size="lg"
             fullWidth
+            loading={isSigningOut}
             onPress={confirmLogout}
           />
         </View>

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
-import { BASE_URL } from './api';
+import { beginSessionEnd, BASE_URL } from './api';
 import { stopBackgroundLocationUpdates } from './backgroundLocation';
 import { resetBlocked } from './blocked';
 import { resetOwnMotion } from './ownMotion';
@@ -84,6 +84,11 @@ async function revokeRefreshToken(refresh: string, accessToken: string | null): 
  * leave the device in a signed-out state.
  */
 export async function performSignOut(): Promise<void> {
+  // First, before anything else touches the tokens. Screens poll on timers and
+  // refetch on focus; left running, every one of those calls 401s during
+  // teardown and drags the api layer's forced-logout path in with it.
+  beginSessionEnd();
+
   const [accessToken, refresh] = await Promise.all([
     AsyncStorage.getItem('access_token').catch(() => null),
     AsyncStorage.getItem('refresh_token').catch(() => null),

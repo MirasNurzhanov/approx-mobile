@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { useEffect } from 'react';
+import { AppState } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   SpaceGrotesk_400Regular,
@@ -30,11 +31,20 @@ function AppShell() {
   const { isLoading, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    console.log('[Push] registerPushToken called');
     console.log('[Push] isAuthenticated:', isAuthenticated);
-    if (isAuthenticated) {
-      registerForPushNotifications();
-    }
+    if (!isAuthenticated) return;
+
+    console.log('[Push] registering token on app open...');
+    registerForPushNotifications().catch(e => console.log('[Push] unhandled:', e?.message ?? e));
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        console.log('[Push] registering token on app open...');
+        registerForPushNotifications().catch(e => console.log('[Push] unhandled:', e?.message ?? e));
+      }
+    });
+
+    return () => sub.remove();
   }, [isAuthenticated]);
 
   if (isLoading) {

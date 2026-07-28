@@ -66,22 +66,26 @@ async function refreshAccessToken(): Promise<string | null> {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && original && !original._retried) {
-      original._retried = true;
-      if (!refreshPromise) {
-        refreshPromise = refreshAccessToken().finally(() => {
-          refreshPromise = null;
-        });
+    try {
+      const original = error.config;
+      if (error.response?.status === 401 && original && !original._retried) {
+        original._retried = true;
+        if (!refreshPromise) {
+          refreshPromise = refreshAccessToken().finally(() => {
+            refreshPromise = null;
+          });
+        }
+        const token = await refreshPromise;
+        if (token) {
+          // The request interceptor re-reads the new token from storage on retry.
+          return api(original);
+        }
+        await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+        onAuthFailure?.();
+        router.replace('/');
       }
-      const token = await refreshPromise;
-      if (token) {
-        // The request interceptor re-reads the new token from storage on retry.
-        return api(original);
-      }
-      await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
-      onAuthFailure?.();
-      router.replace('/');
+    } catch (e) {
+      console.log('[Auth] interceptor error:', e);
     }
     return Promise.reject(error);
   }

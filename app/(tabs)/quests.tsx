@@ -269,6 +269,7 @@ export default function QuestsScreen() {
 
   return (
     <View style={styles.root}>
+      <View style={styles.contentArea} pointerEvents="none">
       {/* ── Header (shared by both tabs) ── */}
       <View style={[styles.pageHeader, { paddingTop: top + 20 }]}>
         <View>
@@ -356,6 +357,7 @@ export default function QuestsScreen() {
         )}
       </ScrollView>
       )}
+      </View>
 
       {primer}
 
@@ -373,6 +375,7 @@ export default function QuestsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
+  contentArea: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 20 },
 

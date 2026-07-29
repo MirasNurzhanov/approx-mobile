@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { Avatar } from '@/components/ui/Avatar';
+import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
 import { colors, fonts, radius } from '@/constants/theme';
 
@@ -27,6 +28,8 @@ interface SearchUser {
   shared_interests_count?: number;
   shared_interests?: { name: string; icon: string }[] | number;
   relationship?: Relationship;
+  /** Absent when this viewer may not see it — render no indicator, not grey. */
+  presence?: Presence;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -111,6 +114,7 @@ function UserCard({
           name={user.username}
           size="md"
           ringColor={ringColor(rel)}
+          presence={user.presence}
         />
 
         <View style={styles.cardInfo}>

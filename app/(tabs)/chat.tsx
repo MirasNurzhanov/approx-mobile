@@ -24,6 +24,7 @@ import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
 import { storyReplyPreview } from '@/services/storyReply';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { colors, fonts, radius } from '@/constants/theme';
+import type { Presence } from '@/services/presence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = 'pending' | 'connected' | 'friends' | 'blocked';
@@ -35,6 +36,8 @@ interface UserSummary {
   last_message_at?: string;
   unread_count?: number;
   profile_picture?: string;
+  /** Absent when this viewer may not see it — render no indicator, not grey. */
+  presence?: Presence;
 }
 
 interface FriendList {
@@ -126,7 +129,7 @@ function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: U
   return (
     <Card onPress={() => onMessage(user)}>
       <View style={styles.cardRow}>
-        <Avatar uri={user.profile_picture} name={user.username} size="md" ringColor={ringColor} />
+        <Avatar uri={user.profile_picture} name={user.username} size="md" ringColor={ringColor} presence={user.presence} />
         <View style={styles.cardBody}>
           <View style={styles.cardNameRow}>
             <Text style={styles.cardName}>{user.username}</Text>

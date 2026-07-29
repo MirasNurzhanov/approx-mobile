@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { api } from './api';
 
@@ -23,6 +23,10 @@ export interface PrivacySettings {
   visibility_zone_audio: Audience;
   visibility_connections: Audience;
   visibility_links: Audience;
+  /** Online/offline and last-seen. Motion state follows this too, but is
+   * additionally capped to friends and connections server-side — a stranger
+   * never sees it whatever this is set to. */
+  visibility_presence: Audience;
   show_on_leaderboard: boolean;
   discoverable_by_username: boolean;
   discoverable_by_interest: boolean;
@@ -83,6 +87,47 @@ function subscribe(listener: () => void): () => void {
 
 export function usePrivacySettings(): State {
   return useSyncExternalStore(subscribe, () => state);
+}
+
+/**
+ * The sharing mode, for screens that only read it. `null` means "not known
+ * yet" — a caller that draws the owner's position should wait rather than
+ * assume, because assuming 'live' for one frame draws the precise point an
+ * approximate sharer asked us not to show.
+ *
+ * No fetch: the privacy screen writes every change into this store and mirrors
+ * it to disk, so reading the mirror is enough and costs nothing on a screen
+ * that is already polling.
+ */
+export function useLocationSharing(): LocationSharing | null {
+  const { settings } = usePrivacySettings();
+  const [mirrored, setMirrored] = useState<LocationSharing | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getCachedLocationSharing()
+      .then((mode) => { if (active) setMirrored(mode); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  return settings?.location_sharing ?? mirrored;
+}
+
+/**
+ * Drop the signed-in user's settings, in memory and on disk.
+ *
+ * Both halves matter. The in-memory copy would otherwise be inherited by the
+ * next account to sign in on this device, and the disk mirror is read by the
+ * background location task — so a previous user's "paused" (or worse, "live")
+ * would govern the next user's location reporting until they happened to open
+ * the privacy screen.
+ */
+export async function resetPrivacy(): Promise<void> {
+  setState({ settings: null });
+  try {
+    await AsyncStorage.removeItem(SHARING_STORAGE);
+  } catch {}
 }
 
 export async function refreshPrivacy(): Promise<PrivacySettings | null> {

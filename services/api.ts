@@ -4,6 +4,10 @@ import { router } from 'expo-router';
 
 export const BASE_URL = 'https://project-x-production-3261.up.railway.app';
 
+/** Kept here rather than imported from ./presence: that module imports this
+ * one, and the interceptor below needs the name at module scope. */
+const PRESENCE_HEADER = 'X-Aura-Presence';
+
 export const api = axios.create({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
@@ -17,10 +21,59 @@ export function setOnAuthFailure(handler: () => void) {
   onAuthFailure = handler;
 }
 
+/**
+ * True once the session is over — the user signed out, or a refresh failed
+ * past recovery. It is a kill switch for this client, not a flag anyone polls.
+ *
+ * Without it, signing out spun the app. Screens keep polling while teardown
+ * runs, every request 401s the moment the tokens go, and each 401 fell into
+ * the block below: clear tokens, notify, `router.replace('/')`. But
+ * `app/index.tsx` sends an authenticated user straight back to `/(tabs)/map`,
+ * and the map refetches on focus — so a single sign-out became an endless
+ * replace → focus → 401 → replace loop that never reached the auth screen.
+ */
+let sessionEnded = false;
+
+/** Silence this client. Sign-out calls it *before* touching the tokens, so
+ * there is nothing left in flight to 401 on the way out. */
+export function beginSessionEnd() {
+  sessionEnded = true;
+}
+
+/** Re-arm after a successful login. */
+export function resumeSession() {
+  sessionEnded = false;
+}
+
+/** Rejection used for requests made after the session ended. Carries no
+ * `response`, so the usual `e?.response?.status` logging stays quiet. */
+export class SessionEndedError extends Error {
+  constructor() {
+    super('Request made after sign-out');
+    this.name = 'SessionEndedError';
+  }
+}
+
 api.interceptors.request.use(async (config) => {
+  // Cheaper and quieter than letting it round-trip to a guaranteed 401.
+  if (sessionEnded) throw new SessionEndedError();
+
   const token = await AsyncStorage.getItem('access_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Presence rides existing traffic rather than a loop of its own. Only a
+  // foregrounded app claims it: the background location task keeps calling the
+  // API every 30s with the app closed, and counting that would leave those
+  // users showing as online indefinitely.
+  //
+  // Required lazily — services/presence imports this module, and pulling it in
+  // at the top would be a cycle. An explicit header already set by the caller
+  // (the going-to-background beacon) is left alone.
+  if (config.headers[PRESENCE_HEADER] === undefined) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isForeground } = require('./presence') as typeof import('./presence');
+    if (isForeground()) config.headers[PRESENCE_HEADER] = 'foreground';
   }
   return config;
 });
@@ -49,22 +102,42 @@ async function refreshAccessToken(): Promise<string | null> {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && original && !original._retried) {
-      original._retried = true;
-      if (!refreshPromise) {
-        refreshPromise = refreshAccessToken().finally(() => {
-          refreshPromise = null;
-        });
+    try {
+      const original = error.config;
+      // Nothing to recover: the tokens are already gone by design. Anything
+      // still landing here is a straggler from before the switch flipped.
+      if (sessionEnded) return Promise.reject(error);
+
+      if (error.response?.status === 401 && original && !original._retried) {
+        original._retried = true;
+        if (!refreshPromise) {
+          refreshPromise = refreshAccessToken().finally(() => {
+            refreshPromise = null;
+          });
+        }
+        const token = await refreshPromise;
+        if (token) {
+          // The request interceptor re-reads the new token from storage on retry.
+          return api(original);
+        }
+        // Re-checked after the await, not just at the top of the handler:
+        // concurrent 401s all queue on the same refreshPromise and resume
+        // together, so the earlier check is stale by the time they land here.
+        // Only the first one through tears the session down — every extra pass
+        // would issue its own replace, which is what turned one dead session
+        // into a navigation loop.
+        if (sessionEnded) return Promise.reject(error);
+        beginSessionEnd();
+
+        await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+        // The handler (AuthContext) owns the teardown *and* the navigation.
+        // Falling back to a bare replace only when nothing is registered —
+        // a 401 before the provider mounts still has to leave the tabs.
+        if (onAuthFailure) onAuthFailure();
+        else router.replace('/');
       }
-      const token = await refreshPromise;
-      if (token) {
-        // The request interceptor re-reads the new token from storage on retry.
-        return api(original);
-      }
-      await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
-      onAuthFailure?.();
-      router.replace('/');
+    } catch (e) {
+      console.log('[Auth] interceptor error:', e);
     }
     return Promise.reject(error);
   }

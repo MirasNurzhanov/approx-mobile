@@ -20,7 +20,9 @@ import { AuraMark } from '@/components/ui/AuraMark';
 import { IconBack, IconMore } from '@/components/ui/icons';
 import { RelationshipBadge } from '@/components/ui/RelationshipBadge';
 import { ProfileLinks } from '@/components/ProfileLinks';
+import { PresenceDot } from '@/components/PresenceDot';
 import type { ProfileLink } from '@/services/links';
+import type { Presence } from '@/services/presence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'hi_received' | 'connected' | 'friend';
@@ -43,6 +45,7 @@ interface UserProfile {
   stats?: { friends: number; connections: number; quests: number };
   // Absent entirely when the viewer isn't allowed to see them.
   links?: ProfileLink[];
+  presence?: Presence;
 }
 
 // The server omits anything this viewer may not see, so "did the field arrive"
@@ -326,6 +329,16 @@ export default function UserProfileScreen() {
 
           <Text style={styles.username}>{profile.username}</Text>
 
+          {/* Absent presence renders nothing at all. A private account the
+              viewer has not been approved for never carries the key, so this
+              disappears alongside the rest of the profile rather than sitting
+              there as a lone grey dot. */}
+          {profile.presence && (
+            <View style={styles.presenceRow}>
+              <PresenceDot presence={profile.presence} size={9} withText />
+            </View>
+          )}
+
           {locked ? (
             <View style={styles.lockedBox}>
               <Text style={styles.lockedTitle}>This account is private</Text>
@@ -484,6 +497,7 @@ const styles = StyleSheet.create({
   avatarImage: { width: 86, height: 86, borderRadius: 43 },
 
   username: { color: '#ffffff', fontSize: 22, fontWeight: '700', marginBottom: 8 },
+  presenceRow: { marginBottom: 10 },
   bio: { color: '#9C9CA6', fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 280, marginBottom: 12 },
   bioEmpty: { color: '#8A8A94', fontSize: 13, marginBottom: 12 },
 

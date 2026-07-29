@@ -1,10 +1,14 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
 import { reportLocation } from './location';
 import { getPref } from './preferences';
 import { getCachedLocationSharing } from './privacy';
+
+const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
 
 export const BACKGROUND_LOCATION_TASK = 'aura-background-location';
 
@@ -47,6 +51,22 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         (u) => u.zone_active && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
       );
       console.log('[BG Task] zone found:', zoneUser?.username);
+
+      if (zoneUser) {
+        const lastNotified = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
+        if (lastNotified !== zoneUser.username) {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: '🎵 You entered a zone!',
+              body: `You are in @${zoneUser.username}'s zone - tap to listen`,
+            },
+            trigger: null,
+          });
+          await AsyncStorage.setItem(LAST_ZONE_NOTIFIED_KEY, zoneUser.username);
+        }
+      } else {
+        await AsyncStorage.removeItem(LAST_ZONE_NOTIFIED_KEY);
+      }
     } catch (e: any) {
       console.log('[BG Task] nearby fetch failed:', e?.response?.status);
     }

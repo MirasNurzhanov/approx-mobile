@@ -65,6 +65,7 @@ const AUDIENCE_FIELDS: {
   label: string;
   hint: string;
 }[] = [
+  { key: 'visibility_presence',    label: 'Online status',  hint: 'Who can see when you’re active, and when you were last online' },
   { key: 'visibility_stories',     label: 'Stories',        hint: 'Who can see stories you post' },
   { key: 'visibility_interests',   label: 'Interests',      hint: 'Hiding these makes you harder to match with' },
   { key: 'visibility_stats',       label: 'Stats & points', hint: 'Connections, friends, quests and Aura points' },

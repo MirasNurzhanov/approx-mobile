@@ -269,6 +269,7 @@ export default function QuestsScreen() {
 
   return (
     <View style={styles.root}>
+      <View style={styles.contentArea} pointerEvents="none">
       {/* ── Header (shared by both tabs) ── */}
       <View style={[styles.pageHeader, { paddingTop: top + 20 }]}>
         <View>
@@ -356,10 +357,17 @@ export default function QuestsScreen() {
         )}
       </ScrollView>
       )}
+      </View>
 
       {primer}
 
       <Speedometer />
+
+      {/* Coming Soon overlay */}
+      <View style={styles.comingSoonOverlay} pointerEvents="none">
+        <Text style={styles.comingSoonTitle}>Quests — Coming Soon 🔒</Text>
+        <Text style={styles.comingSoonSubtitle}>We're working on something exciting</Text>
+      </View>
     </View>
   );
 }
@@ -367,6 +375,7 @@ export default function QuestsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
+  contentArea: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 20 },
 
@@ -534,6 +543,27 @@ const styles = StyleSheet.create({
   },
   verifyBtnOff: { opacity: 0.6 },
   verifyText: { color: '#0a0a0a', fontSize: 14, fontWeight: '700' },
+
+  // ── Coming Soon overlay ──
+  comingSoonOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 10, 10, 0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+    gap: 10,
+  },
+  comingSoonTitle: {
+    color: '#ffffff',
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  comingSoonSubtitle: {
+    color: '#555',
+    fontSize: 14,
+    textAlign: 'center',
+  },
 
   // ── Empty ──
   emptyWrap: { alignItems: 'center', paddingTop: 80, gap: 10 },

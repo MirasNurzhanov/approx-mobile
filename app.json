@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "aura-mobile",
+    "name": "Aura",
     "slug": "aura-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -22,9 +22,6 @@
           "fetch",
           "remote-notification"
         ],
-        "NSLocationWhenInUseUsageDescription": "Aura shows you people within about 500m who share your interests, and places you on the map so they can find you. You choose whether your position is exact or rounded to a ~500m area, and you can pause sharing at any time in Settings.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
-        "NSLocationAlwaysUsageDescription": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
         "NSCameraUsageDescription": "Aura uses the camera to take the photo that proves you completed a quest, and to take photos for stories and chat messages. Quest proof must be taken in the moment — a photo from your library cannot be used.",
         "NSPhotoLibraryUsageDescription": "Aura lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Aura never reads your library."
       },
@@ -66,9 +63,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Aura uses your location to find nearby people and detect zones.",
-          "locationAlwaysPermission": "Aura uses your location in the background for zone detection.",
-          "locationWhenInUsePermission": "Aura uses your location to find nearby people.",
+          "locationAlwaysAndWhenInUsePermission": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
+          "locationAlwaysPermission": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
+          "locationWhenInUsePermission": "Aura shows you people within about 500m who share your interests, and places you on the map so they can find you. You choose whether your position is exact or rounded to a ~500m area, and you can pause sharing at any time in Settings.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true
         }
@@ -89,7 +86,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#0a0a0a"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -101,6 +99,7 @@
         "projectId": "a07cd98a-5015-4f63-a367-4526c5a6a222"
       },
       "googleCloudProjectNumber": ""
-    }
+    },
+    "owner": "arcaniz"
   }
 }

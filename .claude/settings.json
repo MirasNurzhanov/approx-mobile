@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python -)",
-      "Bash(node -e \"const c=require\\('./app.json'\\).expo; console.log\\('entitlements:', JSON.stringify\\(c.ios.entitlements\\)\\); console.log\\('extra:', JSON.stringify\\(c.extra\\)\\)\")"
-    ]
-  }
-}

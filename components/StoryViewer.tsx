@@ -186,7 +186,10 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
         excerpt: context ? `${context.slice(0, 80)}${context.length > 80 ? '…' : ''}` : undefined,
         comment: trimmed,
       });
-      await api.post(`/api/friends/messages/${replyTo.id}/`, { content });
+      // `story_id` is what makes the reply traceable: the message itself is an
+      // opaque payload, so without it the author gets a DM with no indication
+      // of which story it answers. The server checks the story is theirs.
+      await api.post(`/api/friends/messages/${replyTo.id}/`, { content, story_id: story.id });
       setReplyText('');
       Keyboard.dismiss();
       setReplySent(true);

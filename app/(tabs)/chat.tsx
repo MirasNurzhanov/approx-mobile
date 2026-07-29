@@ -22,12 +22,35 @@ import { api } from '@/services/api';
 import { blockUser, refreshBlocked, unblockUser, useBlockedUsers } from '@/services/blocked';
 import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
 import { storyReplyPreview } from '@/services/storyReply';
+import {
+  deriveAlerts,
+  EMPTY_ALERTS,
+  isRead,
+  loadAlerts,
+  refreshAlertsCount,
+  requestActionUrl,
+  type AlertRequest,
+  type AlertsData,
+  type Notification,
+} from '@/services/alerts';
+import { NotifRow, RequestRow } from '@/components/alerts/AlertRow';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { colors, fonts, radius } from '@/constants/theme';
+import { colors, fonts } from '@/constants/theme';
 import type { Presence } from '@/services/presence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Tab = 'pending' | 'connected' | 'friends' | 'blocked';
+// 'alerts' took over the slot "Pending" used to hold, and absorbed it: the
+// incoming Hi requests that lived there now sit alongside friend requests and
+// story activity in one list. Leading slot, because that is where people look
+// for things waiting on them.
+type Tab = 'alerts' | 'connected' | 'friends' | 'blocked';
+
+/** One flat row stream for the Alerts tab, so it scrolls in a FlatList like
+ *  every other tab rather than needing its own scroll container. */
+type AlertRow =
+  | { kind: 'label'; key: string; label: string }
+  | { kind: 'request'; key: string; request: AlertRequest }
+  | { kind: 'activity'; key: string; notif: Notification };
 
 interface UserSummary {
   id: number;
@@ -43,14 +66,6 @@ interface UserSummary {
 interface FriendList {
   connections: UserSummary[];
   friends: UserSummary[];
-}
-
-interface PendingRequest {
-  id: number;
-  from_user?: UserSummary;
-  sender?: UserSummary;
-  message?: string;
-  created_at?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -71,43 +86,6 @@ function EmptyState({ message }: { message: string }) {
     <View style={styles.empty}>
       <Text style={styles.emptyText}>{message}</Text>
     </View>
-  );
-}
-
-// ─── Pending card ─────────────────────────────────────────────────────────────
-interface PendingCardProps {
-  request: PendingRequest;
-  onAccept: (id: number) => void;
-  onDecline: (id: number) => void;
-}
-
-function PendingCard({ request, onAccept, onDecline }: PendingCardProps) {
-  const user = request.sender ?? request.from_user;
-  if (!user) return null;
-  return (
-    <Card>
-      <View style={styles.cardRow}>
-        <Avatar uri={user.profile_picture} name={user.username} size="md" ringColor={colors.t3} />
-        <View style={styles.cardBody}>
-          <Text style={styles.cardName}>{user.username}</Text>
-          <Text style={styles.cardSub}>Sent you a Hi 👋</Text>
-          <View style={styles.cardActions}>
-            <Button
-              label="Accept"
-              variant="primary"
-              size="sm"
-              onPress={() => onAccept(request.id)}
-            />
-            <Button
-              label="Decline"
-              variant="ghost"
-              size="sm"
-              onPress={() => onDecline(request.id)}
-            />
-          </View>
-        </View>
-      </View>
-    </Card>
   );
 }
 
@@ -201,14 +179,16 @@ export default function ChatScreen() {
   const { top } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
-  const [activeTab, setActiveTab] = useState<Tab>('pending');
+  const [activeTab, setActiveTab] = useState<Tab>('alerts');
   const [friendList, setFriendList] = useState<FriendList>({ connections: [], friends: [] });
-  const [pending, setPending] = useState<PendingRequest[]>([]);
+  const [alerts, setAlerts] = useState<AlertsData>(EMPTY_ALERTS);
   // Shared with Settings → Blocked users: one store, one list.
   const blocked = useBlockedUsers().list ?? [];
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
+  const [markingRead, setMarkingRead] = useState(false);
+  const [actioning, setActioning] = useState<Record<string, 'accept' | 'decline'>>({});
 
   const fetchUnreadBreakdown = useCallback(async () => {
     try {
@@ -239,9 +219,9 @@ export default function ChatScreen() {
   }, []);
 
   const fetchAll = useCallback(async () => {
-    const [listRes, pendingRes] = await Promise.allSettled([
+    const [listRes, alertsRes] = await Promise.allSettled([
       api.get<FriendList>('/api/friends/list/'),
-      api.get<PendingRequest[]>('/api/friends/requests/'),
+      loadAlerts(),
       refreshBlocked(),
     ]);
     if (listRes.status === 'fulfilled') {
@@ -251,11 +231,10 @@ export default function ChatScreen() {
         friends:     data.friends     ?? [],
       });
     }
-    if (pendingRes.status === 'fulfilled') {
-      const raw = pendingRes.value.data;
-      console.log('[Chat] pending requests raw:', JSON.stringify(raw));
-      setPending(Array.isArray(raw) ? raw : []);
-    }
+    if (alertsRes.status === 'fulfilled') setAlerts(alertsRes.value);
+    // The nav arc reads the same count from the shared store; nudge it so the
+    // wedge badge cannot lag behind the tab badge right next to it.
+    refreshAlertsCount();
   }, []);
 
   useEffect(() => {
@@ -279,28 +258,81 @@ export default function ChatScreen() {
 
   const friendIds = new Set(friendList.friends.map((f) => f.id));
   const connections = friendList.connections.filter((c) => !friendIds.has(c.id));
+  const { requests, activity, unreadCount } = deriveAlerts(alerts);
+  const hasUnreadActivity = activity.some((n) => !isRead(n));
 
-  // ── Pending ────────────────────────────────────────────────────────
-  function handleAccept(id: number) {
-    setPending((prev) => prev.filter((r) => r.id !== id));
-    api.post(`/api/friends/hi/${id}/accept/`)
-      .then(() =>
-        api.get<FriendList>('/api/friends/list/').then((r) =>
-          setFriendList({
-            connections: r.data.connections ?? [],
-            friends:     r.data.friends     ?? [],
-          }),
+  // ── Alerts ─────────────────────────────────────────────────────────
+  async function handleRequest(req: AlertRequest, action: 'accept' | 'decline') {
+    const key = `${req.kind}-${req.id}`;
+    setActioning((prev) => ({ ...prev, [key]: action }));
+    try {
+      await api.post(requestActionUrl(req, action));
+      setAlerts((prev) => ({
+        ...prev,
+        requests: prev.requests.filter((r) => !(r.id === req.id && r.kind === req.kind)),
+      }));
+      // Accepting makes a connection and declining frees that person to be
+      // waved at again — both change what the map should be showing.
+      triggerNearbyRefresh();
+      // Accepting a Hi adds a connection, so the list behind this tab is stale.
+      fetchAll();
+    } catch (e) {
+      console.log(`[Alerts] ${req.kind} ${action} failed`, e);
+    } finally {
+      setActioning((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    }
+  }
+
+  async function markAllRead() {
+    setMarkingRead(true);
+    try {
+      await api.patch('/api/notifications/mark-all-read/');
+    } catch {}
+    finally {
+      await fetchAll();
+      setMarkingRead(false);
+    }
+  }
+
+  /** Follow an alert to whatever it is about. A reply lives in the chat it was
+   *  sent to; a reaction has no thread, so it goes to who reacted. */
+  function openActivity(n: Notification) {
+    if (!isRead(n)) {
+      // Optimistic: the row un-bolds now, the server catches up.
+      setAlerts((prev) => ({
+        ...prev,
+        notifications: prev.notifications.map((x) =>
+          x.id === n.id ? { ...x, is_read: true, read: true } : x,
         ),
-      )
-      .catch((e) => console.log('[Accept Hi] error:', e?.response?.status));
+      }));
+      api.patch(`/api/notifications/${n.id}/read/`).then(refreshAlertsCount).catch(() => {});
+    }
+
+    if (n.sender_id == null) return;
+    if (n.notification_type === 'story_reply') {
+      router.push({
+        pathname: '/messages/[id]',
+        params: { id: n.sender_id, username: n.sender_username ?? '' },
+      } as any);
+    } else {
+      router.push({ pathname: '/profile/[id]', params: { id: n.sender_id } } as any);
+    }
   }
 
-  function handleDecline(id: number) {
-    setPending((prev) => prev.filter((r) => r.id !== id));
-    api.post(`/api/friends/hi/${id}/decline/`)
-      .catch((e) => console.log('[Decline] error:', e?.response?.status));
-    triggerNearbyRefresh();
-  }
+  const alertRows: AlertRow[] = [
+    ...(requests.length > 0
+      ? [{ kind: 'label' as const, key: 'l-req', label: 'REQUESTS' }]
+      : []),
+    ...requests.map((request) => ({
+      kind: 'request' as const,
+      key: `r-${request.kind}-${request.id}`,
+      request,
+    })),
+    ...(activity.length > 0
+      ? [{ kind: 'label' as const, key: 'l-act', label: 'ACTIVITY' }]
+      : []),
+    ...activity.map((notif) => ({ kind: 'activity' as const, key: `a-${notif.id}`, notif })),
+  ];
 
   // ── Block / remove ─────────────────────────────────────────────────
   function removeFromLists(userId: number) {
@@ -367,7 +399,7 @@ export default function ChatScreen() {
   }
 
   const TABS: { key: Tab; label: string; count: number }[] = [
-    { key: 'pending',   label: 'Pending',   count: pending.length },
+    { key: 'alerts',    label: 'Alerts',    count: unreadCount },
     { key: 'connected', label: 'Connected', count: connections.length },
     { key: 'friends',   label: 'Friends',   count: friendList.friends.length },
     { key: 'blocked',   label: 'Blocked',   count: blocked.length },
@@ -385,25 +417,44 @@ export default function ChatScreen() {
   return (
     <View style={[styles.container, { paddingTop: top }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
+        <Text style={styles.headerTitle}>Chat</Text>
       </View>
 
       {/* Tab bar — underline style */}
       <View style={styles.tabBar}>
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
+          // Unanswered requests are the one count here that somebody else is
+          // waiting on, so Alerts carries a red badge rather than a grey one.
+          const isAlerts = tab.key === 'alerts';
           return (
             <Pressable
               key={tab.key}
               style={[styles.tabItem, isActive && styles.tabItemActive]}
               onPress={() => setActiveTab(tab.key)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                isAlerts && tab.count > 0 ? `Alerts, ${tab.count} unread` : tab.label
+              }
             >
               <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
                 {tab.label}
               </Text>
               {tab.count > 0 && (
-                <View style={[styles.tabBadge, isActive && styles.tabBadgeActive]}>
-                  <Text style={[styles.tabBadgeText, isActive && styles.tabBadgeTextActive]}>
+                <View
+                  style={[
+                    styles.tabBadge,
+                    isActive && styles.tabBadgeActive,
+                    isAlerts && styles.tabBadgeAlerts,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.tabBadgeText,
+                      isActive && styles.tabBadgeTextActive,
+                      isAlerts && styles.tabBadgeTextAlerts,
+                    ]}
+                  >
                     {tab.count}
                   </Text>
                 </View>
@@ -417,15 +468,57 @@ export default function ChatScreen() {
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={colors.teal} size="large" />
         </View>
-      ) : activeTab === 'pending' ? (
+      ) : activeTab === 'alerts' ? (
         <FlatList
-          data={pending}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => (
-            <PendingCard request={item} onAccept={handleAccept} onDecline={handleDecline} />
-          )}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={<EmptyState message={'No pending requests\nWave at people on the map'} />}
+          data={alertRows}
+          keyExtractor={(item) => item.key}
+          renderItem={({ item }) => {
+            if (item.kind === 'label') {
+              return <Text style={styles.alertsSectionLabel}>{item.label}</Text>;
+            }
+            if (item.kind === 'request') {
+              const key = `${item.request.kind}-${item.request.id}`;
+              return (
+                <RequestRow
+                  request={item.request}
+                  actioning={actioning[key]}
+                  onAccept={() => handleRequest(item.request, 'accept')}
+                  onDecline={() => handleRequest(item.request, 'decline')}
+                  onPressUser={() =>
+                    router.push({
+                      pathname: '/profile/[id]',
+                      params: { id: item.request.user.id },
+                    } as any)
+                  }
+                />
+              );
+            }
+            return <NotifRow notif={item.notif} onPress={() => openActivity(item.notif)} />;
+          }}
+          ListHeaderComponent={
+            unreadCount > 0 ? (
+              <View style={styles.alertsHeader}>
+                <View style={styles.unreadPill}>
+                  <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
+                </View>
+                {/* Only offered when it would do something: marking read clears
+                    activity, and a request is answered rather than read. */}
+                {hasUnreadActivity && (
+                  <Pressable onPress={markAllRead} disabled={markingRead} hitSlop={10}>
+                    {markingRead ? (
+                      <ActivityIndicator color={colors.teal} size="small" />
+                    ) : (
+                      <Text style={styles.markReadBtn}>Mark all read</Text>
+                    )}
+                  </Pressable>
+                )}
+              </View>
+            ) : null
+          }
+          contentContainerStyle={styles.alertsList}
+          ListEmptyComponent={
+            <EmptyState message={"You're all caught up\nRequests and story activity land here"} />
+          }
           refreshControl={refreshControl}
           showsVerticalScrollIndicator={false}
           {...scrollProps}
@@ -533,6 +626,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
   },
   tabBadgeActive: { backgroundColor: colors.teal },
+  tabBadgeAlerts: { backgroundColor: colors.red },
+  tabBadgeTextAlerts: { color: '#fff' },
   tabBadgeText: {
     fontFamily: fonts.body,
     color: colors.t3,
@@ -544,6 +639,45 @@ const styles = StyleSheet.create({
   // List
   list: { padding: 16, paddingBottom: 230, gap: 10 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // Alerts list — rows carry their own dividers, so no gap between them
+  alertsList: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 230 },
+  alertsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  alertsSectionLabel: {
+    fontFamily: fonts.body,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    color: colors.t3,
+    textTransform: 'uppercase',
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  unreadPill: {
+    backgroundColor: colors.surface2,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  unreadPillText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.t2,
+  },
+  markReadBtn: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.teal,
+  },
 
   // Card internals
   cardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },

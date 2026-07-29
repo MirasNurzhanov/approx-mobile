@@ -3,6 +3,7 @@ import axios from 'axios';
 
 import { beginSessionEnd, BASE_URL } from './api';
 import { stopBackgroundLocationUpdates } from './backgroundLocation';
+import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
 import { resetOwnMotion } from './ownMotion';
 import { resetPrivacy } from './privacy';
@@ -38,6 +39,9 @@ const ACCOUNT_SCOPED_KEYS = [
   'refresh_token',
   'chat_last_seen',
   'last_zone_notified',
+  // The on-device activity feed is gone (alerts come from the server now), but
+  // devices that ran an older build still hold its keys — and they hold the
+  // previous account's alerts. Kept in the list so signing out clears them.
   'aura:activity:feed',
   'aura:activity:seenNearby',
   'aura:activity:storyReactions',
@@ -119,6 +123,7 @@ export async function performSignOut(): Promise<void> {
   await resetPrivacy().catch(() => {});
   await resetArchive().catch(() => {});
   resetBlocked();
+  resetAlertsCount();
   // Otherwise a user who signed out mid-journey leaves the next session
   // starting in "driving" — with nearby prompts quietly suppressed for someone
   // who is sitting still.

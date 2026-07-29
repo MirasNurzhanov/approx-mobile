@@ -17,6 +17,7 @@ import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { useScrollNav } from '@/context/ScrollNavContext';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
+import { refreshAlertsCount, useAlertsCount } from '@/services/alerts';
 import { api } from '@/services/api';
 import { MAX_SCALE_FIXED, type as typography } from '@/constants/theme';
 
@@ -64,8 +65,7 @@ export function navArcClearance(fromRight: number, width: number): number {
 }
 
 // ─── Badge indices ────────────────────────────────────────────────────────────
-const CHAT_IDX  = 2; // 'Chat'   is index 2
-const NOTIF_IDX = 3; // 'Alerts' is index 3
+const CHAT_IDX = 2; // 'Chat' is index 2
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -79,15 +79,18 @@ interface Section {
   start: number;
   end: number;
   mid: number;
+  /** Extra path fragments that should light this wedge. A pushed screen owned
+   *  by a section keeps its parent selected instead of falling back to Map. */
+  owns?: string[];
 }
 
 const SECTIONS: Section[] = [
-  { label: 'Map',      icon: 'map-outline',           activeIcon: 'map',            route: '/(tabs)/map',           name: 'map',           start: 150, end: 180, mid: 165 },
-  { label: 'Profile',  icon: 'person-outline',        activeIcon: 'person',         route: '/(tabs)/profile',       name: 'profile',       start: 120, end: 150, mid: 135 },
-  { label: 'Chat',     icon: 'chatbubbles-outline',   activeIcon: 'chatbubbles',    route: '/(tabs)/chat',          name: 'chat',          start: 90,  end: 120, mid: 105 },
-  { label: 'Alerts',   icon: 'notifications-outline', activeIcon: 'notifications',  route: '/(tabs)/notifications', name: 'notifications', start: 60,  end: 90,  mid: 75  },
-  { label: 'Quests',   icon: 'compass-outline',       activeIcon: 'compass',        route: '/(tabs)/quests',        name: 'quests',        start: 30,  end: 60,  mid: 45  },
-  { label: 'Settings', icon: 'settings-outline',      activeIcon: 'settings-sharp', route: '/(tabs)/settings',      name: 'settings',      start: 0,   end: 30,  mid: 15  },
+  { label: 'Map',      icon: 'map-outline',         activeIcon: 'map',            route: '/(tabs)/map',      name: 'map',      start: 150, end: 180, mid: 165 },
+  { label: 'Profile',  icon: 'person-outline',      activeIcon: 'person',         route: '/(tabs)/profile',  name: 'profile',  start: 120, end: 150, mid: 135 },
+  { label: 'Chat',     icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 90,  end: 120, mid: 105, owns: ['notification', 'messages'] },
+  { label: 'Swifts',   icon: 'play-circle-outline', activeIcon: 'play-circle',    route: '/(tabs)/swifts',   name: 'swifts',   start: 60,  end: 90,  mid: 75  },
+  { label: 'Quests',   icon: 'compass-outline',     activeIcon: 'compass',        route: '/(tabs)/quests',   name: 'quests',   start: 30,  end: 60,  mid: 45  },
+  { label: 'Settings', icon: 'settings-outline',    activeIcon: 'settings-sharp', route: '/(tabs)/settings', name: 'settings', start: 0,   end: 30,  mid: 15  },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,10 +115,11 @@ function sectorPath(start: number, end: number, gap = 1.2): string {
   ].join(' ');
 }
 
-function badgeFor(index: number, chatBadge: number, notifBadge: number): number {
-  if (index === CHAT_IDX) return chatBadge;
-  if (index === NOTIF_IDX) return notifBadge;
-  return 0;
+/** With Alerts gone from the arc, its unread count rides on the Chat wedge —
+ *  which is where the feed now lives, as Chat's first tab. Two sources with no
+ *  overlap: unread messages, and everything in Alerts. */
+function badgeFor(index: number, chatBadge: number, alertsBadge: number): number {
+  return index === CHAT_IDX ? chatBadge + alertsBadge : 0;
 }
 
 /** "Chat, 3 unread" rather than "Chat" followed by a bare "3". */
@@ -126,7 +130,11 @@ function tabLabel(label: string, badge: number): string {
 
 function matchSection(pathname: string): number {
   const idx = SECTIONS.findIndex(
-    s => pathname === s.route || pathname.startsWith(s.route) || pathname.endsWith(`/${s.name}`),
+    s =>
+      pathname === s.route ||
+      pathname.startsWith(s.route) ||
+      pathname.endsWith(`/${s.name}`) ||
+      (s.owns?.some(fragment => pathname.includes(fragment)) ?? false),
   );
   return idx >= 0 ? idx : 0;
 }
@@ -150,8 +158,10 @@ export function Speedometer() {
   const { collapsed }     = useScrollNav();
 
   const [activeIdx, setActiveIdx] = useState(() => matchSection(pathname));
-  const [chatBadge,  setChatBadge]  = useState(0);
-  const [notifBadge, setNotifBadge] = useState(0);
+  const [chatBadge, setChatBadge] = useState(0);
+  // Same store the Alerts tab inside Chat reads, so the wedge badge and the tab
+  // badge can never disagree.
+  const alertsBadge = useAlertsCount();
 
   // The needle sweep and the collapse spring are decorative. With Reduce
   // Motion on they jump to the end state instead — the feedback is kept, the
@@ -165,19 +175,16 @@ export function Speedometer() {
     [reduceMotion],
   );
 
-  // ── Chat badge: pending Hi requests + unread messages ────────────────────────
+  // ── Chat badge: unread messages only ─────────────────────────────────────────
+  // Pending Hi requests used to be counted here too. They are part of Alerts
+  // now, which `alertsBadge` already counts — and this badge adds the two
+  // together, so counting requests in both would show every one of them twice.
   const fetchChatBadge = useCallback(async () => {
     try {
-      const [pendingRes, unreadRes] = await Promise.allSettled([
-        api.get<unknown>('/api/friends/requests/'),
+      const [unreadRes] = await Promise.allSettled([
         api.get<unknown>('/api/friends/messages/unread/'),
       ]);
       let count = 0;
-      if (pendingRes.status === 'fulfilled') {
-        const d = pendingRes.value.data;
-        if (Array.isArray(d)) count += d.length;
-        else if (d && typeof d === 'object' && 'count' in d) count += Number((d as any).count);
-      }
       if (unreadRes.status === 'fulfilled') {
         const d = unreadRes.value.data;
         if (typeof d === 'number') count += d;
@@ -188,40 +195,26 @@ export function Speedometer() {
     } catch {}
   }, []);
 
-  // ── Notifications badge: incoming friend requests ─────────────────────────────
-  const fetchNotifBadge = useCallback(async () => {
-    try {
-      const res = await api.get<unknown>('/api/friends/requests/incoming/');
-      const d = res.data;
-      let count = 0;
-      if (Array.isArray(d)) count = d.length;
-      else if (d && typeof d === 'object' && 'count' in d) count = Number((d as any).count);
-      setNotifBadge(count);
-    } catch {}
-  }, []);
-
   useEffect(() => {
     fetchChatBadge();
     const id = setInterval(fetchChatBadge, 10_000);
     return () => clearInterval(id);
   }, [fetchChatBadge]);
 
-  useEffect(() => {
-    fetchNotifBadge();
-    const id = setInterval(fetchNotifBadge, 5_000);
-    return () => clearInterval(id);
-  }, [fetchNotifBadge]);
-
   // Re-fetch on tab focus; optimistic clear when entering a message thread
   useEffect(() => {
-    if (pathname.includes('chat'))          fetchChatBadge();
-    if (pathname.includes('notification')) fetchNotifBadge();
+    // Chat is where both halves of this badge get read, so entering it is the
+    // one navigation that can make either half stale.
+    if (pathname.includes('chat')) {
+      fetchChatBadge();
+      refreshAlertsCount();
+    }
     if (pathname.includes('messages')) {
       setChatBadge(0);
       const t = setTimeout(() => fetchChatBadge(), 1500);
       return () => clearTimeout(t);
     }
-  }, [pathname]);
+  }, [pathname, fetchChatBadge]);
 
   const needleAngle      = useSharedValue(SECTIONS[matchSection(pathname)].mid);
   const containerH       = useSharedValue(SVG_H + safeBottom);
@@ -327,7 +320,7 @@ export function Speedometer() {
           {SECTIONS.map((s, i) => {
             const isActive = i === activeIdx;
             const pos = polar(R_ICO, s.mid);
-            const badge = badgeFor(i, chatBadge, notifBadge);
+            const badge = badgeFor(i, chatBadge, alertsBadge);
             return (
               <Pressable
                 key={i}
@@ -380,7 +373,7 @@ export function Speedometer() {
           <View style={styles.slimRow}>
             {SECTIONS.map((s, i) => {
               const isActive = i === activeIdx;
-              const badge = badgeFor(i, chatBadge, notifBadge);
+              const badge = badgeFor(i, chatBadge, alertsBadge);
               return (
                 <Pressable
                   key={i}

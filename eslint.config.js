@@ -8,4 +8,3 @@ module.exports = defineConfig([
     ignores: ['dist/*'],
   },
 ]);
-git 

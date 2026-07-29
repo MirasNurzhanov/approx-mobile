@@ -56,7 +56,6 @@ import {
 } from '@/components/ui/icons';
 import { colors, fonts, radius } from '@/constants/theme';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
-import { recordNearbySightings, recordStoryReactions } from '@/services/activityFeed';
 import { api } from '@/services/api';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
@@ -74,7 +73,7 @@ import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/s
 import { MotionTrail } from '@/components/MotionTrail';
 import { PresenceDot } from '@/components/PresenceDot';
 import { useMotionTrails } from '@/hooks/useMotionTrails';
-import { recordSpeed, shouldQuietPrompts, useOwnMotion } from '@/services/ownMotion';
+import { recordSpeed } from '@/services/ownMotion';
 import { getPref } from '@/services/preferences';
 import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
 import {
@@ -1011,39 +1010,10 @@ export default function MapScreen() {
   // disappears from `visibleNearby` takes their trail history with them.
   const motionTrails = useMotionTrails(visibleNearby);
 
-  // Feed the local notification feed: friends nearby (with distance) and
-  // interest matches. The feed itself dedupes with a per-user cooldown.
-  //
-  // Held back entirely while the user is moving at vehicle speed. Someone doing
-  // 40km/h is driving or being driven, and we cannot tell which — telling a
-  // driver that a stranger with shared interests is 200m away is asking them to
-  // look at their phone. Deferred rather than dropped: this effect re-runs on
-  // the next poll, so whatever is still nearby when they stop is recorded then.
-  const ownMotion = useOwnMotion();
-  useEffect(() => {
-    if (visibleNearby.length === 0) return;
-    if (shouldQuietPrompts()) return;
-    recordNearbySightings(
-      visibleNearby.map((u) => ({
-        id: Number(u.id),
-        username: u.username,
-        isFriend: friendIds.has(Number(u.id)),
-        sharedInterests: u.shared_interests ?? [],
-        distanceKm: u.distance_km ?? (u.distance != null ? u.distance / 1000 : undefined),
-      })),
-    );
-    // `ownMotion` is a dependency so the deferred batch lands as soon as the
-    // user comes to a stop, rather than waiting for the next position change.
-  }, [visibleNearby, friendIds, ownMotion]);
-
-  // Detect new reactions on the current user's own stories.
-  useEffect(() => {
-    if (currentUserId == null || stories.length === 0) return;
-    recordStoryReactions(
-      stories.map((s) => ({ id: s.id, authorId: s.author.id, reactions: s.reactions ?? {} })),
-      currentUserId,
-    );
-  }, [stories, currentUserId]);
+  // Nearby people used to generate alerts from here — "@miras is nearby ·
+  // 180m away", "@aisha shares your interests". They no longer do: being
+  // somewhere is not an event, and the map already shows who is around. The
+  // markers below are the whole of it now.
 
   const fetchFriends = useCallback(async () => {
     try {

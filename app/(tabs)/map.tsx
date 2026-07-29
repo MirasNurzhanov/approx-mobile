@@ -20,7 +20,7 @@ import {
     View,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import MapView, { Circle, Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, {
     FadeInUp,
     FadeOutUp,
@@ -117,16 +117,22 @@ interface SelfZone {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+// Ring colour carries the relationship, and nothing else does: blue is a
+// friend, orange is a connection, teal is a matched stranger. One colour per
+// state, used on the marker, in the sheet and on the zone.
 const COLOR_FRIEND    = colors.blue;
 const COLOR_CONNECTED = colors.orange;
-const COLOR_STRANGER  = colors.t1;
+const COLOR_STRANGER  = colors.teal;
 
 /** Matches APPROX_GRID_M on the server. */
 const APPROX_RADIUS_M = 500;
 
-/** Non-friend marker: opaque core, and the translucent disc around it. */
-const DOT_CORE = 20;
-const DOT_HALO = 32;
+/** Stranger marker: a point of light, not a pin. Small on purpose — a stranger
+ *  is a dot with no name and no face, so the marker should not imply it is
+ *  hiding a card behind it. */
+const DOT_CORE = 14;
+const DOT_HALO = 30;
+
 
 /**
  * Marker draw order.
@@ -140,6 +146,9 @@ const DOT_HALO = 32;
 const Z_SELF = 1;
 const Z_STRANGER = 4;
 const Z_FRIEND = 5;
+/** Above the people it stands in for: while a pile is collapsed, the badge is
+ *  the only thing there is to hit. */
+const Z_CLUSTER = 6;
 const Z_STORY = 7;
 
 const REL_LABEL: Record<Relationship, string> = {
@@ -151,6 +160,8 @@ const REL_LABEL: Record<Relationship, string> = {
 
 const POLL_MS            = 10_000;
 const STORY_POLL_MS      = 10_000;
+/** How still the camera must be before the marker layout reacts to a new zoom. */
+const ZOOM_SETTLE_MS     = 220;
 
 // Neutral dark map per the redesign: tonal grays only, muted labels, no accent color.
 const DARK_MAP_STYLE = [
@@ -205,6 +216,291 @@ function fmtDistance(m?: number): string | null {
   return m < 1000 ? `${Math.round(m)} m away` : `${(m / 1000).toFixed(1)} km away`;
 }
 
+// ─── Overlapping markers ──────────────────────────────────────────────────────
+/**
+ * People standing together are, on the map, one marker with the others hidden
+ * underneath it — and because the owner's marker is drawn *below* everyone
+ * else's on purpose (see Z_SELF), the one that disappears is you.
+ *
+ * Neither draw order nor marker size can fix that: at the same coordinate,
+ * something has to be on top. So markers that collide on screen are fanned out
+ * around the spot they share, and a leader line runs from each one back to it.
+ * The fan is measured in pixels, not metres, so it separates by the same amount
+ * at every zoom — and the lines are what keep it honest, since the marker is
+ * then a few metres from where its owner actually is.
+ *
+ * Only markers move. Zones, the approximate-location haze and motion trails are
+ * real geography and stay exactly where they are.
+ */
+const M_PER_DEG = 111_320;
+
+/** Markers whose centres land closer than this are treated as one pile. */
+const OVERLAP_PX = 26;
+/** Marker footprint the fan has to keep clear between neighbours. */
+const MARKER_PX = 44;
+/** Clearance from the owner's marker. Measured against its solid 34 px core,
+ *  not the 54 px halo — the halo is translucent, so a neighbour sitting over its
+ *  edge is still perfectly readable, and using the full halo would push everyone
+ *  a further 10 px (20 m at the default zoom) from where they really are. */
+const SELF_CLEAR_PX = (34 + MARKER_PX) / 2;
+/** The key the owner's own marker is filed under. */
+const SELF_KEY = 'self';
+
+/**
+ * The hard ceiling on how far the fan may move a marker.
+ *
+ * The fan is sized in pixels, which is what keeps it legible at every zoom — but
+ * a pixel is worth more metres the further you zoom out, so left uncapped the
+ * same 39 px nudge becomes a kilometre. Two things break at that point: the
+ * marker stops describing where its owner is, and anyone standing inside a sound
+ * zone gets pushed outside the circle they are audibly within.
+ *
+ * So the fan is capped, and when the cap leaves too little room to separate a
+ * pile, the pile is drawn as a count instead. Zooming out therefore trades
+ * individuals for a number rather than for a fiction.
+ */
+const FAN_MAX_M = 80;
+
+/**
+ * Widest span the layout will reason about, in degrees of latitude.
+ *
+ * Google Maps will happily zoom out to the whole globe, at which point a pixel
+ * is worth tens of kilometres and `SELF_CLEAR_PX` worth of offset lands a badge
+ * in another hemisphere — or past the poles, which is an invalid coordinate and
+ * takes the native map down with it. Past this the layout stops caring how far
+ * out you are: everything is one pile either way.
+ */
+const MAX_ZOOM_DELTA = 2;
+
+/**
+ * Zoom, snapped to √2 steps.
+ *
+ * The layout only needs a rough idea of how far out the camera is, and a
+ * continuous value meant every marker re-rendered on every zoom event Android
+ * emitted mid-pinch. Buckets reduce a whole pinch to a handful of updates.
+ */
+function zoomBucket(latitudeDelta: number): number {
+  if (!Number.isFinite(latitudeDelta) || latitudeDelta <= 0) return 0.012;
+  const clamped = Math.min(Math.max(latitudeDelta, 0.0005), MAX_ZOOM_DELTA);
+  return 2 ** (Math.round(Math.log2(clamped) * 2) / 2);
+}
+
+/** Refuse to hand the native map a coordinate it can crash on. */
+function isDrawable(p?: GeoPoint | null): p is GeoPoint {
+  return (
+    !!p &&
+    Number.isFinite(p.latitude) &&
+    Number.isFinite(p.longitude) &&
+    Math.abs(p.latitude) <= 85 &&
+    Math.abs(p.longitude) <= 180
+  );
+}
+
+interface ZoneArea extends GeoPoint { radius: number }
+
+interface GeoPoint { latitude: number; longitude: number }
+
+function metersPerDegLng(latitude: number): number {
+  // Guard the poles: cos(90°) is 0 and would send the offset to infinity.
+  return M_PER_DEG * Math.max(Math.cos((latitude * Math.PI) / 180), 0.01);
+}
+
+function offsetByMeters(p: GeoPoint, northM: number, eastM: number): GeoPoint {
+  // Clamped: an offset that runs off the top of the world is an invalid
+  // coordinate, and the native map does not survive being handed one.
+  const latitude = Math.max(-85, Math.min(85, p.latitude + northM / M_PER_DEG));
+  return { latitude, longitude: p.longitude + eastM / metersPerDegLng(p.latitude) };
+}
+
+/** Flat-earth distance. Over the tens of metres this is used for, the error is
+ *  far below the pixel it is being compared against. */
+function roughMeters(a: GeoPoint, b: GeoPoint): number {
+  const dNorth = (a.latitude - b.latitude) * M_PER_DEG;
+  const dEast = (a.longitude - b.longitude) * metersPerDegLng(a.latitude);
+  return Math.hypot(dNorth, dEast);
+}
+
+export interface FanInput extends GeoPoint { key: string }
+export interface FanResult {
+  /** Where to draw the marker. Equal to the true point when nothing collided. */
+  position: GeoPoint;
+  /** True point, when the marker was moved — the leader line's other end. */
+  anchor?: GeoPoint;
+}
+export interface ClusterResult {
+  key: string;
+  /** How many people the badge stands in for. */
+  count: number;
+  position: GeoPoint;
+  /** Set when the badge had to be moved off the spot it describes. */
+  anchor?: GeoPoint;
+}
+export interface MarkerLayout {
+  /** Markers drawn individually, by key. A key that is absent was folded into
+   *  a cluster — its owner must not also be drawn. */
+  placed: Map<string, FanResult>;
+  clusters: ClusterResult[];
+}
+
+/**
+ * How far a marker at `center` may move without leaving a zone it is inside.
+ *
+ * A marker `d` metres from the middle of a zone of radius `R` has `R − d` to
+ * spare. Being inside someone's sound zone is an audible fact, so a marker that
+ * the fan pushed across the circle's edge would contradict what the user can
+ * hear. Zones the point is already outside impose nothing.
+ */
+function fanCapMeters(center: GeoPoint, zones: ZoneArea[]): number {
+  let cap = FAN_MAX_M;
+  for (const zone of zones) {
+    const d = roughMeters(center, zone);
+    if (d >= zone.radius) continue;
+    cap = Math.min(cap, zone.radius - d);
+  }
+  return cap;
+}
+
+/** Ring radius whose straight-line gap between neighbours is one marker wide.
+ *  Sizing by arc length instead looks right but comes out short — a ring of
+ *  three lands 36 px apart and still overlaps. */
+function ringRadiusPx(count: number): number {
+  return count < 2 ? MARKER_PX : MARKER_PX / (2 * Math.sin(Math.PI / count));
+}
+
+/**
+ * Decide where every marker goes: fanned apart, or replaced by a count.
+ *
+ * `metersPerPx` converts the pixel thresholds above into map distance at the
+ * current zoom, so a fan separates by the same amount on screen however far in
+ * you are — and zooming in shrinks how far each marker sits from the truth.
+ *
+ * Two rules survive every zoom level:
+ *
+ *  - **The owner never moves.** When a pile contains them they keep their real
+ *    position and everyone else rings around it. Your own marker is the one
+ *    position on this map you can check against the world outside the phone, and
+ *    it is the centre of your own zone — nudging it would put your avatar
+ *    off-centre inside your own circle. They are never folded into a count
+ *    either: "you" is not a statistic.
+ *  - **Nobody is moved further than the cap.** If separating a pile would cost
+ *    more than that, the pile becomes one badge with a number on it. That is the
+ *    zoomed-out case: a count is true, whereas a fan that flings people across a
+ *    neighbourhood — or out of a sound zone they are standing in — is not.
+ */
+function layoutMarkers(
+  points: FanInput[],
+  metersPerPx: number,
+  zones: ZoneArea[],
+): MarkerLayout {
+  const placed = new Map<string, FanResult>();
+  const clusters: ClusterResult[] = [];
+  if (points.length === 0 || !Number.isFinite(metersPerPx) || metersPerPx <= 0) {
+    return { placed, clusters };
+  }
+
+  /**
+   * Badge keys are the rounded centre, not the member list.
+   *
+   * Keying on membership looked tidier and was the bug: one person walking in or
+   * out changed the key, React unmounted the badge and mounted a new one, and a
+   * fresh marker re-arms `tracksViewChanges`. Do that repeatedly — which is
+   * exactly what a pinch does — and Android is re-rasterizing markers every
+   * frame until it runs out of memory. A position key keeps the same badge
+   * mounted while the pile stays put.
+   */
+  const usedKeys = new Set<string>();
+  const badgeKey = (center: GeoPoint) => {
+    const base = `cluster-${center.latitude.toFixed(4)}-${center.longitude.toFixed(4)}`;
+    let key = base;
+    for (let i = 2; usedKeys.has(key); i++) key = `${base}-${i}`;
+    usedKeys.add(key);
+    return key;
+  };
+
+  const threshold = OVERLAP_PX * metersPerPx;
+  const piles: FanInput[][] = [];
+  for (const p of points) {
+    const pile = piles.find((group) => group.some((q) => roughMeters(q, p) <= threshold));
+    if (pile) pile.push(p);
+    else piles.push([p]);
+  }
+
+  const keep = (p: FanInput) => {
+    placed.set(p.key, { position: { latitude: p.latitude, longitude: p.longitude } });
+  };
+
+  for (const pile of piles) {
+    if (pile.length === 1) {
+      keep(pile[0]);
+      continue;
+    }
+
+    const self = pile.find((p) => p.key === SELF_KEY);
+    const others = self ? pile.filter((p) => p.key !== SELF_KEY) : pile;
+
+    // Ring centre: the owner's exact position when they are in the pile,
+    // otherwise the pile's centroid — which keeps a group of other people put
+    // when the server re-orders them between polls.
+    const center: GeoPoint = self
+      ? { latitude: self.latitude, longitude: self.longitude }
+      : {
+          latitude: pile.reduce((s, p) => s + p.latitude, 0) / pile.length,
+          longitude: pile.reduce((s, p) => s + p.longitude, 0) / pile.length,
+        };
+
+    if (self) keep(self);
+
+    // With the owner sitting at the centre, the ring also has to clear *them*.
+    const wantPx = self
+      ? Math.max(SELF_CLEAR_PX, ringRadiusPx(others.length))
+      : ringRadiusPx(others.length);
+    const wantM = wantPx * metersPerPx;
+    const capM = fanCapMeters(center, zones);
+
+    if (wantM > capM) {
+      clusters.push({
+        key: badgeKey(center),
+        count: others.length,
+        // A badge stands for a group rather than claiming to be one person's
+        // position, so moving it clear of the owner's marker costs nothing —
+        // and it has to move, because the owner's marker is staying put.
+        position: self ? offsetByMeters(center, SELF_CLEAR_PX * metersPerPx, 0) : center,
+        anchor: self ? center : undefined,
+      });
+      continue;
+    }
+
+    const radiusM = wantM;
+    others.forEach((p, i) => {
+      // Start at the top and go clockwise.
+      const angle = (2 * Math.PI * i) / others.length - Math.PI / 2;
+      placed.set(p.key, {
+        position: offsetByMeters(center, -radiusM * Math.sin(angle), radiusM * Math.cos(angle)),
+        anchor: center,
+      });
+    });
+  }
+
+  return { placed, clusters };
+}
+
+/**
+ * A stranger's distance, as a band plus an approximate figure.
+ *
+ * Strangers never get an exact number. "90 m away" is a measurement of a person
+ * who has not agreed to be measured — and read twice a minute it is enough to
+ * walk someone down. The band is the useful part anyway: what a stranger needs
+ * to know is whether this is worth crossing the road for.
+ */
+function distanceBand(m?: number): string | null {
+  if (m == null) return null;
+  const band = m < 150 ? 'Close' : m < 400 ? 'Nearby' : 'In range';
+  const approx = m < 1000
+    ? `about ${Math.max(10, Math.round(m / 10) * 10)} m`
+    : `about ${(m / 1000).toFixed(1)} km`;
+  return `${band} · ${approx}`;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function DotMarker({ coordinate, color, presence, zIndex, onPress }: {
@@ -238,12 +534,16 @@ function DotMarker({ coordinate, color, presence, zIndex, onPress }: {
           bleeding out of it: Android clips marker children to their parent
           when it rasterizes, so anything outside these bounds would vanish. */}
       <View style={styles.dotWrap}>
-        <View style={[styles.dotHalo, { backgroundColor: color }]} />
-        <View style={[styles.userDot, { backgroundColor: color }]} />
+        {/* Two discs, not one: a wide faint bloom and a tighter brighter one,
+            which is what makes the dot read as lit from within rather than as
+            a flat circle sitting on the map. */}
+        <View style={[styles.dotBloom, { backgroundColor: color }]} />
+        <View style={[styles.dotGlow, { backgroundColor: color }]} />
+        <View style={[styles.userDot, { backgroundColor: color, shadowColor: color }]} />
         {/* Absent presence renders nothing — PresenceDot returns null — so a
             hidden state never becomes a visible "offline". */}
         <View style={styles.dotPresence}>
-          <PresenceDot presence={presence} size={9} haloColor={colors.bg} />
+          <PresenceDot presence={presence} size={8} haloColor={colors.bg} />
         </View>
       </View>
     </Marker>
@@ -259,10 +559,33 @@ interface AvatarMarkerProps {
   zIndex?: number;
   presence?: Presence;
   motion?: MotionClass;
+  /** Shown under the ring. Someone whose face you are allowed to see is someone
+   *  whose name you are allowed to see, so the marker says both. */
+  caption?: string;
+  /** Appended to the caption in the ring colour — "· zone" when they are
+   *  broadcasting, which is the one thing worth walking towards. */
+  captionTag?: string;
   onPress?: () => void;
 }
 
-function AvatarMarker({ coordinate, uri, username, ringColor, size = 40, zIndex, presence, motion, onPress }: AvatarMarkerProps) {
+/** Caption geometry, needed up front: the anchor has to be computed from the
+ *  full marker height so the ring — not the whole box — sits on the point. */
+const CAPTION_GAP = 5;
+const CAPTION_H = 17;
+
+function AvatarMarker({
+  coordinate,
+  uri,
+  username,
+  ringColor,
+  size = 40,
+  zIndex,
+  presence,
+  motion,
+  caption,
+  captionTag,
+  onPress,
+}: AvatarMarkerProps) {
   // Markers rasterize their children: keep tracking until the remote image is
   // drawn, and re-arm briefly when the ring color changes (friend data arrives
   // after the first nearby fetch).
@@ -285,41 +608,63 @@ function AvatarMarker({ coordinate, uri, username, ringColor, size = 40, zIndex,
   // The trail is decorative and hidden from assistive tech, so the state it
   // conveys is spelled out here instead — motion must never be carried by the
   // effect alone.
-  const label = [username, presenceLabel(presence), motionLabel(motion)]
+  const label = [username, captionTag, presenceLabel(presence), motionLabel(motion)]
     .filter(Boolean)
     .join(', ');
 
   const inner = size - 6;
+
+  // With a caption the marker is taller than the ring, and anchoring by the
+  // box's centre would float the ring above the point it belongs to. Anchor on
+  // the ring's centre instead, expressed as a fraction of the full height.
+  const totalH = caption ? size + CAPTION_GAP + CAPTION_H : size;
+  const anchorY = (size / 2) / totalH;
+
   return (
     <Marker
       coordinate={coordinate}
-      anchor={{ x: 0.5, y: 0.5 }}
+      anchor={{ x: 0.5, y: anchorY }}
       tracksViewChanges={!imageReady || ringSettling}
       zIndex={zIndex}
       accessibilityLabel={label}
       onPress={onPress}
     >
-      <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
-        {uri && !imageFailed ? (
-          <Image
-            source={{ uri }}
-            style={{ width: inner, height: inner, borderRadius: inner / 2 }}
-            onLoad={() => setTimeout(() => setImageReady(true), 250)}
-            onError={() => { setImageFailed(true); setImageReady(true); }}
-          />
-        ) : (
-          <View
-            style={[
-              styles.avatarMarkerFallback,
-              { width: inner, height: inner, borderRadius: inner / 2, backgroundColor: avatarBgColor(username) },
-            ]}
-          >
-            <Text style={styles.avatarMarkerInitial}>{username ? username.charAt(0).toUpperCase() : '?'}</Text>
+      {/* Column wrapper: Android clips marker children to the parent box when
+          it rasterizes, so the caption has to live inside it. */}
+      <View style={styles.avatarMarkerWrap}>
+        <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
+          {uri && !imageFailed ? (
+            <Image
+              source={{ uri }}
+              style={{ width: inner, height: inner, borderRadius: inner / 2 }}
+              onLoad={() => setTimeout(() => setImageReady(true), 250)}
+              onError={() => { setImageFailed(true); setImageReady(true); }}
+            />
+          ) : (
+            <View
+              style={[
+                styles.avatarMarkerFallback,
+                { width: inner, height: inner, borderRadius: inner / 2, backgroundColor: avatarBgColor(username) },
+              ]}
+            >
+              <Text style={styles.avatarMarkerInitial}>{username ? username.charAt(0).toUpperCase() : '?'}</Text>
+            </View>
+          )}
+          <View style={styles.markerPresence}>
+            <PresenceDot presence={presence} size={10} haloColor={colors.bg} />
           </View>
-        )}
-        <View style={styles.markerPresence}>
-          <PresenceDot presence={presence} size={10} haloColor={colors.bg} />
         </View>
+
+        {caption ? (
+          <View style={styles.markerCaption}>
+            <Text style={styles.markerCaptionText} numberOfLines={1}>
+              {caption}
+              {captionTag ? (
+                <Text style={[styles.markerCaptionTag, { color: ringColor }]}>{` · ${captionTag}`}</Text>
+              ) : null}
+            </Text>
+          </View>
+        ) : null}
       </View>
     </Marker>
   );
@@ -362,6 +707,46 @@ function SelfMarker({ coordinate, uri, username }: {
               </Text>
             </View>
           )}
+        </View>
+      </View>
+    </Marker>
+  );
+}
+
+/**
+ * What a pile becomes when it cannot be fanned apart — a headcount.
+ *
+ * Deliberately faceless. A pile at this zoom is usually strangers, and a stack of
+ * little avatars would hand out the photos the map withholds until a Hi is
+ * mutual. A number gives the one thing worth knowing from this far out — how many
+ * people are over there — and tapping goes in for the detail.
+ */
+function ClusterMarker({ coordinate, count, onPress }: {
+  coordinate: { latitude: number; longitude: number };
+  count: number;
+  onPress?: () => void;
+}) {
+  // Same reason as DotMarker: freeze the raster, but not before it has drawn.
+  const [settling, setSettling] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setSettling(false), 400);
+    return () => clearTimeout(t);
+  }, [count]);
+
+  return (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={settling}
+      zIndex={Z_CLUSTER}
+      onPress={onPress}
+      accessibilityLabel={`${count} ${count === 1 ? 'person' : 'people'} here. Zoom in to see them.`}
+    >
+      <View style={styles.clusterWrap}>
+        <View style={styles.clusterBloom} />
+        <View style={styles.clusterBadge}>
+          <IconPeople size={12} color={colors.teal} />
+          <Text style={styles.clusterCount}>{count}</Text>
         </View>
       </View>
     </Marker>
@@ -783,57 +1168,81 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
     router.push({ pathname: '/profile/[id]', params: { id: user.id, username: user.username } });
   }
 
+  // Whether this person's identity is ours to show. Below a mutual Hi there is
+  // no name and no face on this card — the map showed a point, and the card has
+  // to agree with the map or the point was never really anonymous.
+  const identified = isFriend || isConnected;
+
+  // Friends and connections get the real number; a stranger gets a band.
+  const distLine = identified ? dist : distanceBand(user.distance);
+  const zoneLine = isFriend && user.zone_active ? 'in their sound zone' : null;
+  const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
+
   return (
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
-      <Animated.View style={[styles.sheet, { paddingBottom: bottom + 20 }, animStyle]}>
+      <Animated.View style={[styles.sheet, { paddingBottom: bottom + 16 }, animStyle]}>
         <View style={styles.sheetHandle} />
 
-        <Pressable onPress={onDismiss} hitSlop={14} style={styles.closeBtn}>
-          <IconClose size={16} color={colors.t3} />
-        </Pressable>
-
-        <View style={styles.sheetHero}>
-          <Avatar
-            uri={user.profile_picture}
-            name={user.username}
-            size="lg"
-            ringColor={relRingColor}
-          />
-          <Text style={styles.sheetName}>{user.username}</Text>
-          <View style={styles.sheetMetaRow}>
-            <View style={styles.relBadge}>
-              <Text style={[styles.relBadgeText, { color: relLabelColor }]}>
-                {REL_LABEL[rel] ?? 'Nearby'}
-              </Text>
+        {/* Identity row: who, how far, and what they are to you — one line of
+            each, read left to right. The old sheet stacked this centred over
+            400 px, which pushed the actions below the fold on small screens. */}
+        <View style={styles.sheetHead}>
+          {identified ? (
+            <Avatar
+              uri={user.profile_picture}
+              name={user.username}
+              size="md"
+              ringColor={relRingColor}
+              presence={user.presence}
+            />
+          ) : (
+            // The marker, enlarged. A stranger is a point of light here too.
+            <View style={styles.strangerAvatar}>
+              <View style={styles.strangerAvatarGlow} />
+              <View style={styles.strangerAvatarCore} />
             </View>
-            {dist && (
-              <View style={styles.relBadge}>
-                <Text style={styles.relBadgeText}>{dist}</Text>
-              </View>
-            )}
-            {/* Absent presence renders nothing, so a viewer who is not in the
-                audience sees no badge rather than a false "offline". */}
-            {user.presence && (
-              <View style={styles.relBadge}>
-                <PresenceDot presence={user.presence} size={8} withText />
-              </View>
-            )}
-            {/* The trail on the map is decorative and hidden from screen
-                readers, so the state it conveys is also stated in words. */}
-            {motionLabel(user.motion_class) && (
-              <View style={styles.relBadge} accessible accessibilityLabel={motionLabel(user.motion_class)!}>
-                <Text style={[styles.relBadgeText, { color: colors.teal }]} importantForAccessibility="no">
-                  {user.motion_class === 'fast' ? 'Moving fast' : 'On the move'}
-                </Text>
-              </View>
-            )}
+          )}
+
+          <View style={styles.sheetHeadBody}>
+            <Text style={styles.sheetName} numberOfLines={1}>
+              {identified ? user.username : 'Someone nearby'}
+            </Text>
+            {metaLine ? (
+              <Text style={styles.sheetMeta} numberOfLines={1}>{metaLine}</Text>
+            ) : null}
+          </View>
+
+          <View style={[styles.relPill, { borderColor: relRingColor }]}>
+            <Text style={[styles.relPillText, { color: relLabelColor }]}>
+              {REL_LABEL[rel] ?? 'Nearby'}
+            </Text>
           </View>
         </View>
 
+        {/* Presence and motion were badges in the meta row and are now a single
+            quiet line — still spelled out in words, because the trail on the map
+            is decorative and hidden from assistive tech. */}
+        {(user.presence || motionLabel(user.motion_class)) && (
+          <View style={styles.statusRow}>
+            {user.presence && <PresenceDot presence={user.presence} size={8} withText />}
+            {motionLabel(user.motion_class) && (
+              <Text
+                style={styles.statusMotion}
+                accessible
+                accessibilityLabel={motionLabel(user.motion_class)!}
+              >
+                {user.motion_class === 'fast' ? 'Moving fast' : 'On the move'}
+              </Text>
+            )}
+          </View>
+        )}
+
         {user.shared_interests && user.shared_interests.length > 0 && (
           <View style={styles.interestsSection}>
-            <Text style={styles.sectionLabel}>Shared Interests</Text>
+            <Text style={styles.sectionLabel}>
+              {identified ? 'Shared interests' : 'You both like'}
+            </Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -863,28 +1272,42 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
           </View>
         )}
 
+        {/* One decision, then a way out of it. The primary action is wide and
+            the dismiss is a square beside it, so the choice a stranger card
+            offers reads as "yes, or nothing". */}
         <View style={styles.actions}>
-          <View style={styles.actionBtn}>
+          <View style={styles.actionPrimary}>
             {isStranger && (
-              <Button label="Send Hi" variant="primary" size="md" fullWidth onPress={sendHi} />
+              <Button label="Say Hi" variant="primary" size="md" fullWidth onPress={sendHi} />
             )}
             {isHiSent && (
               <Button label="Hi Sent ✓" variant="secondary" size="md" fullWidth disabled />
             )}
-            {(isFriend || isConnected) && (
-              <Button
-                label="Message"
-                variant={isConnected ? 'secondary' : 'primary'}
-                size="md"
-                fullWidth
-                onPress={goToMessages}
-              />
+            {identified && (
+              <Button label="Message" variant="primary" size="md" fullWidth onPress={goToMessages} />
             )}
           </View>
-          <View style={styles.actionBtn}>
-            <Button label="View Profile" variant="ghost" size="md" fullWidth onPress={goToProfile} />
+          <View style={styles.actionSecondary}>
+            <Button label="Profile" variant="ghost" size="md" fullWidth onPress={goToProfile} />
           </View>
+          <Pressable
+            onPress={onDismiss}
+            style={styles.actionDismiss}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+          >
+            <IconClose size={16} color={colors.t3} />
+          </Pressable>
         </View>
+
+        {/* Says out loud what the card is already doing. Someone deciding
+            whether to send a Hi is deciding how much of themselves it costs. */}
+        {isStranger && (
+          <Text style={styles.sheetFootnote}>
+            They see the same shared interests — and nothing else about you.
+          </Text>
+        )}
       </Animated.View>
     </>
   );
@@ -929,6 +1352,17 @@ export default function MapScreen() {
   /** Last region the map settled on, so recentering can keep the user's zoom
    * instead of snapping back to the default every time they move. */
   const regionRef          = useRef<Region | null>(null);
+  /** Viewport, for turning the marker fan's pixel thresholds into map metres.
+   *
+   * State rather than a ref because the fan is rendered from it — but coarse
+   * state: `zoomDelta` only moves when the zoom changes materially, so panning
+   * (which never changes latitudeDelta) re-renders nothing, and a pinch
+   * re-rasterizes the markers once instead of continuously. */
+  const [zoomDelta, setZoomDelta] = useState(() => zoomBucket(0.012));
+  const [mapH, setMapH] = useState(0);
+  /** Debounce for the above — see onRegionChangeComplete. */
+  const zoomSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current); }, []);
   /** The position the camera was last sent to, so a fix that rounds to the
    * same approximate point doesn't re-issue an animation. */
   const centeredOnRef      = useRef<Coordinates | null>(null);
@@ -1009,6 +1443,52 @@ export default function MapScreen() {
   // Speed trails. Fed from the same list the markers render, so a person who
   // disappears from `visibleNearby` takes their trail history with them.
   const motionTrails = useMotionTrails(visibleNearby);
+
+  /** Every live sound zone, so the fan can be held inside the circles people
+   *  are audibly standing in. */
+  const zoneAreas = useMemo<ZoneArea[]>(() => {
+    const areas: ZoneArea[] = [];
+    if (displayCoords && selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0) {
+      areas.push({ ...displayCoords, radius: selfZone.zone_radius });
+    }
+    for (const u of visibleNearby) {
+      if (!u.zone_active || !(u.zone_radius ?? 0) || u.latitude == null || u.longitude == null) continue;
+      areas.push({ latitude: u.latitude, longitude: u.longitude, radius: u.zone_radius! });
+    }
+    return areas;
+  }, [visibleNearby, displayCoords, selfZone]);
+
+  /**
+   * Where every marker is drawn, and which piles became a count instead.
+   *
+   * The owner is in the input so a pile containing them is recognised as theirs:
+   * they stay put and the pile opens up around them. Before the viewport has
+   * been measured this is empty, and everyone falls back to their true point —
+   * which is exactly the old behaviour, so the first frame is never wrong.
+   */
+  const markerLayout = useMemo<MarkerLayout>(() => {
+    // latitudeDelta spans the viewport's height, so this is metres per pixel.
+    const metersPerPx = mapH > 0 ? (zoomDelta * M_PER_DEG) / mapH : 0;
+    if (metersPerPx <= 0) return { placed: new Map(), clusters: [] };
+
+    const points: FanInput[] = [];
+    if (displayCoords) {
+      points.push({ key: SELF_KEY, latitude: displayCoords.latitude, longitude: displayCoords.longitude });
+    }
+    for (const u of visibleNearby) {
+      if (u.latitude == null || u.longitude == null) continue;
+      points.push({ key: `u-${u.id}`, latitude: u.latitude, longitude: u.longitude });
+    }
+    return layoutMarkers(points, metersPerPx, zoneAreas);
+  }, [visibleNearby, displayCoords, zoomDelta, mapH, zoneAreas]);
+
+  /** Marker position for someone, falling back to their true point before the
+   *  viewport is measured on the first frame. */
+  const posFor = useCallback(
+    (key: string, fallback: GeoPoint): GeoPoint =>
+      markerLayout.placed.get(key)?.position ?? fallback,
+    [markerLayout],
+  );
 
   // Nearby people used to generate alerts from here — "@miras is nearby ·
   // 180m away", "@aisha shares your interests". They no longer do: being
@@ -1430,6 +1910,29 @@ export default function MapScreen() {
     );
   }, []);
 
+  /**
+   * Tapping a headcount goes in far enough to break the pile up.
+   *
+   * A third of the current span per tap, so a badge over a dense spot can be
+   * opened by tapping it again rather than by guessing a zoom level. Following is
+   * released first: the camera is being sent where the user chose, and the next
+   * position fix would otherwise haul it straight back.
+   */
+  const zoomToCluster = useCallback(
+    (center: { latitude: number; longitude: number }) => {
+      const map = mapRef.current;
+      if (!map) return;
+      stopFollowing('tap');
+      const current = regionRef.current;
+      const delta = Math.max(0.0015, (current?.latitudeDelta ?? zoomDelta) / 3);
+      map.animateToRegion(
+        { ...center, latitudeDelta: delta, longitudeDelta: delta },
+        reduceMotion ? 0 : RECENTER_MS,
+      );
+    },
+    [reduceMotion, stopFollowing, zoomDelta],
+  );
+
   // Track each new fix while following. The guard matters in approximate mode,
   // where consecutive fixes usually round to the same point and would
   // otherwise re-animate the camera to where it already is.
@@ -1582,7 +2085,10 @@ export default function MapScreen() {
       ) : (
         <MapView
           ref={mapRef}
-          onLayout={() => console.log('[Map] step 5: map rendering')}
+          onLayout={(e) => {
+            console.log('[Map] step 5: map rendering');
+            setMapH(e.nativeEvent.layout.height);
+          }}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
           customMapStyle={DARK_MAP_STYLE}
@@ -1596,7 +2102,19 @@ export default function MapScreen() {
           // wherever they just moved to. Pinch-zoom is not a pan, so zooming
           // in on yourself keeps following, the way it does in Google Maps.
           onPanDrag={() => stopFollowing('gesture')}
-          onRegionChangeComplete={(r) => { regionRef.current = r; }}
+          onRegionChangeComplete={(r) => {
+            regionRef.current = r;
+            // Android fires this repeatedly through a continuous pinch, and each
+            // pass re-renders every marker on the map. So the layout's zoom is
+            // updated once the camera has been still for a moment, and only when
+            // it lands in a different bucket — a pinch costs one re-render at the
+            // end instead of one per frame, and a pan costs none.
+            if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current);
+            zoomSettleRef.current = setTimeout(() => {
+              const next = zoomBucket(r.latitudeDelta);
+              setZoomDelta((prev) => (next === prev ? prev : next));
+            }, ZOOM_SETTLE_MS);
+          }}
           onLongPress={() => {
             if (!coords) return;
             setCreateStoryCoord(coords);
@@ -1656,27 +2174,61 @@ export default function MapScreen() {
             <MotionTrail key={`trail-${id}`} path={path} reduceMotion={reduceMotion} />
           ))}
 
+          {/* Leader lines back to the spot a moved marker really occupies.
+              Without them the fan would quietly claim that people sitting at
+              one table are tens of metres apart. Drawn under the markers. */}
+          {[
+            ...Array.from(markerLayout.placed.entries()).map(([key, fan]) => ({ key, ...fan })),
+            ...markerLayout.clusters,
+          ].map((item) =>
+            // Both ends validated: a single bad coordinate in a Polyline is
+            // enough to bring the native map down.
+            item.anchor && isDrawable(item.anchor) && isDrawable(item.position) ? (
+              <Polyline
+                key={`leader-${item.key}`}
+                coordinates={[item.anchor, item.position]}
+                strokeColor="rgba(244,244,246,0.28)"
+                strokeWidth={1}
+                lineDashPattern={[3, 3]}
+                zIndex={2}
+              />
+            ) : null,
+          )}
+
           {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
+            // Absent from `placed` means this person was folded into a headcount
+            // badge. Drawing them as well would put two of them on the map.
+            const layout = markerLayout.placed.get(`u-${user.id}`);
+            if (!layout || !isDrawable(layout.position)) return null;
+
             const uid = Number(user.id);
             const isFriend = friendIds.has(uid);
-            const color = isFriend ? COLOR_FRIEND : connectionIds.has(uid) ? COLOR_CONNECTED : COLOR_STRANGER;
-            // Only friends reveal their avatar on the map; everyone else stays a dot.
-            return isFriend ? (
+            const isConnected = connectionIds.has(uid);
+            const color = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_STRANGER;
+            // Anyone you have a name for gets a face and a name plate — blue
+            // ring for a friend, orange for a connection. Strangers stay a lit
+            // point: no photo, no name, nothing to screenshot, until the Hi is
+            // mutual and they cross into the row above.
+            return isFriend || isConnected ? (
               <AvatarMarker
                 key={user.id}
-                coordinate={{ latitude: user.latitude, longitude: user.longitude }}
+                coordinate={layout.position}
                 uri={user.profile_picture}
                 username={user.username}
                 ringColor={color}
                 presence={user.presence}
                 motion={user.motion_class}
+                caption={user.username}
+                // A connection has no zone access, so tagging one would be
+                // advertising a door they cannot open.
+                captionTag={isFriend && user.zone_active ? 'zone' : undefined}
                 zIndex={Z_FRIEND}
                 onPress={() => openSheet(user)}
               />
             ) : (
               <DotMarker
                 key={user.id}
-                coordinate={{ latitude: user.latitude, longitude: user.longitude }}
+                coordinate={layout.position}
                 color={color}
                 presence={user.presence}
                 zIndex={Z_STRANGER}
@@ -1698,8 +2250,23 @@ export default function MapScreen() {
             />
           )}
 
+          {/* Piles that could not be fanned apart without moving someone too far
+              — which is what zooming out does to a pixel-sized fan. A number
+              instead, and a tap to go in and see who. */}
+          {markerLayout.clusters.filter((c) => isDrawable(c.position)).map((cluster) => (
+            <ClusterMarker
+              key={cluster.key}
+              coordinate={cluster.position}
+              count={cluster.count}
+              onPress={() => zoomToCluster(cluster.anchor ?? cluster.position)}
+            />
+          ))}
+
+          {/* Never moved, and never folded into a count. When someone stands
+              where you stand, they are the one who gets fanned aside — so this
+              marker, and the zone centred on it, stay exactly where you are. */}
           <SelfMarker
-            coordinate={displayCoords}
+            coordinate={posFor(SELF_KEY, displayCoords)}
             uri={selfProfile?.profile_picture}
             username={selfProfile?.username ?? ''}
           />
@@ -1858,34 +2425,47 @@ const styles = StyleSheet.create({
   emptyLink: { paddingVertical: 12, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
   emptyLinkText: { fontFamily: fonts.body, fontWeight: '600', fontSize: 14, color: colors.teal },
 
-  // ── Non-friend marker: relationship-colored dot in a soft halo ──
+  // ── Stranger marker: a lit point, no pin and no card ──
   //
-  // Sized against the default viewport, not against how it looks in isolation.
-  // At latitudeDelta 0.012 the map shows roughly 2 m per pixel, so a person
-  // standing 30 m away lands ~15 px from you — the old 14 px dot was both easy
-  // to miss and small enough to disappear under a neighbouring marker.
+  // The box stays DOT_HALO wide whatever the core does — it is also the touch
+  // target, and at latitudeDelta 0.012 (~2 m per pixel) a 30 px box is about
+  // the smallest thing a thumb can reliably hit among neighbours.
   dotWrap: {
     width: DOT_HALO,
     height: DOT_HALO,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  /** Widens the target without inflating the dot itself: the marker keeps
-   * reading as a point, but one with enough presence to catch the eye against
-   * map texture. */
-  dotHalo: {
+  /** Outer bloom: wide and very faint, so a cluster of matched strangers reads
+   *  as a lit area before you can pick out the individual points. */
+  dotBloom: {
     position: 'absolute',
     width: DOT_HALO,
     height: DOT_HALO,
     borderRadius: DOT_HALO / 2,
-    opacity: 0.22,
+    opacity: 0.14,
+  },
+  /** Inner glow: tight enough to belong to the core rather than to the map. */
+  dotGlow: {
+    position: 'absolute',
+    width: DOT_CORE + 8,
+    height: DOT_CORE + 8,
+    borderRadius: (DOT_CORE + 8) / 2,
+    opacity: 0.3,
   },
   userDot: {
     width: DOT_CORE,
     height: DOT_CORE,
     borderRadius: DOT_CORE / 2,
-    borderWidth: 2.5,
+    // A thin dark rim, not a thick one: the point has to stay a point when it
+    // lands on a pale road label.
+    borderWidth: 1.5,
     borderColor: colors.bg,
+    // iOS only; Android rasterizes the marker and drops it, which is why the
+    // bloom above does the same job structurally.
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 0 },
   },
 
   /** Presence badge, pinned to the dot's lower-right so it reads as attached
@@ -1905,11 +2485,70 @@ const styles = StyleSheet.create({
   },
 
   // ── Avatar markers: photo/initial core, bg gap, relationship-colored ring ──
+  avatarMarkerWrap: { alignItems: 'center' },
   avatarMarkerRing: {
     borderWidth: 2,
     backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // ── Cluster badge: a pile too tight to fan, shown as a headcount ──
+  clusterWrap: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** Reads as "several people" before the number is even legible. */
+  clusterBloom: {
+    position: 'absolute',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.teal,
+    opacity: 0.14,
+  },
+  clusterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.bg,
+    borderWidth: 1.5,
+    borderColor: colors.teal,
+  },
+  clusterCount: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.t1,
+  },
+
+  /** Name plate under the ring. Dark chip rather than bare text: over a light
+   *  road or a water label, plain white type is unreadable. */
+  markerCaption: {
+    height: CAPTION_H,
+    marginTop: CAPTION_GAP,
+    maxWidth: 108,
+    paddingHorizontal: 7,
+    justifyContent: 'center',
+    borderRadius: radius.s,
+    backgroundColor: 'rgba(10,10,11,0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  markerCaptionText: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.t1,
+  },
+  markerCaptionTag: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
   },
   avatarMarkerFallback: {
     alignItems: 'center',
@@ -2070,7 +2709,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: SHEET_H,
+    // Sizes to its content — a stranger card is four short rows and used to be
+    // padded out to 400 px of empty surface. SHEET_H is only the distance it
+    // travels to get off screen, which stays larger than any card it holds.
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
@@ -2088,45 +2729,77 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
-  sheetHero: {
+  // Identity row: avatar or point, name + meta, relationship pill.
+  sheetHead: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 20,
+    gap: 12,
+    marginBottom: 14,
   },
+  sheetHeadBody: { flex: 1, gap: 3 },
   sheetName: {
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 17,
     color: colors.t1,
   },
-  sheetMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  relBadge: {
-    backgroundColor: colors.surface2,
-    borderRadius: radius.s,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  relBadgeText: {
+  sheetMeta: {
     fontFamily: fonts.body,
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 13,
     color: colors.t2,
   },
-  closeBtn: {
-    position: 'absolute',
-    top: 14,
-    right: 20,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.surface2,
+
+  /** A stranger's "avatar": the map marker at card scale. Nothing is being
+   *  withheld behind a placeholder silhouette — this is all there is. */
+  strangerAvatar: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 10,
+  },
+  strangerAvatarGlow: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.teal,
+    opacity: 0.16,
+  },
+  strangerAvatarCore: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.teal,
+  },
+
+  /** Outlined, not filled: the relationship is a label on this person, and a
+   *  filled chip in the same colour would read as a button. */
+  relPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+  },
+  relPillText: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  statusMotion: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.teal,
   },
   interestsSection: { marginBottom: 20 },
   sectionLabel: {
@@ -2153,9 +2826,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  actions: { flexDirection: 'row', gap: 10 },
-  actionBtn: { flex: 1 },
+  // Action row: wide primary, narrower secondary, square dismiss.
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  actionPrimary: { flex: 1.5 },
+  actionSecondary: { flex: 1 },
+  actionDismiss: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   addFriendRow: { marginBottom: 10 },
+  sheetFootnote: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.t3,
+    textAlign: 'center',
+    marginTop: 12,
+    paddingHorizontal: 8,
+  },
 
   // ─── Story marker: surface card + tail + reaction pill (no gold, no shadows) ───
   storyCard: {

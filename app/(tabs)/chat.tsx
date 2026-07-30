@@ -153,7 +153,17 @@ function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: U
 }
 
 // ─── Club card ────────────────────────────────────────────────────────────────
-function ClubCard({ club, onPress }: { club: Club; onPress: () => void }) {
+function ClubCard({
+  club,
+  onPress,
+  onJoin,
+  joining,
+}: {
+  club: Club;
+  onPress: () => void;
+  onJoin?: () => void;
+  joining?: boolean;
+}) {
   return (
     <Pressable style={styles.clubCard} onPress={onPress}>
       {club.emblem ? (
@@ -169,7 +179,7 @@ function ClubCard({ club, onPress }: { club: Club; onPress: () => void }) {
           {club.role && (
             <View style={styles.clubRoleBadge}>
               <Text style={styles.clubRoleText}>
-                {club.role === 'president' ? '👑 President' : club.role === 'vice' ? '⭐ Vice' : 'Member'}
+                {club.role === 'owner' ? '👑 Owner' : 'Member'}
               </Text>
             </View>
           )}
@@ -182,6 +192,19 @@ function ClubCard({ club, onPress }: { club: Club; onPress: () => void }) {
           <Text style={styles.clubMemberCount}>{club.member_count} members</Text>
         </View>
       </View>
+      {onJoin !== undefined && (
+        <Pressable
+          style={[styles.clubJoinBtn, joining && styles.clubJoinBtnBusy]}
+          onPress={onJoin}
+          disabled={joining}
+        >
+          {joining ? (
+            <ActivityIndicator size="small" color={colors.bg} />
+          ) : (
+            <Text style={styles.clubJoinBtnText}>Join</Text>
+          )}
+        </Pressable>
+      )}
     </Pressable>
   );
 }
@@ -205,6 +228,7 @@ export default function ChatScreen() {
   const [myClubs, setMyClubs] = useState<Club[]>([]);
   const [discoverClubs, setDiscoverClubs] = useState<Club[]>([]);
   const [loadingClubs, setLoadingClubs] = useState(false);
+  const [joiningClubId, setJoiningClubId] = useState<number | null>(null);
 
   const fetchUnreadBreakdown = useCallback(async () => {
     try {
@@ -276,8 +300,8 @@ export default function ChatScreen() {
     setLoadingClubs(true);
     try {
       const [myRes, discoverRes] = await Promise.allSettled([
-        clubsApi.list(),
-        clubsApi.discover(),
+        clubsApi.myList(),   // GET /api/clubs/?member=true  — only joined clubs
+        clubsApi.list(),     // GET /api/clubs/              — only unjoined clubs
       ]);
       if (myRes.status === 'fulfilled') setMyClubs(myRes.value.data);
       if (discoverRes.status === 'fulfilled') setDiscoverClubs(discoverRes.value.data);
@@ -285,6 +309,18 @@ export default function ChatScreen() {
       setLoadingClubs(false);
     }
   }, []);
+
+  async function handleJoinFromCard(clubId: number) {
+    setJoiningClubId(clubId);
+    try {
+      await clubsApi.join(clubId);
+      await fetchClubs();
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not join club.');
+    } finally {
+      setJoiningClubId(null);
+    }
+  }
 
   useEffect(() => {
     if (activeTab === 'clubs') fetchClubs();
@@ -580,6 +616,8 @@ export default function ChatScreen() {
                     key={club.id}
                     club={club}
                     onPress={() => router.push({ pathname: '/clubs/[id]', params: { id: club.id } } as any)}
+                    onJoin={() => handleJoinFromCard(club.id)}
+                    joining={joiningClubId === club.id}
                   />
                 ))
               ) : (
@@ -793,6 +831,17 @@ const styles = StyleSheet.create({
   clubInterest: { fontFamily: fonts.body, fontSize: 12, color: colors.t2 },
   clubMemberRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   clubMemberCount: { fontFamily: fonts.body, fontSize: 12, color: colors.t3 },
+
+  clubJoinBtn: {
+    backgroundColor: colors.teal,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    minWidth: 56,
+    alignItems: 'center',
+  },
+  clubJoinBtnBusy: { opacity: 0.6 },
+  clubJoinBtnText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '700', color: colors.bg },
 
   clubsEmptyText: {
     fontFamily: fonts.body,

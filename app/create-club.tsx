@@ -40,7 +40,15 @@ export default function CreateClubScreen() {
   const [selectedInterest, setSelectedInterest] = useState<Interest | null>(null);
   const [showInterestPicker, setShowInterestPicker] = useState(false);
   const [loadingInterests, setLoadingInterests] = useState(false);
+  const [interestQuery, setInterestQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // The catalog is hundreds of interests long. Same filter as the two interest
+  // screens, so searching means the same thing everywhere it appears.
+  const normalizedQuery = interestQuery.trim().toLowerCase();
+  const visibleInterests = normalizedQuery
+    ? interests.filter((i) => i.name.toLowerCase().includes(normalizedQuery))
+    : interests;
 
   async function openInterestPicker() {
     setShowInterestPicker(true);
@@ -192,15 +200,45 @@ export default function CreateClubScreen() {
         <View style={styles.modalSheet}>
           <View style={styles.modalHandle} />
           <Text style={styles.modalTitle}>Pick an Interest</Text>
+
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={18} color={colors.t3} />
+            <TextInput
+              style={styles.searchInput}
+              value={interestQuery}
+              onChangeText={setInterestQuery}
+              placeholder="Search interests…"
+              placeholderTextColor={colors.t3}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              accessibilityLabel="Search interests"
+            />
+            {interestQuery.length > 0 && (
+              <Pressable
+                onPress={() => setInterestQuery('')}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
+                <Ionicons name="close" size={16} color={colors.t3} />
+              </Pressable>
+            )}
+          </View>
+
           {loadingInterests ? (
             <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
           ) : (
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {interests.map((interest) => (
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {visibleInterests.map((interest) => (
                 <Pressable
                   key={interest.id}
                   style={[styles.interestRow, selectedInterest?.id === interest.id && styles.interestRowActive]}
-                  onPress={() => { setSelectedInterest(interest); setShowInterestPicker(false); }}
+                  onPress={() => {
+                    setSelectedInterest(interest);
+                    setShowInterestPicker(false);
+                    setInterestQuery('');
+                  }}
                 >
                   <Text style={styles.interestIcon}>{interest.icon}</Text>
                   <Text style={[styles.interestName, selectedInterest?.id === interest.id && styles.interestNameActive]}>
@@ -211,6 +249,9 @@ export default function CreateClubScreen() {
                   )}
                 </Pressable>
               ))}
+              {visibleInterests.length === 0 && (
+                <Text style={styles.interestEmpty}>Nothing matches “{interestQuery.trim()}”.</Text>
+              )}
             </ScrollView>
           )}
         </View>
@@ -336,8 +377,35 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 44,
+    paddingHorizontal: 14,
+    marginBottom: 12,
+    backgroundColor: colors.bg,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+    paddingVertical: 0,
+  },
+
   interestRowActive: { opacity: 1 },
   interestIcon: { fontSize: 20 },
+  interestEmpty: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t3,
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
   interestName: { flex: 1, fontFamily: fonts.body, fontSize: 15, color: colors.t2 },
   interestNameActive: { color: colors.t1, fontWeight: '600' },
 });

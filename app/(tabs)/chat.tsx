@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -19,8 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Speedometer } from '@/components/Speedometer';
 import { DraggableTabs, type DraggableTabKey } from '@/components/DraggableTabs';
 import { Avatar } from '@/components/ui/Avatar';
-import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { IconClose, IconSearch } from '@/components/ui/icons';
 import { api } from '@/services/api';
 import { blockUser, refreshBlocked, useBlockedUsers } from '@/services/blocked';
 import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
@@ -39,7 +40,7 @@ import {
 import { NotifRow, RequestRow } from '@/components/alerts/AlertRow';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { clubsApi, type Club } from '@/services/clubs';
-import { colors, fonts } from '@/constants/theme';
+import { colors, fonts, radius } from '@/constants/theme';
 import type { Presence } from '@/services/presence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -99,6 +100,15 @@ interface UserCardProps {
   onMenu: (user: UserSummary, type: 'connected' | 'friend') => void;
 }
 
+/**
+ * Every chat row is the same card, whoever it holds.
+ *
+ * A connection's card used to carry a full-width "Add Friend" button inside it,
+ * which made it a head taller than a friend's — so a list of both read as two
+ * kinds of thing, and the ragged heights were the first thing you saw. Adding a
+ * friend is now the compact action beside the menu: same row, same height, and
+ * the card is still a chat you tap to open.
+ */
 function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: UserCardProps) {
   const ringColor = type === 'connected' ? colors.orange : colors.blue;
   const hasMessage = !!user.last_message;
@@ -128,25 +138,40 @@ function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: U
               </View>
             )}
           </View>
-          {type === 'connected' && onAddFriend && (
-            <View style={styles.cardActions}>
-              <Button
-                label={requestSent ? 'Request Sent ✓' : 'Add Friend'}
-                variant={requestSent ? 'secondary' : 'ghost'}
-                size="sm"
-                disabled={requestSent}
-                onPress={() => { if (!requestSent) onAddFriend(user); }}
-              />
-            </View>
-          )}
         </View>
-        <Pressable
-          style={styles.menuBtn}
-          onPress={() => onMenu(user, type)}
-          hitSlop={10}
-        >
-          <Ionicons name="ellipsis-vertical" size={16} color={colors.t3} />
-        </Pressable>
+
+        <View style={styles.cardTail}>
+          {type === 'connected' && onAddFriend && (
+            <Pressable
+              style={[styles.addFriendBtn, requestSent && styles.addFriendBtnSent]}
+              onPress={() => { if (!requestSent) onAddFriend(user); }}
+              disabled={requestSent}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={
+                requestSent
+                  ? `Friend request sent to ${user.username}`
+                  : `Add ${user.username} as a friend`
+              }
+              accessibilityState={{ disabled: requestSent }}
+            >
+              <Ionicons
+                name={requestSent ? 'checkmark' : 'person-add-outline'}
+                size={15}
+                color={requestSent ? colors.teal : colors.t2}
+              />
+            </Pressable>
+          )}
+          <Pressable
+            style={styles.menuBtn}
+            onPress={() => onMenu(user, type)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={`More options for ${user.username}`}
+          >
+            <Ionicons name="ellipsis-vertical" size={16} color={colors.t3} />
+          </Pressable>
+        </View>
       </View>
     </Card>
   );
@@ -186,6 +211,93 @@ function ClubCard({ club, onPress }: { club: Club; onPress: () => void }) {
   );
 }
 
+// ─── Search ───────────────────────────────────────────────────────────────────
+// One field over everything this screen holds: the people you can message —
+// friends and connections — and the clubs, yours and the ones you could join.
+// Three tabs meant three places to look for a name you already knew, and the
+// Clubs tab in particular is two unbounded lists you were expected to scroll.
+//
+// Nothing new is fetched. Every list this searches is already in memory and
+// already polling, so a query is a filter, not a request — and it can't show
+// you anyone the screen wasn't allowed to show you in the first place.
+
+type ChatUser = UserSummary & { chatType: 'connected' | 'friend' };
+
+type SearchRow =
+  | { kind: 'label'; key: string; label: string }
+  | { kind: 'person'; key: string; user: ChatUser }
+  | { kind: 'club'; key: string; club: Club };
+
+function matches(haystack: string | undefined, needle: string): boolean {
+  return !!haystack && haystack.toLowerCase().includes(needle);
+}
+
+function SearchField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <View style={styles.searchWrap}>
+      <IconSearch size={16} color={colors.t3} />
+      <TextInput
+        style={styles.searchInput}
+        value={value}
+        onChangeText={onChange}
+        placeholder="Search people and clubs"
+        placeholderTextColor={colors.t3}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
+        accessibilityLabel="Search your chats and clubs"
+      />
+      {value.length > 0 && (
+        <Pressable
+          onPress={() => onChange('')}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Clear search"
+        >
+          <IconClose size={16} color={colors.t3} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function SearchPersonRow({ user, onPress }: { user: ChatUser; onPress: () => void }) {
+  const isFriend = user.chatType === 'friend';
+  return (
+    <Card onPress={onPress}>
+      <View style={styles.searchRow}>
+        <Avatar
+          uri={user.profile_picture}
+          name={user.username}
+          size="md"
+          ringColor={isFriend ? colors.blue : colors.orange}
+          presence={user.presence}
+        />
+        <View style={styles.searchRowBody}>
+          <Text style={styles.cardName} numberOfLines={1}>{user.username}</Text>
+          <Text style={styles.searchRowMeta} numberOfLines={1}>
+            {isFriend ? 'Friend' : 'Connected'}
+            {user.last_message ? ` · ${storyReplyPreview(user.last_message)}` : ''}
+          </Text>
+        </View>
+        {(user.unread_count ?? 0) > 0 && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadText}>
+              {(user.unread_count ?? 0) > 9 ? '9+' : user.unread_count}
+            </Text>
+          </View>
+        )}
+      </View>
+    </Card>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ChatScreen() {
   const router = useRouter();
@@ -194,6 +306,7 @@ export default function ChatScreen() {
 
   const [activeTab, setActiveTab] = useState<Tab>('alerts');
   const [tabOrder, setTabOrder] = useState<DraggableTabKey[]>(['alerts', 'chats', 'clubs']);
+  const [query, setQuery] = useState('');
   const [friendList, setFriendList] = useState<FriendList>({ connections: [], friends: [] });
   const [alerts, setAlerts] = useState<AlertsData>(EMPTY_ALERTS);
   useBlockedUsers();
@@ -424,15 +537,49 @@ export default function ChatScreen() {
     router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } } as any);
   }
 
-  const chatUsers = [
-    ...connections.map((u) => ({ ...u, chatType: 'connected' as const })),
+  // Friends first, then connections — the same tiering the nearby list uses, so
+  // "who am I closest to" reads the same way everywhere. Recency only sorts
+  // within a tier, so an active connection can't push your friends down the
+  // list.
+  const chatUsers: ChatUser[] = [
     ...friendList.friends.map((u) => ({ ...u, chatType: 'friend' as const })),
+    ...connections.map((u) => ({ ...u, chatType: 'connected' as const })),
   ].sort((a, b) => {
+    if (a.chatType !== b.chatType) return a.chatType === 'friend' ? -1 : 1;
     if (a.last_message_at && b.last_message_at) return b.last_message_at.localeCompare(a.last_message_at);
     if (a.last_message_at) return -1;
     if (b.last_message_at) return 1;
     return 0;
   });
+
+  // ── Search across people and clubs ─────────────────────────────────
+  const trimmed = query.trim();
+  const searching = trimmed.length > 0;
+
+  const searchRows: SearchRow[] = useMemo(() => {
+    const needle = trimmed.toLowerCase();
+    if (!needle) return [];
+
+    const people = chatUsers.filter((u) => matches(u.username, needle));
+
+    // A club can be in both lists across a refresh; the one you are in wins,
+    // because its row carries your role.
+    const clubById = new Map<number, Club>();
+    for (const club of [...discoverClubs, ...myClubs]) clubById.set(club.id, club);
+    const clubs = [...clubById.values()].filter(
+      (c) => matches(c.name, needle) || matches(c.interest?.name, needle),
+    );
+
+    return [
+      ...(people.length ? [{ kind: 'label' as const, key: 'l-people', label: 'PEOPLE' }] : []),
+      ...people.map((user) => ({ kind: 'person' as const, key: `p-${user.id}`, user })),
+      ...(clubs.length ? [{ kind: 'label' as const, key: 'l-clubs', label: 'CLUBS' }] : []),
+      ...clubs.map((club) => ({ kind: 'club' as const, key: `c-${club.id}`, club })),
+    ];
+    // chatUsers is rebuilt every render from friendList; depending on the two
+    // lists it comes from keeps this from recomputing on unrelated state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmed, friendList, myClubs, discoverClubs]);
 
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'alerts', label: 'Alerts', count: unreadCount },
@@ -452,21 +599,64 @@ export default function ChatScreen() {
   return (
     <View style={[styles.container, { paddingTop: top }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Messages</Text>
+        <Text style={styles.headerTitle}>Chat</Text>
       </View>
 
-      <DraggableTabs
-        tabs={TABS}
-        activeTab={activeTab}
-        order={tabOrder}
-        onTabPress={(key) => setActiveTab(key)}
-        onOrderChange={setTabOrder}
-      />
+      <SearchField value={query} onChange={setQuery} />
+
+      {/* The tabs are what you are searching *instead of*, so they step aside
+          while a query is live rather than sitting above results that belong
+          to none of them. */}
+      {!searching && (
+        <DraggableTabs
+          tabs={TABS}
+          activeTab={activeTab}
+          order={tabOrder}
+          onTabPress={(key) => setActiveTab(key)}
+          onOrderChange={setTabOrder}
+        />
+      )}
 
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={colors.teal} size="large" />
         </View>
+      ) : searching ? (
+        <FlatList
+          data={searchRows}
+          keyExtractor={(item) => item.key}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          renderItem={({ item }) => {
+            if (item.kind === 'label') {
+              return <Text style={styles.searchSectionLabel}>{item.label}</Text>;
+            }
+            if (item.kind === 'person') {
+              return (
+                <SearchPersonRow
+                  user={item.user}
+                  onPress={() => handleMessage(item.user)}
+                />
+              );
+            }
+            return (
+              <ClubCard
+                club={item.club}
+                onPress={() =>
+                  router.push({ pathname: '/clubs/[id]', params: { id: item.club.id } } as any)
+                }
+              />
+            );
+          }}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <EmptyState
+              message={`Nothing matches “${trimmed}”\nThis searches your friends, connections and clubs`}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+          {...scrollProps}
+        />
       ) : activeTab === 'alerts' ? (
         <FlatList
           data={alertRows}
@@ -608,6 +798,47 @@ const styles = StyleSheet.create({
     color: colors.t1,
   },
 
+  // Search
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    height: 44,
+    backgroundColor: colors.surface,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+    // Android pads text inputs by default, which pushes the text off centre
+    // inside a fixed-height row.
+    paddingVertical: 0,
+  },
+  searchSectionLabel: {
+    fontFamily: fonts.body,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    color: colors.t3,
+    textTransform: 'uppercase',
+    marginTop: 6,
+    marginBottom: 2,
+  },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  searchRowBody: { flex: 1, gap: 3 },
+  searchRowMeta: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+  },
+
   // List
   list: { padding: 16, paddingBottom: 230, gap: 10 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -652,7 +883,7 @@ const styles = StyleSheet.create({
   },
 
   // Card internals
-  cardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   cardBody: { flex: 1, gap: 3 },
   cardNameRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cardName: {
@@ -676,7 +907,21 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   cardSubEmpty: { color: colors.t3, fontStyle: 'italic' },
-  cardActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
+
+  // Trailing actions. Both are icon-sized, so a connection's row is exactly as
+  // tall as a friend's.
+  cardTail: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  addFriendBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  addFriendBtnSent: { backgroundColor: colors.tealTint, borderColor: colors.tealLine },
 
   // Unread badge
   unreadBadge: {
@@ -696,7 +941,7 @@ const styles = StyleSheet.create({
   },
 
   // Three-dots menu
-  menuBtn: { alignSelf: 'flex-start', paddingLeft: 8, paddingTop: 2 },
+  menuBtn: { paddingHorizontal: 4, paddingVertical: 6 },
 
   // Blocked dim
   cardBlocked: { opacity: 0.6 },

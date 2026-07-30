@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -28,6 +28,13 @@ import { colors, fonts, type as typography } from '@/constants/theme';
 // Dots and avatar pins on a map are unreachable with VoiceOver or TalkBack —
 // there is nothing to focus and no reading order. This screen carries the same
 // data as a linear, labelled list, and is reachable from the map header.
+//
+// "The same data" is a promise in both directions. The map draws a stranger as
+// a nameless point of light: no username, no face, a distance band rather than
+// a reading, and nothing else about them until a mutual Hi. This list used to
+// print the name, the avatar's initials, the exact metres and a link to their
+// full profile for exactly those people — the anonymous marker and the list of
+// who it is, one tap apart. Anyone below `identified` is anonymous here too.
 
 interface NearbyUser {
   id: number;
@@ -43,6 +50,35 @@ interface NearbyUser {
   motion_class?: MotionClass;
 }
 
+/** Whose name and face are ours to show. Matches the map's rule exactly: a Hi
+ *  in one direction is not an introduction, so `hi_sent` stays anonymous. */
+function identified(user: NearbyUser): boolean {
+  return user.relationship === 'friend' || user.relationship === 'connected';
+}
+
+/**
+ * Reading order: friends, then connections, then everyone still anonymous.
+ *
+ * The server returns whoever happens to be in range, in no order that means
+ * anything to the reader — so a friend two streets away could sit below eight
+ * unnamed dots. Closeness to *you* is the sort, and distance only breaks ties
+ * inside a tier.
+ */
+const REL_RANK: Record<Relationship, number> = {
+  friend:      0,
+  connected:   1,
+  hi_received: 2,
+  hi_sent:     3,
+  stranger:    4,
+};
+
+function byRelationshipThenDistance(a: NearbyUser, b: NearbyUser): number {
+  const rank = (REL_RANK[a.relationship] ?? 9) - (REL_RANK[b.relationship] ?? 9);
+  if (rank !== 0) return rank;
+  // Unknown distance sorts last rather than first, where Infinity puts it.
+  return (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity);
+}
+
 function distanceText(user: NearbyUser): string {
   if (user.distance_km == null) return 'Distance unknown';
   const metres = Math.round(user.distance_km * 1000);
@@ -51,8 +87,35 @@ function distanceText(user: NearbyUser): string {
   return `${rough ? 'About ' : ''}${user.distance_km.toFixed(1)} km away`;
 }
 
-/** One sentence containing everything the map conveys visually. */
+/** The map's stranger reading: near enough to matter, not a fix on a person. */
+function distanceBand(user: NearbyUser): string {
+  if (user.distance_km == null) return 'Somewhere in range';
+  const m = user.distance_km * 1000;
+  const band = m < 150 ? 'Close' : m < 400 ? 'Nearby' : 'In range';
+  const approx = m < 1000
+    ? `about ${Math.max(10, Math.round(m / 10) * 10)} m`
+    : `about ${(m / 1000).toFixed(1)} km`;
+  return `${band} · ${approx}`;
+}
+
+/** One sentence containing everything the map conveys visually — and, for
+ *  someone anonymous, only what the map conveys about them. */
 function summarise(user: NearbyUser): string {
+  const shared = user.shared_interests ?? [];
+  const sharedLine = shared.length
+    ? `${shared.length} shared interest${shared.length === 1 ? '' : 's'}: ${shared.join(', ')}`
+    : null;
+
+  if (!identified(user)) {
+    return [
+      'Someone nearby',
+      relationshipLabel(user.relationship),
+      distanceBand(user),
+      sharedLine,
+      'Anonymous until you both say Hi',
+    ].filter(Boolean).join('. ');
+  }
+
   const parts = [user.username, relationshipLabel(user.relationship), distanceText(user)];
   // Both omitted when the API omitted them. Presence is stated in words here
   // because the dot alone is no use to a screen reader, and motion because the
@@ -62,10 +125,7 @@ function summarise(user: NearbyUser): string {
   if (presence) parts.push(presence);
   const motion = motionLabel(user.motion_class);
   if (motion) parts.push(motion.charAt(0).toUpperCase() + motion.slice(1));
-  const shared = user.shared_interests ?? [];
-  if (shared.length) {
-    parts.push(`${shared.length} shared interest${shared.length === 1 ? '' : 's'}: ${shared.join(', ')}`);
-  }
+  if (sharedLine) parts.push(sharedLine);
   if (user.is_private) parts.push('Private account');
   return parts.join('. ');
 }
@@ -101,6 +161,13 @@ export default function NearbyListScreen() {
     setRefreshing(false);
   }, [load]);
 
+  // Sorted here rather than in `load`, so a refetch that arrives in a different
+  // server order doesn't reshuffle the list under the reader's finger.
+  const ordered = useMemo(
+    () => (users ? [...users].sort(byRelationshipThenDistance) : null),
+    [users],
+  );
+
   return (
     <View style={[styles.root, { paddingTop: top }]}>
       <View style={styles.header}>
@@ -121,13 +188,13 @@ export default function NearbyListScreen() {
         </View>
       </View>
 
-      {users === null ? (
+      {ordered === null ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.teal} size="large" />
         </View>
       ) : (
         <FlatList
-          data={users}
+          data={ordered}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={[styles.list, { paddingBottom: bottom + 32 }]}
           refreshControl={
@@ -143,32 +210,44 @@ export default function NearbyListScreen() {
               </Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <Card
-              onPress={() =>
-                router.push({
-                  pathname: '/profile/[id]',
-                  params: { id: item.id, username: item.username },
-                })
-              }
-            >
-              {/* One accessible node per person: the screen reader reads the
-                  whole summary, rather than five disconnected fragments. */}
+          renderItem={({ item }) => {
+            const known = identified(item);
+
+            const row = (
+              // One accessible node per person: the screen reader reads the
+              // whole summary, rather than five disconnected fragments.
               <View
                 style={styles.row}
                 accessible
-                accessibilityRole="button"
+                accessibilityRole={known ? 'button' : 'text'}
                 accessibilityLabel={summarise(item)}
-                accessibilityHint="Opens their profile"
+                accessibilityHint={known ? 'Opens their profile' : undefined}
               >
-                <Avatar uri={item.profile_picture} name={item.username} size="md" presence={item.presence} />
+                {known ? (
+                  <Avatar uri={item.profile_picture} name={item.username} size="md" presence={item.presence} />
+                ) : (
+                  // The marker, at avatar size. Not the Avatar component with a
+                  // blank name: that renders initials, which is the first letter
+                  // of the username we are not showing.
+                  <View style={styles.anonAvatar}>
+                    <View style={styles.anonGlow} />
+                    <View style={styles.anonCore} />
+                  </View>
+                )}
+
                 <View style={styles.info}>
-                  <Text style={styles.name} numberOfLines={1}>{item.username}</Text>
-                  <Text style={styles.meta}>{distanceText(item)}</Text>
-                  {/* The row is one accessible node carrying `summarise`, so
-                      these are visual only — importantForAccessibility="no"
-                      keeps them from being read a second time. */}
-                  {(item.presence || item.motion_class) && (
+                  <Text style={[styles.name, !known && styles.nameAnon]} numberOfLines={1}>
+                    {known ? item.username : 'Someone nearby'}
+                  </Text>
+                  <Text style={styles.meta}>
+                    {known ? distanceText(item) : distanceBand(item)}
+                  </Text>
+
+                  {/* Presence and motion are theirs, not a shared interest —
+                      they stay with the people whose name is already visible.
+                      The row is one accessible node carrying `summarise`, so
+                      these are visual only. */}
+                  {known && (item.presence || item.motion_class) && (
                     <Text style={styles.meta} numberOfLines={1} importantForAccessibility="no">
                       {[
                         item.presence?.is_online ? 'Online' : null,
@@ -176,16 +255,44 @@ export default function NearbyListScreen() {
                       ].filter(Boolean).join(' · ')}
                     </Text>
                   )}
+
+                  {/* The one thing a stranger's row is for: why they are on
+                      your map at all. */}
                   {!!item.shared_interests?.length && (
                     <Text style={styles.meta} numberOfLines={1}>
                       {item.shared_interests.join(' · ')}
                     </Text>
                   )}
+
+                  {!known && (
+                    <Text style={styles.footnote} numberOfLines={1} importantForAccessibility="no">
+                      Anonymous until you both say Hi
+                    </Text>
+                  )}
                 </View>
+
                 <RelationshipBadge relationship={item.relationship} />
               </View>
-            </Card>
-          )}
+            );
+
+            // No route in for someone anonymous — their profile screen is their
+            // name and their face, which is the whole of what this row hides.
+            // Say Hi from their marker on the map.
+            return known ? (
+              <Card
+                onPress={() =>
+                  router.push({
+                    pathname: '/profile/[id]',
+                    params: { id: item.id, username: item.username },
+                  })
+                }
+              >
+                {row}
+              </Card>
+            ) : (
+              <Card>{row}</Card>
+            );
+          }}
         />
       )}
     </View>
@@ -221,7 +328,23 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     color: colors.t1,
   },
+  /** A placeholder for a name, not a name — lighter, so the row doesn't read as
+   *  someone called "Someone nearby". */
+  nameAnon: { color: colors.t2, fontWeight: '500' },
   meta: { fontFamily: fonts.body, fontSize: typography.caption, color: colors.t2 },
+  footnote: { fontFamily: fonts.body, fontSize: typography.micro, color: colors.t3 },
+
+  // The stranger marker from the map, at avatar size.
+  anonAvatar: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  anonGlow: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.teal,
+    opacity: 0.16,
+  },
+  anonCore: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.teal },
 
   empty: { alignItems: 'center', paddingTop: 80, gap: 8, paddingHorizontal: 32 },
   emptyTitle: {

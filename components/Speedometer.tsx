@@ -15,6 +15,7 @@ import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
+import { IconSwift, type IconComponent } from '@/components/ui/icons';
 import { useScrollNav } from '@/context/ScrollNavContext';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { refreshAlertsCount, useAlertsCount } from '@/services/alerts';
@@ -72,8 +73,16 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface Section {
   label: string;
-  icon: IoniconName;
-  activeIcon: IoniconName;
+  icon?: IoniconName;
+  activeIcon?: IoniconName;
+  /** A glyph from the app's own icon set, for sections Ionicons has no word
+   *  for. Wins over `icon`/`activeIcon` — it carries its own state through
+   *  colour, like every other icon on the arc. */
+  Glyph?: IconComponent;
+  /** Optical size correction for a `Glyph` whose shape doesn't fill its box.
+   *  Multiplies the rendered size everywhere the icon appears, so the arc and
+   *  the collapsed bar stay in proportion with each other. */
+  glyphScale?: number;
   route: string;
   name: string;
   start: number;
@@ -87,11 +96,36 @@ interface Section {
 const SECTIONS: Section[] = [
   { label: 'Map',      icon: 'map-outline',         activeIcon: 'map',            route: '/(tabs)/map',      name: 'map',      start: 150, end: 180, mid: 165 },
   { label: 'Profile',  icon: 'person-outline',      activeIcon: 'person',         route: '/(tabs)/profile',  name: 'profile',  start: 120, end: 150, mid: 135 },
-  { label: 'Messages', icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 90,  end: 120, mid: 105, owns: ['notification', 'messages', 'clubs', 'create-club'] },
-  { label: 'Swifts',   icon: 'play-circle-outline', activeIcon: 'play-circle',    route: '/(tabs)/swifts',   name: 'swifts',   start: 60,  end: 90,  mid: 75  },
+  { label: 'Chat',     icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 90,  end: 120, mid: 105, owns: ['notification', 'messages', 'clubs', 'create-club'] },
+  // The swift is a wide, shallow silhouette — at the same nominal size as the
+  // Ionicons around it, which fill their square, it reads smaller than its
+  // neighbours. The bump is optical, not a size change.
+  { label: 'Swifts',   Glyph: IconSwift, glyphScale: 1.3,                         route: '/(tabs)/swifts',   name: 'swifts',   start: 60,  end: 90,  mid: 75  },
   { label: 'Quests',   icon: 'compass-outline',     activeIcon: 'compass',        route: '/(tabs)/quests',   name: 'quests',   start: 30,  end: 60,  mid: 45  },
   { label: 'Settings', icon: 'settings-outline',    activeIcon: 'settings-sharp', route: '/(tabs)/settings', name: 'settings', start: 0,   end: 30,  mid: 15  },
 ];
+
+function SectionGlyph({
+  section,
+  active,
+  size,
+  color,
+}: {
+  section: Section;
+  active: boolean;
+  size: number;
+  color: string;
+}) {
+  const Glyph = section.Glyph;
+  if (Glyph) return <Glyph size={Math.round(size * (section.glyphScale ?? 1))} color={color} />;
+  return (
+    <Ionicons
+      name={(active ? section.activeIcon : section.icon) ?? 'ellipse-outline'}
+      size={size}
+      color={color}
+    />
+  );
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function toRad(deg: number) { return (deg * Math.PI) / 180; }
@@ -334,8 +368,9 @@ export function Speedometer() {
                 accessibilityState={{ selected: isActive }}
                 accessibilityLabel={tabLabel(s.label, badge)}
               >
-                <Ionicons
-                  name={isActive ? s.activeIcon : s.icon}
+                <SectionGlyph
+                  section={s}
+                  active={isActive}
                   size={18}
                   color={isActive ? '#0a0a0a' : '#555'}
                 />
@@ -388,8 +423,9 @@ export function Speedometer() {
                   accessibilityLabel={tabLabel(s.label, badge)}
                 >
                   <View style={{ position: 'relative' }}>
-                    <Ionicons
-                      name={isActive ? s.activeIcon : s.icon}
+                    <SectionGlyph
+                      section={s}
+                      active={isActive}
                       size={22}
                       color={isActive ? '#00b4a6' : '#444'}
                     />

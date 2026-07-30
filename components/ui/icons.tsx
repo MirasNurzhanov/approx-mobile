@@ -842,6 +842,71 @@ export function IconLocateOff({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
+// Transport controls. Filled rather than stroked — at 20px a stroked triangle
+// reads as an outline arrow, and these are the one place in the app where the
+// glyph itself is the button.
+export function IconPlay({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M8 4.8l11.5 7.2L8 19.2z" fill={color} />
+    </Svg>
+  )
+}
+
+export function IconPause({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Rect x={7} y={5} width={3.6} height={14} rx={1} fill={color} />
+      <Rect x={13.4} y={5} width={3.6} height={14} rx={1} fill={color} />
+    </Svg>
+  )
+}
+
+/** Start over, not "previous track" — there is only ever one track. */
+export function IconRestart({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4.5 12a7.5 7.5 0 107.5-7.5c-2.5 0-4.7 1.2-6.1 3" />
+        <Path d="M3.4 3.6v4.4h4.4" />
+      </G>
+    </Svg>
+  )
+}
+
+/**
+ * A swift, for Swifts. Filled rather than stroked: at 18px on the nav arc a
+ * hairline bird is a smudge, and the silhouette is the whole recognisability of
+ * this one — scythe wings swept hard back, and the forked tail the bird is
+ * named for. The old play-circle said "video player", which is the container,
+ * not the thing.
+ */
+export function IconSwift({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G fill={color}>
+        {/* Wings: long and swept hard back from the shoulder, tapering to a
+            point. Wings raised in a V read as a gull; these trail. */}
+        <Path d="M11.3 9.8C8.2 10.1 5.1 12.1 2.2 16c4-1.6 7-2.6 9.3-3Z" />
+        <Path d="M12.7 9.8c3.1.3 6.2 2.3 9.1 6.2-4-1.6-7-2.6-9.3-3Z" />
+        {/* Head, body and the fork it is named for, in one stroke. */}
+        <Path d="M12 8.6c.95 0 1.6.8 1.48 1.75l-.88 6.9-.6-1.15-.6 1.15-.88-6.9C10.4 9.4 11.05 8.6 12 8.6Z" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconUpload({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M12 16.5V4.5M7.5 9L12 4.5 16.5 9" />
+        <Path d="M4.5 15v4.5h15V15" />
+      </G>
+    </Svg>
+  )
+}
+
 // Backend serves emoji for interests; this maps interest names to the designed
 // icon set instead (redesign rule 3 — no emoji anywhere). Grouped by icon and
 // covering the full seed catalog (scripts/interests_seed.json) so nothing

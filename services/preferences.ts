@@ -4,10 +4,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PREFIX = 'aura:pref:';
 
-export type PrefKey = 'zoneAutoplay' | 'backgroundLocation';
+// `zoneAutoplay` used to live here. Zone audio never starts on its own now —
+// it is played from the button on a friend's card — so the preference had
+// nothing to govern. Values already written under the old key stay on disk,
+// unread, until the app is reinstalled.
+export type PrefKey = 'backgroundLocation';
 
 const DEFAULTS: Record<PrefKey, boolean> = {
-  zoneAutoplay: true,
   backgroundLocation: true,
 };
 

@@ -87,7 +87,7 @@ interface Section {
 const SECTIONS: Section[] = [
   { label: 'Map',      icon: 'map-outline',         activeIcon: 'map',            route: '/(tabs)/map',      name: 'map',      start: 150, end: 180, mid: 165 },
   { label: 'Profile',  icon: 'person-outline',      activeIcon: 'person',         route: '/(tabs)/profile',  name: 'profile',  start: 120, end: 150, mid: 135 },
-  { label: 'Chat',     icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 90,  end: 120, mid: 105, owns: ['notification', 'messages'] },
+  { label: 'Messages', icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 90,  end: 120, mid: 105, owns: ['notification', 'messages', 'clubs', 'create-club'] },
   { label: 'Swifts',   icon: 'play-circle-outline', activeIcon: 'play-circle',    route: '/(tabs)/swifts',   name: 'swifts',   start: 60,  end: 90,  mid: 75  },
   { label: 'Quests',   icon: 'compass-outline',     activeIcon: 'compass',        route: '/(tabs)/quests',   name: 'quests',   start: 30,  end: 60,  mid: 45  },
   { label: 'Settings', icon: 'settings-outline',    activeIcon: 'settings-sharp', route: '/(tabs)/settings', name: 'settings', start: 0,   end: 30,  mid: 15  },

@@ -2,6 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useFonts } from 'expo-font';
@@ -75,6 +76,8 @@ function AppShell() {
       <Stack.Screen name="register"        options={{ headerShown: false }} />
       <Stack.Screen name="interests-setup" options={{ headerShown: false }} />
       <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="clubs/[id]"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="create-club"    options={{ headerShown: false, animation: 'slide_from_bottom' }} />
       <Stack.Screen name="modal"           options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
   );
@@ -101,15 +104,17 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <ErrorBoundary>
-      <ScrollNavProvider>
-        <AuthProvider>
-          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-            <AppShell />
-            <StatusBar style="light" />
-          </ThemeProvider>
-        </AuthProvider>
-      </ScrollNavProvider>
-    </ErrorBoundary>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <ScrollNavProvider>
+          <AuthProvider>
+            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <AppShell />
+              <StatusBar style="light" />
+            </ThemeProvider>
+          </AuthProvider>
+        </ScrollNavProvider>
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }

@@ -5,8 +5,10 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -15,11 +17,12 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Speedometer } from '@/components/Speedometer';
+import { DraggableTabs, type DraggableTabKey } from '@/components/DraggableTabs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { api } from '@/services/api';
-import { blockUser, refreshBlocked, unblockUser, useBlockedUsers } from '@/services/blocked';
+import { blockUser, refreshBlocked, useBlockedUsers } from '@/services/blocked';
 import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
 import { storyReplyPreview } from '@/services/storyReply';
 import {
@@ -35,15 +38,12 @@ import {
 } from '@/services/alerts';
 import { NotifRow, RequestRow } from '@/components/alerts/AlertRow';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
+import { clubsApi, type Club } from '@/services/clubs';
 import { colors, fonts } from '@/constants/theme';
 import type { Presence } from '@/services/presence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-// 'alerts' took over the slot "Pending" used to hold, and absorbed it: the
-// incoming Hi requests that lived there now sit alongside friend requests and
-// story activity in one list. Leading slot, because that is where people look
-// for things waiting on them.
-type Tab = 'alerts' | 'connected' | 'friends' | 'blocked';
+type Tab = 'alerts' | 'chats' | 'clubs';
 
 /** One flat row stream for the Alerts tab, so it scrolls in a FlatList like
  *  every other tab rather than needing its own scroll container. */
@@ -152,24 +152,37 @@ function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: U
   );
 }
 
-// ─── Blocked card ─────────────────────────────────────────────────────────────
-interface BlockedCardProps {
-  user: UserSummary;
-  onUnblock: (user: UserSummary) => void;
-}
-
-function BlockedCard({ user, onUnblock }: BlockedCardProps) {
+// ─── Club card ────────────────────────────────────────────────────────────────
+function ClubCard({ club, onPress }: { club: Club; onPress: () => void }) {
   return (
-    <Card style={styles.cardBlocked}>
-      <View style={styles.cardRow}>
-        <Avatar uri={user.profile_picture} name={user.username} size="md" ringColor={colors.t3} />
-        <View style={styles.cardBody}>
-          <Text style={[styles.cardName, styles.cardNameBlocked]}>{user.username}</Text>
-          <Text style={styles.cardSub}>Blocked</Text>
+    <Pressable style={styles.clubCard} onPress={onPress}>
+      {club.emblem ? (
+        <Image source={{ uri: club.emblem }} style={styles.clubEmblem} />
+      ) : (
+        <View style={styles.clubEmblemFallback}>
+          <Text style={styles.clubEmblemInitial}>{club.name.charAt(0).toUpperCase()}</Text>
         </View>
-        <Button label="Unblock" variant="ghost" size="sm" onPress={() => onUnblock(user)} />
+      )}
+      <View style={styles.clubCardBody}>
+        <View style={styles.clubCardTop}>
+          <Text style={styles.clubCardName} numberOfLines={1}>{club.name}</Text>
+          {club.role && (
+            <View style={styles.clubRoleBadge}>
+              <Text style={styles.clubRoleText}>
+                {club.role === 'president' ? '👑 President' : club.role === 'vice' ? '⭐ Vice' : 'Member'}
+              </Text>
+            </View>
+          )}
+        </View>
+        {club.interest && (
+          <Text style={styles.clubInterest}>{club.interest.icon} {club.interest.name}</Text>
+        )}
+        <View style={styles.clubMemberRow}>
+          <Ionicons name="people-outline" size={12} color={colors.t3} />
+          <Text style={styles.clubMemberCount}>{club.member_count} members</Text>
+        </View>
       </View>
-    </Card>
+    </Pressable>
   );
 }
 
@@ -180,15 +193,18 @@ export default function ChatScreen() {
   const scrollProps = useScrollHandler();
 
   const [activeTab, setActiveTab] = useState<Tab>('alerts');
+  const [tabOrder, setTabOrder] = useState<DraggableTabKey[]>(['alerts', 'chats', 'clubs']);
   const [friendList, setFriendList] = useState<FriendList>({ connections: [], friends: [] });
   const [alerts, setAlerts] = useState<AlertsData>(EMPTY_ALERTS);
-  // Shared with Settings → Blocked users: one store, one list.
-  const blocked = useBlockedUsers().list ?? [];
+  useBlockedUsers();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
   const [markingRead, setMarkingRead] = useState(false);
   const [actioning, setActioning] = useState<Record<string, 'accept' | 'decline'>>({});
+  const [myClubs, setMyClubs] = useState<Club[]>([]);
+  const [discoverClubs, setDiscoverClubs] = useState<Club[]>([]);
+  const [loadingClubs, setLoadingClubs] = useState(false);
 
   const fetchUnreadBreakdown = useCallback(async () => {
     try {
@@ -255,6 +271,28 @@ export default function ChatScreen() {
     await fetchAll();
     setRefreshing(false);
   }, [fetchAll]);
+
+  const fetchClubs = useCallback(async () => {
+    setLoadingClubs(true);
+    try {
+      const [myRes, discoverRes] = await Promise.allSettled([
+        clubsApi.list(),
+        clubsApi.discover(),
+      ]);
+      if (myRes.status === 'fulfilled') setMyClubs(myRes.value.data);
+      if (discoverRes.status === 'fulfilled') setDiscoverClubs(discoverRes.value.data);
+    } catch {} finally {
+      setLoadingClubs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'clubs') fetchClubs();
+  }, [activeTab, fetchClubs]);
+
+  useFocusEffect(useCallback(() => {
+    fetchClubs();
+  }, [fetchClubs]));
 
   const friendIds = new Set(friendList.friends.map((f) => f.id));
   const connections = friendList.connections.filter((c) => !friendIds.has(c.id));
@@ -362,18 +400,6 @@ export default function ChatScreen() {
     api.delete(`/api/friends/${user.id}/remove/`).catch(() => {});
   }
 
-  function handleUnblock(user: UserSummary) {
-    unblockUser(user.id)
-      .then(() => {
-        // A suspended friendship/connection comes back on unblock.
-        fetchAll();
-        triggerNearbyRefresh();
-      })
-      .catch(() => {
-        Alert.alert('Could not unblock', `Unblocking @${user.username} failed. Please try again.`);
-      });
-  }
-
   function handleAddFriend(user: UserSummary) {
     api.post(`/api/friends/request/${user.id}/`)
       .then(() => setSentRequestIds((prev) => new Set(prev).add(user.id)))
@@ -398,11 +424,20 @@ export default function ChatScreen() {
     router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } } as any);
   }
 
+  const chatUsers = [
+    ...connections.map((u) => ({ ...u, chatType: 'connected' as const })),
+    ...friendList.friends.map((u) => ({ ...u, chatType: 'friend' as const })),
+  ].sort((a, b) => {
+    if (a.last_message_at && b.last_message_at) return b.last_message_at.localeCompare(a.last_message_at);
+    if (a.last_message_at) return -1;
+    if (b.last_message_at) return 1;
+    return 0;
+  });
+
   const TABS: { key: Tab; label: string; count: number }[] = [
-    { key: 'alerts',    label: 'Alerts',    count: unreadCount },
-    { key: 'connected', label: 'Connected', count: connections.length },
-    { key: 'friends',   label: 'Friends',   count: friendList.friends.length },
-    { key: 'blocked',   label: 'Blocked',   count: blocked.length },
+    { key: 'alerts', label: 'Alerts', count: unreadCount },
+    { key: 'chats',  label: 'Chats',  count: chatUsers.length },
+    { key: 'clubs',  label: 'Clubs',  count: myClubs.length },
   ];
 
   const refreshControl = (
@@ -417,52 +452,16 @@ export default function ChatScreen() {
   return (
     <View style={[styles.container, { paddingTop: top }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Chat</Text>
+        <Text style={styles.headerTitle}>Messages</Text>
       </View>
 
-      {/* Tab bar — underline style */}
-      <View style={styles.tabBar}>
-        {TABS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          // Unanswered requests are the one count here that somebody else is
-          // waiting on, so Alerts carries a red badge rather than a grey one.
-          const isAlerts = tab.key === 'alerts';
-          return (
-            <Pressable
-              key={tab.key}
-              style={[styles.tabItem, isActive && styles.tabItemActive]}
-              onPress={() => setActiveTab(tab.key)}
-              accessibilityRole="button"
-              accessibilityLabel={
-                isAlerts && tab.count > 0 ? `Alerts, ${tab.count} unread` : tab.label
-              }
-            >
-              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                {tab.label}
-              </Text>
-              {tab.count > 0 && (
-                <View
-                  style={[
-                    styles.tabBadge,
-                    isActive && styles.tabBadgeActive,
-                    isAlerts && styles.tabBadgeAlerts,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.tabBadgeText,
-                      isActive && styles.tabBadgeTextActive,
-                      isAlerts && styles.tabBadgeTextAlerts,
-                    ]}
-                  >
-                    {tab.count}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </View>
+      <DraggableTabs
+        tabs={TABS}
+        activeTab={activeTab}
+        order={tabOrder}
+        onTabPress={(key) => setActiveTab(key)}
+        onOrderChange={setTabOrder}
+      />
 
       {loading ? (
         <View style={styles.loadingWrap}>
@@ -501,8 +500,6 @@ export default function ChatScreen() {
                 <View style={styles.unreadPill}>
                   <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
                 </View>
-                {/* Only offered when it would do something: marking read clears
-                    activity, and a request is answered rather than read. */}
                 {hasUnreadActivity && (
                   <Pressable onPress={markAllRead} disabled={markingRead} hitSlop={10}>
                     {markingRead ? (
@@ -523,55 +520,74 @@ export default function ChatScreen() {
           showsVerticalScrollIndicator={false}
           {...scrollProps}
         />
-      ) : activeTab === 'connected' ? (
+      ) : activeTab === 'chats' ? (
         <FlatList
-          data={connections}
+          data={chatUsers}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => (
             <UserCard
               user={item}
-              type="connected"
+              type={item.chatType}
               requestSent={sentRequestIds.has(item.id)}
               onMessage={handleMessage}
-              onAddFriend={handleAddFriend}
+              onAddFriend={item.chatType === 'connected' ? handleAddFriend : undefined}
               onMenu={openMenu}
             />
           )}
           contentContainerStyle={styles.list}
-          ListEmptyComponent={<EmptyState message={'No connections yet\nAccept incoming Hi requests'} />}
-          refreshControl={refreshControl}
-          showsVerticalScrollIndicator={false}
-          {...scrollProps}
-        />
-      ) : activeTab === 'friends' ? (
-        <FlatList
-          data={friendList.friends}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => (
-            <UserCard
-              user={item}
-              type="friend"
-              onMessage={handleMessage}
-              onMenu={openMenu}
-            />
-          )}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={<EmptyState message={'No friends yet\nUpgrade a connection to friend'} />}
+          ListEmptyComponent={<EmptyState message={'No chats yet\nAccept incoming Hi requests'} />}
           refreshControl={refreshControl}
           showsVerticalScrollIndicator={false}
           {...scrollProps}
         />
       ) : (
-        <FlatList
-          data={blocked}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <BlockedCard user={item} onUnblock={handleUnblock} />}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={<EmptyState message="No blocked users" />}
-          refreshControl={refreshControl}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.clubsScroll}
           showsVerticalScrollIndicator={false}
-          {...scrollProps}
-        />
+          refreshControl={
+            <RefreshControl refreshing={loadingClubs} onRefresh={fetchClubs} tintColor={colors.teal} colors={[colors.teal]} />
+          }
+        >
+          {myClubs.length === 0 && (
+            <Pressable style={styles.createClubBtn} onPress={() => router.push('/create-club' as any)}>
+              <Ionicons name="add-circle-outline" size={18} color={colors.teal} />
+              <Text style={styles.createClubBtnText}>Create a Club</Text>
+            </Pressable>
+          )}
+
+          {loadingClubs ? (
+            <ActivityIndicator color={colors.teal} style={{ marginTop: 40 }} />
+          ) : (
+            <>
+              {myClubs.length > 0 && (
+                <>
+                  <Text style={styles.clubsSectionLabel}>MY CLUBS</Text>
+                  {myClubs.map((club) => (
+                    <ClubCard
+                      key={club.id}
+                      club={club}
+                      onPress={() => router.push({ pathname: '/clubs/[id]', params: { id: club.id } } as any)}
+                    />
+                  ))}
+                </>
+              )}
+
+              <Text style={styles.clubsSectionLabel}>DISCOVER</Text>
+              {discoverClubs.length > 0 ? (
+                discoverClubs.map((club) => (
+                  <ClubCard
+                    key={club.id}
+                    club={club}
+                    onPress={() => router.push({ pathname: '/clubs/[id]', params: { id: club.id } } as any)}
+                  />
+                ))
+              ) : (
+                <Text style={styles.clubsEmptyText}>No clubs to discover yet.</Text>
+              )}
+            </>
+          )}
+        </ScrollView>
       )}
 
       <Speedometer />
@@ -591,50 +607,6 @@ const styles = StyleSheet.create({
     fontSize: 26,
     color: colors.t1,
   },
-
-  // Tab bar — underline style
-  tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  tabItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingVertical: 11,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabItemActive: { borderBottomColor: colors.teal },
-  tabLabel: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.t3,
-  },
-  tabLabelActive: { color: colors.t1, fontWeight: '600' },
-  tabBadge: {
-    backgroundColor: colors.surface2,
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
-  },
-  tabBadgeActive: { backgroundColor: colors.teal },
-  tabBadgeAlerts: { backgroundColor: colors.red },
-  tabBadgeTextAlerts: { color: '#fff' },
-  tabBadgeText: {
-    fontFamily: fonts.body,
-    color: colors.t3,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  tabBadgeTextActive: { color: colors.bg },
 
   // List
   list: { padding: 16, paddingBottom: 230, gap: 10 },
@@ -737,5 +709,97 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 22,
+  },
+
+  // Clubs tab
+  clubsScroll: { padding: 16, paddingBottom: 230 },
+
+  createClubBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.tealLine,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    marginBottom: 20,
+  },
+  createClubBtnText: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.teal,
+  },
+
+  clubsSectionLabel: {
+    fontFamily: fonts.body,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    color: colors.t3,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+    marginTop: 4,
+  },
+
+  clubCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  clubEmblem: { width: 48, height: 48, borderRadius: 24 },
+  clubEmblemFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubEmblemInitial: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.teal,
+  },
+  clubCardBody: { flex: 1, gap: 3 },
+  clubCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  clubCardName: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.t1,
+  },
+  clubRoleBadge: {
+    backgroundColor: colors.tealTint,
+    borderWidth: 1,
+    borderColor: colors.tealLine,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  clubRoleText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', color: colors.teal },
+  clubInterest: { fontFamily: fonts.body, fontSize: 12, color: colors.t2 },
+  clubMemberRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  clubMemberCount: { fontFamily: fonts.body, fontSize: 12, color: colors.t3 },
+
+  clubsEmptyText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t3,
+    textAlign: 'center',
+    lineHeight: 21,
+    paddingVertical: 24,
   },
 });

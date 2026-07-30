@@ -90,7 +90,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // dismissAll() first so any modal or pushed screen is gone, then replace
       // rather than navigate — the auth screen becomes the only entry on the
       // stack, so Back cannot return to an authenticated screen.
-      router.dismissAll();
+      //
+      // Guarded, because dismissAll() dispatches POP_TO_TOP unconditionally and
+      // signing out from a tab is the common case: the root stack holds only
+      // `(tabs)` then, nothing pops, and the action falls through to the tab
+      // navigator — which cannot handle it either — for a red "action
+      // 'POP_TO_TOP' was not handled by any navigator" on every sign out.
+      if (router.canDismiss()) router.dismissAll();
       router.replace('/');
       // Released so the buttons never strand the user on a permanently
       // spinning Sign out.

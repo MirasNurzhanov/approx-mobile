@@ -212,7 +212,7 @@ export function DraggableTabs({ tabs, activeTab, order, onTabPress, onOrderChang
         return (
           <GestureDetector key={slotIdx} gesture={gestures[slotIdx]}>
             <Animated.View
-              style={animStyles[slotIdx]}
+              style={[styles.slot, animStyles[slotIdx]]}
               onLayout={(e) => {
                 const { x, width } = e.nativeEvent.layout;
                 if (slotIdx === 0) { cx0.value = x + width / 2; sw0.value = width; }
@@ -248,21 +248,26 @@ export function DraggableTabs({ tabs, activeTab, order, onTabPress, onOrderChang
 }
 
 const styles = StyleSheet.create({
+  // Flush with the search field above it — same 16pt gutters, and the three
+  // pills divide the row between them so the strip ends where the field ends
+  // instead of floating centred inside it.
   row: {
     flexDirection: 'row',
-    justifyContent: 'center',
     gap: GAP,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 6,
     paddingBottom: 12,
   },
+  /** Equal thirds. It also makes the drag maths exact: every slot is the same
+   *  width, so a pill swapped with its neighbour travels precisely one slot. */
+  slot: { flex: 1 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 9,
-    paddingHorizontal: 18,
+    paddingHorizontal: 12,
     borderRadius: 999,
     backgroundColor: colors.surface,
   },

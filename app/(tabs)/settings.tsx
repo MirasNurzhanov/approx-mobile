@@ -11,7 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -44,13 +44,13 @@ import {
   IconEyeOff,
   IconGhost,
   IconInfo,
+  IconLocate,
   IconLock,
   IconLogout,
   IconMail,
   IconMusic,
   IconPin,
   IconShield,
-  IconSound,
   IconTrash,
   type IconComponent,
 } from '@/components/ui/icons';
@@ -81,6 +81,15 @@ const LOCATION_MODES: {
 ];
 
 // ─── SettingsRow ──────────────────────────────────────────────────────────────
+/**
+ * One row in a settings card.
+ *
+ * Ordering rule for every card on this screen: **switches first, links last.**
+ * A switch is a decision you make here and see the result of immediately; a row
+ * with a chevron takes you somewhere else and loses your place in the list.
+ * Mixing them puts a trapdoor in the middle of a column of toggles, so each
+ * card reads as toggles, then exits — never a link with switches under it.
+ */
 function SettingsRow({
   icon: Icon,
   label,
@@ -149,7 +158,6 @@ export default function SettingsScreen() {
 
   const [zoneActive, setZoneActive] = useState<boolean | null>(null);
   const [zoneSaving, setZoneSaving] = useState(false);
-  const [autoplay, setAutoplay] = useState(true);
   const [bgLocation, setBgLocation] = useState(true);
   const [notifAllowed, setNotifAllowed] = useState<boolean | null>(null);
 
@@ -174,14 +182,20 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     refreshPrivacy().catch(() => setPrivacyFailed(true));
-
-    api.get<SelfZone>('/api/users/zone/')
-      .then((r) => setZoneActive(!!r.data.zone_active))
-      .catch(() => setZoneActive(false));
-
-    getPref('zoneAutoplay').then(setAutoplay);
     getPref('backgroundLocation').then(setBgLocation);
   }, []);
+
+  // Re-read on every focus, not once per mount. This is a tab, so it stays
+  // mounted for the whole session — and it is the only place the zone can be
+  // added or removed, so a switch showing a stale "on" is a user who believes
+  // they are on the map when they are not.
+  useFocusEffect(
+    useCallback(() => {
+      api.get<SelfZone>('/api/users/zone/')
+        .then((r) => setZoneActive(!!r.data.zone_active))
+        .catch(() => setZoneActive(false));
+    }, []),
+  );
 
   async function selectLocationSharing(mode: LocationSharing) {
     if (mode === settings?.location_sharing || saving) return;
@@ -210,11 +224,6 @@ export default function SettingsScreen() {
     } finally {
       setZoneSaving(false);
     }
-  }
-
-  function toggleAutoplay(value: boolean) {
-    setAutoplay(value);
-    setPref('zoneAutoplay', value);
   }
 
   async function toggleBgLocation(value: boolean) {
@@ -373,9 +382,13 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>ZONE & LOCATION</Text>
           <Card style={styles.rowsCard}>
+            {/* The zone is the circle that puts you on the map, not the music
+                that plays in it — this switch adds and removes the zone
+                itself. It was labelled "Sound zone", which made turning it off
+                look like a way to mute a track. */}
             <SettingsRow
-              icon={IconSound}
-              label="Sound zone"
+              icon={IconLocate}
+              label="Zone on the map"
               right={
                 zoneActive === null ? (
                   <ActivityIndicator color={colors.t3} size="small" />
@@ -385,15 +398,20 @@ export default function SettingsScreen() {
               }
             />
             <SettingsRow
-              icon={IconMusic}
-              label="Auto-play zone audio"
-              right={<PrefSwitch value={autoplay} onValueChange={toggleAutoplay} />}
-            />
-            <SettingsRow
               icon={IconPin}
               label="Background location"
-              last
               right={<PrefSwitch value={bgLocation} onValueChange={toggleBgLocation} />}
+            />
+            {/* Switches first, then the rows that leave this screen — see the
+                note above SettingsRow. "Auto-play zone audio" used to sit in
+                this card too; nothing plays by itself any more, so the switch
+                had nothing left to turn off. */}
+            <SettingsRow
+              icon={IconMusic}
+              label="Zone music"
+              last
+              onPress={() => router.push('/zone')}
+              right={<IconChevron size={16} color={colors.t3} />}
             />
           </Card>
         </View>

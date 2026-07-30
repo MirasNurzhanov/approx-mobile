@@ -1,4 +1,3 @@
-import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -22,9 +21,6 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, {
-    FadeInUp,
-    FadeOutUp,
-    ReduceMotion,
     runOnJS,
     useAnimatedStyle,
     useSharedValue,
@@ -46,14 +42,14 @@ import {
     IconLocate,
     IconLocateFixed,
     IconLocateOff,
-    IconMute,
+    IconLock,
     IconPeople,
     IconPin,
     IconSearch,
     IconShield,
-    IconSound,
     type IconComponent,
 } from '@/components/ui/icons';
+import { ZonePlayer } from '@/components/ZonePlayer';
 import { colors, fonts, radius } from '@/constants/theme';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
@@ -74,8 +70,14 @@ import { MotionTrail } from '@/components/MotionTrail';
 import { PresenceDot } from '@/components/PresenceDot';
 import { useMotionTrails } from '@/hooks/useMotionTrails';
 import { recordSpeed } from '@/services/ownMotion';
-import { getPref } from '@/services/preferences';
 import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
+import {
+    cachedZonePresets,
+    fmtRadius,
+    loadZonePresets,
+    trackTitle,
+    type ZonePreset,
+} from '@/services/zoneAudio';
 import {
     recordOwnStory,
     useStoryArchive,
@@ -181,7 +183,11 @@ const DARK_MAP_STYLE = [
   { featureType: 'administrative', elementType: 'geometry',         stylers: [{ color: '#1A1A20' }] },
   { featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{ color: '#5E5E68' }] },
 ];
-const SHEET_H   = 400;
+/** How far the sheet travels to get off screen — not its height, which sizes
+ *  to content. Raised from 400 when the zone player moved into the card: a
+ *  friend broadcasting a track makes the tallest card the sheet holds, and a
+ *  travel distance shorter than the card leaves a sliver of it on screen. */
+const SHEET_H   = 560;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
 // ── Locate control ──
@@ -931,61 +937,11 @@ function TopBar({
   );
 }
 
-// ─── Zone Banner ──────────────────────────────────────────────────────────────
-/**
- * Only ever a friend's zone — see the zone-detection effect. There is no
- * locked state and no self state left to render, because a banner you cannot
- * listen to is just a notification that you are not allowed to do something.
- */
-function ZoneBanner({
-  username,
-  isPlaying,
-  onTap,
-  onMute,
-}: {
-  username: string;
-  isPlaying: boolean;
-  onTap: () => void;
-  onMute: () => void;
-}) {
-  const { top } = useSafeAreaInsets();
-  return (
-    <Animated.View
-      // Drops in from under the top bar rather than materialising in place, so
-      // it reads as arriving. `reduceMotion` is reanimated's own system-setting
-      // check, which drops the slide on the UI thread when it's on.
-      entering={FadeInUp.duration(260).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOutUp.duration(200).reduceMotion(ReduceMotion.System)}
-      style={[styles.zoneBanner, { top: top + 62 }]}
-    >
-      <IconSound size={20} color={colors.teal} />
-      <Text style={styles.zoneBannerText} numberOfLines={1}>
-        {isPlaying ? 'Playing ' : 'You are in '}
-        <Text style={styles.zoneBannerUser}>@{username}</Text>
-        {"'s zone"}
-      </Text>
-      {isPlaying ? (
-        <TouchableOpacity
-          onPress={onMute}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel={`Mute ${username}'s zone music`}
-        >
-          <IconMute size={20} color={colors.teal} />
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          onPress={onTap}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel={`Listen to ${username}'s zone music`}
-        >
-          <Text style={styles.zoneBannerAction}>Listen</Text>
-        </TouchableOpacity>
-      )}
-    </Animated.View>
-  );
-}
+// The floating zone banner used to live here. It announced "you are in @x's
+// zone" over the map and, with autoplay on, had already started their track by
+// the time you read it. Both halves are gone: a zone is now something you open
+// from the person it belongs to (see UserSheet), and it makes no sound until
+// you press play.
 
 // ─── Create Story Modal ───────────────────────────────────────────────────────
 interface CreateStoryModalProps {
@@ -1178,6 +1134,26 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
   const zoneLine = isFriend && user.zone_active ? 'in their sound zone' : null;
   const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
 
+  // ── Their zone track ──
+  // The server only sends zone_audio_url to viewers allowed to hear it, so a
+  // URL here is already permission to play — but permission is not a reason to
+  // start. Nothing loads until the play button below is pressed.
+  const zoneUrl = isFriend && user.zone_active ? user.zone_audio_url : undefined;
+  const zoneRadius = user.zone_radius && user.zone_radius > 0 ? user.zone_radius : 500;
+  const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
+  // Unknown distance is not "out of range" — a card that refuses to play with
+  // no reason it can name is worse than one that plays a track you can hear.
+  const insideZone = distanceM == null || distanceM < zoneRadius;
+
+  // Preset names arrive from the API; until they do, the fallback list stands
+  // in and an upload is named after its file either way.
+  const [presets, setPresets] = useState<ZonePreset[]>(cachedZonePresets);
+  useEffect(() => {
+    let alive = true;
+    loadZonePresets().then((list) => { if (alive) setPresets(list); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   return (
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
@@ -1235,6 +1211,39 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
                 {user.motion_class === 'fast' ? 'Moving fast' : 'On the move'}
               </Text>
             )}
+          </View>
+        )}
+
+        {/* Their zone, on the person it belongs to — the map used to float this
+            over everything as a banner, which is how it ended up playing to
+            people who had never asked for it. */}
+        {zoneUrl && (
+          <View style={styles.zoneSection}>
+            <Text style={styles.sectionLabel}>Zone music</Text>
+            <ZonePlayer
+              // Remounts per track, so switching between two friends' cards
+              // cannot leave the previous one loaded.
+              key={zoneUrl}
+              url={zoneUrl}
+              title={trackTitle(zoneUrl, presets)}
+              subtitle={
+                insideZone
+                  ? `@${user.username} · inside their ${fmtRadius(zoneRadius)} zone`
+                  : `@${user.username} · ${fmtRadius(zoneRadius)} zone`
+              }
+              blockedReason={
+                insideZone
+                  ? null
+                  : `Out of range — step inside their ${fmtRadius(zoneRadius)} zone to listen`
+              }
+              accessibilityName={`${user.username}'s zone track`}
+            />
+            <View style={styles.zoneNote}>
+              <IconLock size={12} color={colors.t3} />
+              <Text style={styles.zoneNoteText}>
+                Audible to their friends only. It stays silent until you press play.
+              </Text>
+            </View>
           </View>
         )}
 
@@ -1327,9 +1336,6 @@ export default function MapScreen() {
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [selfProfile, setSelfProfile] = useState<{ username: string; profile_picture?: string } | null>(null);
-  /** Always a friend's zone with playable audio, or null. */
-  const [activeZone, setActiveZone]   = useState<{ username: string; audioUrl: string } | null>(null);
-  const [isPlaying, setIsPlaying]     = useState(false);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
   const [hiToast, setHiToast]           = useState(false);
   const [locationToast, setLocationToast] = useState(false);
@@ -1343,11 +1349,7 @@ export default function MapScreen() {
   const coordsRef          = useRef(coords);
   const hiToastTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const soundRef           = useRef<Audio.Sound | null>(null);
   const currentUserIdRef   = useRef<number | null>(null);
-  const playingUrlRef      = useRef<string | null>(null);
-  const mutedZoneRef       = useRef<string | null>(null);
-  const announcedZoneRef   = useRef<string | null>(null);
   const mapRef             = useRef<MapView | null>(null);
   /** Last region the map settled on, so recentering can keep the user's zoom
    * instead of snapping back to the default every time they move. */
@@ -1503,105 +1505,15 @@ export default function MapScreen() {
     } catch {}
   }, []);
 
-  async function stopZone() {
-    playingUrlRef.current = null;
-    if (soundRef.current) {
-      await soundRef.current.stopAsync().catch(() => {});
-      await soundRef.current.unloadAsync().catch(() => {});
-      soundRef.current = null;
-    }
-    setIsPlaying(false);
-  }
-
-  async function playZone(url: string, username: string) {
-    await stopZone();
-    console.log('[Zone] attempting to play audio:', url);
-    try {
-      await Audio.setAudioModeAsync({
-        staysActiveInBackground: true,
-        playsInSilentModeIOS: true,
-      });
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: url },
-        { shouldPlay: true, isLooping: true },
-      );
-      soundRef.current = sound;
-      playingUrlRef.current = url;
-      setIsPlaying(true);
-      console.log('[Zone] audio playing successfully');
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (!status.isLoaded) setIsPlaying(false);
-      });
-    } catch (e: any) {
-      console.log('[Zone] audio play error:', e.message);
-      setIsPlaying(false);
-    }
-  }
-
-  // Detect the zone the banner and audio follow.
+  // Zone audio is no longer the map's to play. There is no screen-level sound
+  // any more, no autoplay when you cross into someone's circle, and nothing to
+  // stop on unmount: a friend's track is loaded by the player inside their card
+  // and unloaded when that card closes. Walking into a zone is an invitation,
+  // not a command to a stranger's phone speaker.
   //
-  // A friend's zone, or nothing. The banner exists to offer you music you can
-  // actually play, so the two cases that used to reach it no longer do:
-  //
-  //   A stranger's or connection's zone — including an interest match, which
-  //   is the only kind of stranger the map draws at all — used to appear as a
-  //   locked "Friends only" row. That is a banner announcing something you
-  //   can't do, in the one place you can't act on it.
-  //
-  //   The owner's own zone used to appear too, captioned "You are in no one's
-  //   zone". It is your own music, you already know it's there, and it was
-  //   never autoplayed anyway.
-  useEffect(() => {
-    // The server omits zone_audio_url for anyone the owner's Zone audio
-    // setting excludes, so a friend without a URL is a friend whose audio we
-    // are not allowed to play — that's a no-banner case too, not a locked one.
-    const friendZone = visibleNearby.find((u) =>
-      u.zone_active &&
-      friendIds.has(Number(u.id)) &&
-      u.zone_audio_url &&
-      (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
-    );
-    console.log('[Zone] friend zone in range:', friendZone?.username ?? 'none');
-
-    if (!friendZone?.zone_audio_url) {
-      setActiveZone(null);
-      mutedZoneRef.current = null;
-      announcedZoneRef.current = null;
-      if (playingUrlRef.current) stopZone();
-      return;
-    }
-
-    const next = { username: friendZone.username, audioUrl: friendZone.zone_audio_url };
-    setActiveZone(next);
-
-    // The banner slides in on its own as you walk into a zone, with no focus
-    // change to hint at it. Announced from here rather than via
-    // accessibilityLiveRegion, which is Android-only — and guarded, because
-    // this effect re-runs on every 10s poll.
-    if (announcedZoneRef.current !== next.username) {
-      announcedZoneRef.current = next.username;
-      announce(`You are in ${next.username}'s zone. Their music is available.`);
-    }
-    if (mutedZoneRef.current && mutedZoneRef.current !== next.username) mutedZoneRef.current = null;
-
-    // Stop stale audio when the zone (or its track) changed.
-    if (playingUrlRef.current && playingUrlRef.current !== next.audioUrl) stopZone();
-
-    // Only when nothing is playing yet and the user hasn't muted it — the
-    // nearby poll re-runs this effect every 10s, and an unguarded playZone()
-    // here restarts the track each time.
-    if (!playingUrlRef.current && mutedZoneRef.current !== next.username) {
-      const { audioUrl, username } = next;
-      getPref('zoneAutoplay').then((autoplay) => {
-        if (autoplay && !playingUrlRef.current) playZone(audioUrl, username);
-      });
-    }
-  }, [visibleNearby, friendIds]);
-
-  // Stop audio on unmount
-  useEffect(() => {
-    return () => { stopZone(); };
-  }, []);
+  // Only the track *names* are fetched here, once, so a friend's card can say
+  // "Rain" instead of the URL it came from.
+  useEffect(() => { loadZonePresets().catch(() => {}); }, []);
 
   function handleHiSent() {
     fetchFriends();
@@ -2299,24 +2211,7 @@ export default function MapScreen() {
         onList={() => router.push('/nearby')}
       />
 
-      {/* Zone banner */}
-      {activeZone && (
-        <ZoneBanner
-          username={activeZone.username}
-          isPlaying={isPlaying}
-          onTap={() => {
-            mutedZoneRef.current = null;
-            playZone(activeZone.audioUrl, activeZone.username);
-          }}
-          onMute={() => {
-            mutedZoneRef.current = activeZone.username;
-            stopZone();
-          }}
-        />
-      )}
-
-
-      {/* User detail sheet */}
+      {/* User detail sheet — where zone audio lives now. */}
       {selectedUser && (
         <UserSheet
           user={selectedUser}
@@ -2671,36 +2566,21 @@ const styles = StyleSheet.create({
     borderColor: colors.tealLine,
   },
 
-  // ── Zone banner (solid card) ──
-  zoneBanner: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
+  // ── Zone audio, inside the sheet ──
+  zoneSection: { marginBottom: 16, gap: 8 },
+  zoneNote: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    borderRadius: radius.m,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    zIndex: 90,
+    gap: 6,
+    paddingHorizontal: 2,
   },
-  zoneBannerText: {
+  zoneNoteText: {
     flex: 1,
     fontFamily: fonts.body,
-    fontSize: 13,
-    color: colors.t1,
+    fontSize: 11.5,
+    lineHeight: 15,
+    color: colors.t3,
   },
-  zoneBannerUser: { fontWeight: '600' },
-  zoneBannerAction: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.teal,
-  },
-
 
   // ── Sheet ──
   backdrop: { backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 150 },

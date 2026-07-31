@@ -118,10 +118,10 @@ export default function ClubDetailScreen() {
 
     if (clubRes.status === 'fulfilled') {
       let clubData = clubRes.value.data;
-      if (meId && !clubData.role && !clubData.is_member) {
+      if (meId && !clubData.my_role && !clubData.is_member) {
         const myMembership = fetchedMembers.find((m) => Number(m.user.id) === Number(meId));
         if (myMembership) {
-          clubData = { ...clubData, role: myMembership.role, is_member: true };
+          clubData = { ...clubData, my_role: myMembership.role, is_member: true };
         }
       }
       setClub(clubData);

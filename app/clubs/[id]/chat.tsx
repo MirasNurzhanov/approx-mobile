@@ -26,6 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { clubsApi } from '@/services/clubs';
+import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
 import { colors, fonts, radius } from '@/constants/theme';
@@ -39,7 +40,7 @@ interface MeetupProposal {
   id: number;
   title: string;
   description?: string;
-  scheduled_at: string;
+  event_datetime: string;
   location_name?: string;
   latitude?: number;
   longitude?: number;
@@ -67,6 +68,7 @@ interface RawMsg {
   body?: string;
   image?: string;
   message_type?: string;
+  event?: unknown;   // ClubMessageSerializer nests the ClubEvent here
   proposal?: unknown;
   sender_id?: number | string;
   sender?: number | string | { id: number | string; username?: string; profile_picture?: string };
@@ -120,7 +122,7 @@ function normalise(raw: RawMsg, fallbackId?: string): ClubMessage {
     text:         textVal != null ? String(textVal) : undefined,
     image:        raw.image as string | undefined,
     message_type: raw.message_type,
-    proposal:     raw.proposal as MeetupProposal | undefined,
+    proposal:     (raw.event ?? raw.proposal) as MeetupProposal | undefined,
     sender_id,
     sender_username,
     sender_avatar,
@@ -234,19 +236,35 @@ function ProposalCard({
   proposal,
   proposerUsername,
   viewerIsOwner,
+  viewerIsProposer,
   onApprove,
   onReject,
+  onDelete,
   actioningId,
 }: {
   proposal: MeetupProposal;
   proposerUsername?: string;
   viewerIsOwner: boolean;
+  viewerIsProposer: boolean;
   onApprove: (id: number) => void;
   onReject: (id: number) => void;
+  onDelete: (id: number) => void;
   actioningId: number | null;
 }) {
   const statusColor = STATUS_COLORS[proposal.status] ?? STATUS_COLORS.pending;
   const isActioning = actioningId === proposal.id;
+  const canDelete = viewerIsOwner || viewerIsProposer;
+
+  function confirmDelete() {
+    Alert.alert(
+      'Delete this meetup?',
+      'This removes it from the chat and the map.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => onDelete(proposal.id) },
+      ],
+    );
+  }
 
   return (
     <View style={cardStyles.card}>
@@ -256,10 +274,17 @@ function ProposalCard({
           <Ionicons name="calendar-outline" size={13} color={colors.teal} />
           <Text style={cardStyles.headerLabel}>MEETUP PROPOSAL</Text>
         </View>
-        <View style={[cardStyles.statusBadge, { backgroundColor: statusColor.bg }]}>
-          <Text style={[cardStyles.statusText, { color: statusColor.text }]}>
-            {proposal.status.toUpperCase()}
-          </Text>
+        <View style={cardStyles.headerRight}>
+          <View style={[cardStyles.statusBadge, { backgroundColor: statusColor.bg }]}>
+            <Text style={[cardStyles.statusText, { color: statusColor.text }]}>
+              {proposal.status.toUpperCase()}
+            </Text>
+          </View>
+          {canDelete && (
+            <Pressable onPress={confirmDelete} hitSlop={10} style={cardStyles.menuBtn}>
+              <Ionicons name="ellipsis-vertical" size={16} color={colors.t2} />
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -268,7 +293,7 @@ function ProposalCard({
         <Text style={cardStyles.title}>{proposal.title}</Text>
         <View style={cardStyles.metaRow}>
           <Ionicons name="time-outline" size={13} color={colors.t3} />
-          <Text style={cardStyles.metaText}>{fmtDateTime(proposal.scheduled_at)}</Text>
+          <Text style={cardStyles.metaText}>{fmtDateTime(proposal.event_datetime)}</Text>
         </View>
         {proposal.location_name ? (
           <View style={cardStyles.metaRow}>
@@ -327,9 +352,11 @@ const cardStyles = StyleSheet.create({
     borderBottomColor: colors.tealLine,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerLabel: { fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 1, color: colors.teal },
   statusBadge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   statusText: { fontFamily: fonts.body, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  menuBtn: { padding: 2 },
 
   body: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10, gap: 5 },
   title: { fontFamily: fonts.display, fontSize: 16, fontWeight: '700', color: colors.t1 },
@@ -392,16 +419,15 @@ export default function ClubChatScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [actioningEventId, setActioningEventId] = useState<number | null>(null);
 
-  // ── Proposal modal state ──────────────────────────────────────────────────
-  const [showProposalModal, setShowProposalModal] = useState(false);
+  // ── Proposal / map modal state ────────────────────────────────────────────
+  const [modalView, setModalView] = useState<'proposal' | 'map' | null>(null);
   const [propTitle, setPropTitle] = useState('');
   const [propDesc, setPropDesc] = useState('');
-  const [propDateTime, setPropDateTime] = useState<Date>(defaultProposalDate());
+  const [propDateTime, setPropDateTime] = useState<Date>(defaultProposalDate);
   const [propLocation, setPropLocation] = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [proposalSubmitting, setProposalSubmitting] = useState(false);
 
   // ── Map picker state ──────────────────────────────────────────────────────
-  const [showMapPicker, setShowMapPicker] = useState(false);
   const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
   const [gettingLocation, setGettingLocation] = useState(false);
 
@@ -434,7 +460,7 @@ export default function ClubChatScreen() {
   const fetchRole = useCallback(async () => {
     try {
       const { data } = await clubsApi.get(clubId);
-      setViewerIsOwner(data.role === 'owner');
+      setViewerIsOwner(data.my_role === 'owner');
     } catch {}
   }, [clubId]);
 
@@ -634,12 +660,12 @@ export default function ClubChatScreen() {
     } catch {}
     setPropLocation({ name: locationName, lat: latitude, lng: longitude });
     setGettingLocation(false);
-    setShowMapPicker(false);
+    setModalView('proposal');
   }
 
   // ── Proposal submit ───────────────────────────────────────────────────────
   function closeProposalModal() {
-    setShowProposalModal(false);
+    setModalView(null);
     setPropTitle('');
     setPropDesc('');
     setPropDateTime(defaultProposalDate());
@@ -653,19 +679,32 @@ export default function ClubChatScreen() {
     }
     setProposalSubmitting(true);
     try {
-      await api.post(`/api/clubs/${clubId}/events/`, {
+      const body = {
         title: propTitle.trim(),
         description: propDesc.trim() || undefined,
-        scheduled_at: propDateTime.toISOString(),
+        event_datetime: propDateTime.toISOString(),
         location_name: propLocation?.name,
         latitude: propLocation?.lat,
         longitude: propLocation?.lng,
-      });
+      };
+      console.log('[Proposal] POST body:', JSON.stringify(body));
+      await api.post(`/api/clubs/${clubId}/events/`, body);
       closeProposalModal();
     } catch (e: any) {
       Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create proposal.');
     } finally {
       setProposalSubmitting(false);
+    }
+  }
+
+  // ── Delete proposal ───────────────────────────────────────────────────────
+  async function handleDelete(proposalId: number) {
+    try {
+      await api.delete(`/api/clubs/events/${proposalId}/`);
+      setMessages((prev) => prev.filter((m) => m.proposal?.id !== proposalId));
+      removeMeetupFromMap(proposalId);
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not delete meetup.');
     }
   }
 
@@ -754,6 +793,9 @@ export default function ClubChatScreen() {
             const hydratedItem = hydrate(item);
 
             // ── Meetup proposal card ──────────────────────────────────────
+            if (item.message_type === 'meetup_proposal') {
+              console.log('[Proposal] raw message:', JSON.stringify(item));
+            }
             if (item.message_type === 'meetup_proposal' && item.proposal) {
               return (
                 <View style={styles.proposalRow}>
@@ -761,8 +803,10 @@ export default function ClubChatScreen() {
                     proposal={item.proposal}
                     proposerUsername={hydratedItem.sender_username}
                     viewerIsOwner={viewerIsOwner}
+                    viewerIsProposer={item.sender_id === currentUserIdRef.current}
                     onApprove={handleApprove}
                     onReject={handleReject}
+                    onDelete={handleDelete}
                     actioningId={actioningEventId}
                   />
                   <Text style={styles.proposalTime}>{fmtTime(item.created_at)}</Text>
@@ -812,7 +856,7 @@ export default function ClubChatScreen() {
         <Pressable style={styles.attachBtn} onPress={handleAttach} hitSlop={4}>
           <Ionicons name="image-outline" size={20} color={colors.t3} />
         </Pressable>
-        <Pressable style={styles.attachBtn} onPress={() => setShowProposalModal(true)} hitSlop={4}>
+        <Pressable style={styles.attachBtn} onPress={() => setModalView('proposal')} hitSlop={4}>
           <Ionicons name="calendar-outline" size={20} color={colors.t3} />
         </Pressable>
         <TextInput
@@ -838,135 +882,141 @@ export default function ClubChatScreen() {
       </View>
       {primer}
 
-      {/* ── Proposal modal ──────────────────────────────────────────────── */}
-      <Modal visible={showProposalModal} transparent animationType="slide" onRequestClose={closeProposalModal}>
-        <Pressable style={styles.modalBackdrop} onPress={closeProposalModal} />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
-          <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
-            <View style={styles.modalHandle} />
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Propose a Meetup</Text>
-              <Pressable onPress={closeProposalModal} hitSlop={10}>
-                <Ionicons name="close" size={22} color={colors.t2} />
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Title */}
-              <Text style={styles.fieldLabel}>Title <Text style={styles.required}>*</Text></Text>
-              <TextInput
-                style={styles.fieldInput}
-                value={propTitle}
-                onChangeText={setPropTitle}
-                placeholder="e.g. Morning hike at Shymbulak"
-                placeholderTextColor={colors.t3}
-                maxLength={80}
-              />
-
-              {/* Description */}
-              <Text style={styles.fieldLabel}>Description</Text>
-              <TextInput
-                style={[styles.fieldInput, styles.fieldTextArea]}
-                value={propDesc}
-                onChangeText={setPropDesc}
-                placeholder="Details, what to bring, etc."
-                placeholderTextColor={colors.t3}
-                multiline
-                numberOfLines={3}
-                maxLength={400}
-                textAlignVertical="top"
-              />
-
-              {/* Date / time */}
-              <Text style={styles.fieldLabel}>Date &amp; Time</Text>
-              <DateTimePicker value={propDateTime} onChange={setPropDateTime} />
-
-              {/* Location */}
-              <Text style={styles.fieldLabel}>Location</Text>
-              <View style={styles.locationRow}>
-                <Pressable
-                  style={[styles.locationBtn, gettingLocation && styles.locationBtnBusy]}
-                  onPress={handleCurrentLocation}
-                  disabled={gettingLocation}
-                >
-                  {gettingLocation
-                    ? <ActivityIndicator size="small" color={colors.teal} />
-                    : <Ionicons name="navigate-outline" size={16} color={colors.teal} />
-                  }
-                  <Text style={styles.locationBtnText}>My location</Text>
-                </Pressable>
-                <Pressable style={styles.locationBtn} onPress={() => setShowMapPicker(true)}>
-                  <Ionicons name="map-outline" size={16} color={colors.teal} />
-                  <Text style={styles.locationBtnText}>Pick on map</Text>
-                </Pressable>
-              </View>
-              {propLocation && (
-                <View style={styles.locationPreview}>
-                  <Ionicons name="location" size={14} color={colors.teal} />
-                  <Text style={styles.locationPreviewText} numberOfLines={1}>{propLocation.name}</Text>
-                  <Pressable onPress={() => setPropLocation(null)} hitSlop={8}>
-                    <Ionicons name="close-circle" size={16} color={colors.t3} />
+      {/* ── Single modal: proposal form or map picker ────────────────────── */}
+      <Modal
+        visible={modalView !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={modalView === 'map' ? () => setModalView('proposal') : closeProposalModal}
+      >
+        {modalView === 'proposal' ? (
+          <>
+            <Pressable style={styles.modalBackdrop} onPress={closeProposalModal} />
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
+              <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
+                <View style={styles.modalHandle} />
+                <View style={styles.modalHeaderRow}>
+                  <Text style={styles.modalTitle}>Propose a Meetup</Text>
+                  <Pressable onPress={closeProposalModal} hitSlop={10}>
+                    <Ionicons name="close" size={22} color={colors.t2} />
                   </Pressable>
                 </View>
-              )}
 
-              {/* Submit */}
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                  {/* Title */}
+                  <Text style={styles.fieldLabel}>Title <Text style={styles.required}>*</Text></Text>
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={propTitle}
+                    onChangeText={setPropTitle}
+                    placeholder="e.g. Morning hike at Shymbulak"
+                    placeholderTextColor={colors.t3}
+                    maxLength={80}
+                  />
+
+                  {/* Description */}
+                  <Text style={styles.fieldLabel}>Description</Text>
+                  <TextInput
+                    style={[styles.fieldInput, styles.fieldTextArea]}
+                    value={propDesc}
+                    onChangeText={setPropDesc}
+                    placeholder="Details, what to bring, etc."
+                    placeholderTextColor={colors.t3}
+                    multiline
+                    numberOfLines={3}
+                    maxLength={400}
+                    textAlignVertical="top"
+                  />
+
+                  {/* Date / time */}
+                  <Text style={styles.fieldLabel}>Date &amp; Time</Text>
+                  <DateTimePicker value={propDateTime} onChange={setPropDateTime} />
+
+                  {/* Location */}
+                  <Text style={styles.fieldLabel}>Location</Text>
+                  <View style={styles.locationRow}>
+                    <Pressable
+                      style={[styles.locationBtn, gettingLocation && styles.locationBtnBusy]}
+                      onPress={handleCurrentLocation}
+                      disabled={gettingLocation}
+                    >
+                      {gettingLocation
+                        ? <ActivityIndicator size="small" color={colors.teal} />
+                        : <Ionicons name="navigate-outline" size={16} color={colors.teal} />
+                      }
+                      <Text style={styles.locationBtnText}>My location</Text>
+                    </Pressable>
+                    <Pressable style={styles.locationBtn} onPress={() => setModalView('map')}>
+                      <Ionicons name="map-outline" size={16} color={colors.teal} />
+                      <Text style={styles.locationBtnText}>Pick on map</Text>
+                    </Pressable>
+                  </View>
+                  {propLocation && (
+                    <View style={styles.locationPreview}>
+                      <Ionicons name="location" size={14} color={colors.teal} />
+                      <Text style={styles.locationPreviewText} numberOfLines={1}>{propLocation.name}</Text>
+                      <Pressable onPress={() => setPropLocation(null)} hitSlop={8}>
+                        <Ionicons name="close-circle" size={16} color={colors.t3} />
+                      </Pressable>
+                    </View>
+                  )}
+
+                  {/* Submit */}
+                  <Pressable
+                    style={[styles.submitBtn, proposalSubmitting && styles.submitBtnBusy]}
+                    onPress={handleProposalSubmit}
+                    disabled={proposalSubmitting}
+                  >
+                    {proposalSubmitting
+                      ? <ActivityIndicator color={colors.bg} size="small" />
+                      : <Text style={styles.submitBtnText}>Send Proposal</Text>
+                    }
+                  </Pressable>
+                </ScrollView>
+              </View>
+            </KeyboardAvoidingView>
+          </>
+        ) : (
+          <View style={styles.mapPickerRoot}>
+            {/* Map header */}
+            <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
+              <Pressable onPress={() => setModalView('proposal')} hitSlop={12} style={styles.backBtn}>
+                <Ionicons name="chevron-back" size={24} color={colors.t1} />
+              </Pressable>
+              <Text style={styles.mapPickerTitle}>Drop a pin</Text>
+              <View style={{ width: 36 }} />
+            </View>
+
+            {/* Map */}
+            <View style={styles.mapWrap}>
+              <MapView
+                style={StyleSheet.absoluteFill}
+                provider={PROVIDER_GOOGLE}
+                initialRegion={mapRegion}
+                onRegionChangeComplete={setMapRegion}
+              />
+              {/* Fixed center pin */}
+              <View pointerEvents="none" style={styles.centerPin}>
+                <Ionicons name="location" size={36} color={colors.teal} />
+                <View style={styles.centerPinDot} />
+              </View>
+            </View>
+
+            {/* Confirm */}
+            <View style={[styles.mapConfirmBar, { paddingBottom: bottom + 16 }]}>
               <Pressable
-                style={[styles.submitBtn, proposalSubmitting && styles.submitBtnBusy]}
-                onPress={handleProposalSubmit}
-                disabled={proposalSubmitting}
+                style={[styles.mapConfirmBtn, gettingLocation && styles.submitBtnBusy]}
+                onPress={confirmMapLocation}
+                disabled={gettingLocation}
               >
-                {proposalSubmitting
+                {gettingLocation
                   ? <ActivityIndicator color={colors.bg} size="small" />
-                  : <Text style={styles.submitBtnText}>Send Proposal</Text>
+                  : <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
                 }
               </Pressable>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* ── Map picker modal ─────────────────────────────────────────────── */}
-      <Modal visible={showMapPicker} animationType="slide" onRequestClose={() => setShowMapPicker(false)}>
-        <View style={styles.mapPickerRoot}>
-          {/* Map header */}
-          <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
-            <Pressable onPress={() => setShowMapPicker(false)} hitSlop={12} style={styles.backBtn}>
-              <Ionicons name="chevron-back" size={24} color={colors.t1} />
-            </Pressable>
-            <Text style={styles.mapPickerTitle}>Drop a pin</Text>
-            <View style={{ width: 36 }} />
-          </View>
-
-          {/* Map */}
-          <View style={styles.mapWrap}>
-            <MapView
-              style={StyleSheet.absoluteFill}
-              provider={PROVIDER_GOOGLE}
-              initialRegion={mapRegion}
-              onRegionChangeComplete={setMapRegion}
-            />
-            {/* Fixed center pin */}
-            <View pointerEvents="none" style={styles.centerPin}>
-              <Ionicons name="location" size={36} color={colors.teal} />
-              <View style={styles.centerPinDot} />
             </View>
           </View>
-
-          {/* Confirm */}
-          <View style={[styles.mapConfirmBar, { paddingBottom: bottom + 16 }]}>
-            <Pressable
-              style={[styles.mapConfirmBtn, gettingLocation && styles.submitBtnBusy]}
-              onPress={confirmMapLocation}
-              disabled={gettingLocation}
-            >
-              {gettingLocation
-                ? <ActivityIndicator color={colors.bg} size="small" />
-                : <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
-              }
-            </Pressable>
-          </View>
-        </View>
+        )}
       </Modal>
     </KeyboardAvoidingView>
   );

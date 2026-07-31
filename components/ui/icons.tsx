@@ -104,6 +104,17 @@ export function IconPin({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
+export function IconCalendar({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={3.5} y={4.5} width={17} height={16} rx={1.5} />
+        <Path d="M3.5 9.5h17M8.5 4.5V2.5M15.5 4.5V2.5" />
+      </G>
+    </Svg>
+  )
+}
+
 export function IconImage({ size = 24, color = colors.t2 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">

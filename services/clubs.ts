@@ -15,8 +15,8 @@ export interface Club {
   emblem?: string;
   interest?: ClubInterest;
   member_count: number;
-  creator?: number;
-  role?: ClubRole;
+  creator?: number | { id: number; username: string };
+  my_role?: ClubRole;   // SerializerMethodField — the viewer's own role
   is_member?: boolean;
 }
 

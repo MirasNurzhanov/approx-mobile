@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm install *)",
       "Bash(grep -E \"^\\\\-.*\\\\.\\(tsx|ts\\)$\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(xargs ls -1)"
     ]
   }
 }

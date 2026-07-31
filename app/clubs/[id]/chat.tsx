@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { clubsApi } from '@/services/clubs';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
 import { colors, fonts, radius } from '@/constants/theme';
@@ -369,19 +370,18 @@ const cardStyles = StyleSheet.create({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ClubChatScreen() {
-  const { id, name, emblem, memberCount, isOwner: isOwnerParam } = useLocalSearchParams<{
+  const { id, name, emblem, memberCount } = useLocalSearchParams<{
     id: string;
     name?: string;
     emblem?: string;
     memberCount?: string;
-    isOwner?: string;
   }>();
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   const clubId = Number(id);
-  const viewerIsOwner = isOwnerParam === '1';
+  const [viewerIsOwner, setViewerIsOwner] = useState(false);
 
   // ── Chat state ────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ClubMessage[]>([]);
@@ -429,6 +429,18 @@ export default function ClubChatScreen() {
       .then((r) => { currentUserIdRef.current = Number(r.data.id); })
       .catch(() => {});
   }, []);
+
+  // ── Ownership — fetch on mount and re-check whenever screen is focused ────
+  const fetchRole = useCallback(async () => {
+    try {
+      const { data } = await clubsApi.get(clubId);
+      setViewerIsOwner(data.role === 'owner');
+    } catch {}
+  }, [clubId]);
+
+  useEffect(() => { fetchRole(); }, [fetchRole]);
+
+  useFocusEffect(useCallback(() => { fetchRole(); }, [fetchRole]));
 
   // ── History ───────────────────────────────────────────────────────────────
   useEffect(() => {

@@ -403,7 +403,6 @@ export default function ClubDetailScreen() {
                     name: club.name,
                     emblem: club.emblem ?? '',
                     memberCount: members.length || club.member_count,
-                    isOwner: isOwner ? '1' : '0',
                   },
                 } as any)
               }

@@ -78,7 +78,8 @@ function AppShell() {
       <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="create-club"    options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="create-club"     options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="market"          options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="modal"           options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
   );

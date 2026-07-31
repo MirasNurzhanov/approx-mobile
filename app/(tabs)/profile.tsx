@@ -16,6 +16,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Ionicons } from '@expo/vector-icons';
+
 import { api } from '@/services/api';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
@@ -37,6 +39,7 @@ import {
   IconSound,
   iconForInterest,
   type IconComponent,
+  type IconProps,
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { colors, fonts, radius } from '@/constants/theme';
@@ -74,6 +77,10 @@ function ActionRow({ icon: Icon, label, onPress }: {
       <IconChevron size={16} color={colors.t3} />
     </Pressable>
   );
+}
+
+function IconMarket({ size = 24 }: IconProps): React.JSX.Element {
+  return <Ionicons name="storefront-outline" size={size} color={colors.teal} />;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -235,10 +242,14 @@ export default function ProfileScreen() {
 
             <View style={styles.pillRow}>
               {profile?.aura_points != null && (
-                <View style={styles.pill}>
+                <Pressable
+                  style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+                  onPress={() => router.push('/market')}
+                >
                   <AuraMark size={13} color={colors.purple} />
                   <Text style={styles.pillAura}>{profile.aura_points.toLocaleString()}</Text>
-                </View>
+                  <IconChevron size={11} color={colors.purple} />
+                </Pressable>
               )}
               {profile?.date_joined ? (
                 <View style={styles.pill}>
@@ -297,6 +308,7 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>MORE</Text>
           <View style={styles.rowGroup}>
+            <ActionRow icon={IconMarket} label="Market"         onPress={() => router.push('/market')} />
             <ActionRow icon={IconSound}  label="My zone"        onPress={() => router.push('/zone')} />
             <ActionRow icon={IconHeart}  label="Edit interests" onPress={() => router.push('/interests')} />
             <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/saved-stories')} />

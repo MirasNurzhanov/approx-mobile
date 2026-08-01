@@ -15,12 +15,18 @@ import { api } from './api';
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type ZoneMode = 'radius' | 'region';
 
+/** The two sizes a region zone comes in. `other` exists because the cache also
+ *  holds things that are neither — a province, a country — reachable by search
+ *  but never by the two buttons. */
+export type RegionKind = 'city' | 'district' | 'other';
+
 /** A region without its geometry — enough to list and label, not to draw. */
 export interface RegionSummary {
   id: number;
   name: string;
   display_name: string;
   country_code: string;
+  kind: RegionKind;
   admin_level: number | null;
   min_lat: number;
   min_lon: number;
@@ -109,21 +115,44 @@ export async function searchRegions(query: string): Promise<RegionSummary[]> {
   return Array.isArray(data) ? data : [];
 }
 
-/** The region containing a point — "my city". Null when nothing covers it,
- *  which is a real answer at sea or in unmapped territory. */
+/** What a "where am I" lookup produced. `region` is null when nothing of the
+ *  requested size covers the point — at sea, in unmapped territory, or, for a
+ *  district lookup, in a city with no mapped subdivisions. In that last case
+ *  `fallback` carries the city, so the screen can offer it by name instead of
+ *  saying only that it found nothing. */
+export interface RegionLookup {
+  region: RegionSummary | null;
+  fallback: RegionSummary | null;
+}
+
+/** The place containing a point, at the size asked for.
+ *
+ * Never silently substitutes one size for another: asking for a district and
+ * receiving the whole city would widen a zone by orders of magnitude without
+ * the user choosing it. */
 export async function regionForPoint(
   latitude: number,
   longitude: number,
-): Promise<RegionSummary | null> {
+  level: 'city' | 'district' = 'city',
+): Promise<RegionLookup> {
   try {
     const { data } = await api.get<RegionSummary>('/api/regions/for-point/', {
-      params: { lat: latitude, lon: longitude },
+      params: { lat: latitude, lon: longitude, level },
     });
-    return data ?? null;
+    return { region: data ?? null, fallback: null };
   } catch (e: any) {
-    if (e?.response?.status === 404) return null;
+    if (e?.response?.status === 404) {
+      return { region: null, fallback: e.response.data?.fallback ?? null };
+    }
     throw e;
   }
+}
+
+/** "City" / "District" — the size label shown beside a place's name. */
+export function kindLabel(kind: RegionKind): string {
+  if (kind === 'city') return 'City';
+  if (kind === 'district') return 'District';
+  return 'Area';
 }
 
 // ─── Geometry ─────────────────────────────────────────────────────────────────

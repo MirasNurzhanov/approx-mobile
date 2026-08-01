@@ -23,6 +23,7 @@ import { colors, fonts, radius as themeRadius, type } from '@/constants/theme';
 import {
   formatRadius,
   getRegion,
+  kindLabel,
   regionForPoint,
   regionViewport,
   searchRegions,
@@ -125,7 +126,8 @@ export default function ZoneAreaScreen() {
   const [results, setResults] = useState<RegionSummary[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [locating, setLocating] = useState(false);
+  /** Which of the two lookup buttons is in flight, so only that one spins. */
+  const [locating, setLocating] = useState<'city' | 'district' | null>(null);
 
   const mapRef = useRef<MapView | null>(null);
 
@@ -255,23 +257,41 @@ export default function ZoneAreaScreen() {
     return () => { alive = false; clearTimeout(timer); };
   }, [query]);
 
-  async function useMyCity() {
-    setLocating(true);
+  /** Trace the place the user is standing in, at one of the two sizes.
+   *
+   * A district lookup that finds nothing offers the city by name rather than
+   * quietly using it — the two are orders of magnitude apart, and picking the
+   * larger one on someone's behalf is not a rounding error. */
+  async function traceMyPlace(level: 'city' | 'district') {
+    setLocating(level);
     setSearchError(null);
     try {
       const position = coords ?? (await currentCoords());
       if (!position) {
-        setSearchError('Location is off, so there is no city to find. Search for it instead.');
+        setSearchError('Location is off, so there is nothing to trace. Search for a place instead.');
         return;
       }
       setCoords(position);
-      const found = await regionForPoint(position.latitude, position.longitude);
-      if (found) commitRegion(found);
-      else setSearchError('Nothing mapped covers where you are. Try searching.');
+      const { region: found, fallback } = await regionForPoint(
+        position.latitude, position.longitude, level,
+      );
+      if (found) {
+        commitRegion(found);
+      } else if (fallback) {
+        setSearchError(
+          `No smaller area is mapped inside ${fallback.name}. Tap "Use my city" to cover all of it.`,
+        );
+      } else {
+        setSearchError(
+          level === 'district'
+            ? 'No district is mapped where you are. Try your city, or search.'
+            : 'Nothing mapped covers where you are. Try searching.',
+        );
+      }
     } catch {
       setSearchError('Could not find your area right now.');
     } finally {
-      setLocating(false);
+      setLocating(null);
     }
   }
 
@@ -402,7 +422,12 @@ export default function ZoneAreaScreen() {
               <View style={styles.chosen}>
                 <Ionicons name="location" size={18} color={colors.purple} />
                 <View style={styles.chosenText}>
-                  <Text style={styles.chosenName}>{region.name}</Text>
+                  <View style={styles.chosenTitleRow}>
+                    <Text style={styles.chosenName} numberOfLines={1}>{region.name}</Text>
+                    <View style={styles.kindTag}>
+                      <Text style={styles.kindTagText}>{kindLabel(region.kind)}</Text>
+                    </View>
+                  </View>
                   <Text style={styles.chosenWhere} numberOfLines={1}>
                     {region.display_name}
                   </Text>
@@ -419,19 +444,40 @@ export default function ZoneAreaScreen() {
               </View>
             ) : null}
 
-            <Pressable
-              style={styles.myCity}
-              onPress={useMyCity}
-              disabled={locating || saving}
-              accessibilityRole="button"
-            >
-              {locating
-                ? <ActivityIndicator color={colors.teal} size="small" />
-                : <Ionicons name="navigate" size={16} color={colors.teal} />}
-              <Text style={styles.myCityText}>
-                {region ? 'Use my city instead' : 'Use my city'}
-              </Text>
-            </Pressable>
+            {/* Two sizes, traced from where you are standing. Side by side
+                rather than one button with a size picker: they are the two
+                answers to the same question, and neither is the default. */}
+            <View style={styles.traceRow}>
+              <Pressable
+                style={[styles.traceBtn, locating === 'city' && styles.traceBtnBusy]}
+                onPress={() => traceMyPlace('city')}
+                disabled={locating !== null || saving}
+                accessibilityRole="button"
+                accessibilityLabel="Use my whole city"
+                accessibilityState={{ disabled: locating !== null || saving }}
+              >
+                {locating === 'city'
+                  ? <ActivityIndicator color={colors.teal} size="small" />
+                  : <Ionicons name="business-outline" size={17} color={colors.teal} />}
+                <Text style={styles.traceLabel}>Use my city</Text>
+                <Text style={styles.traceHint}>The whole city</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.traceBtn, locating === 'district' && styles.traceBtnBusy]}
+                onPress={() => traceMyPlace('district')}
+                disabled={locating !== null || saving}
+                accessibilityRole="button"
+                accessibilityLabel="Use my district, the area inside my city"
+                accessibilityState={{ disabled: locating !== null || saving }}
+              >
+                {locating === 'district'
+                  ? <ActivityIndicator color={colors.teal} size="small" />
+                  : <Ionicons name="navigate-outline" size={17} color={colors.teal} />}
+                <Text style={styles.traceLabel}>Use my district</Text>
+                <Text style={styles.traceHint}>Just my area of it</Text>
+              </Pressable>
+            </View>
 
             <View style={styles.searchRow}>
               <Ionicons name="search" size={16} color={colors.t3} />
@@ -459,7 +505,12 @@ export default function ZoneAreaScreen() {
               >
                 <Ionicons name="map-outline" size={16} color={colors.t2} />
                 <View style={styles.resultText}>
-                  <Text style={styles.resultName}>{r.name}</Text>
+                  <View style={styles.chosenTitleRow}>
+                    <Text style={styles.resultName} numberOfLines={1}>{r.name}</Text>
+                    <View style={styles.kindTag}>
+                      <Text style={styles.kindTagText}>{kindLabel(r.kind)}</Text>
+                    </View>
+                  </View>
                   <Text style={styles.resultWhere} numberOfLines={1}>{r.display_name}</Text>
                 </View>
               </Pressable>
@@ -567,18 +618,35 @@ const styles = StyleSheet.create({
   chosenName: { fontFamily: fonts.body, fontSize: type.body, fontWeight: '600', color: colors.t1 },
   chosenWhere: { fontFamily: fonts.body, fontSize: type.caption, color: colors.t3, marginTop: 1 },
 
-  myCity: {
-    flexDirection: 'row',
+  traceRow: { flexDirection: 'row', gap: 10 },
+  traceBtn: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 11,
+    gap: 4,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
     borderRadius: themeRadius.m,
     borderWidth: 1,
     borderColor: colors.tealLine,
     backgroundColor: colors.tealTint,
   },
-  myCityText: { fontFamily: fonts.body, fontSize: type.small, fontWeight: '600', color: colors.teal },
+  traceBtnBusy: { opacity: 0.7 },
+  traceLabel: { fontFamily: fonts.body, fontSize: type.small, fontWeight: '600', color: colors.teal },
+  traceHint: { fontFamily: fonts.body, fontSize: type.micro, color: colors.t2, textAlign: 'center' },
+
+  chosenTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  kindTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: themeRadius.s,
+    backgroundColor: colors.surface,
+  },
+  kindTagText: {
+    fontFamily: fonts.body,
+    fontSize: type.micro,
+    fontWeight: '600',
+    color: colors.t2,
+  },
 
   searchRow: {
     flexDirection: 'row',

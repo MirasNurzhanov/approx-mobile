@@ -9,8 +9,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "jest",
-    "generate:hobbies": "node scripts/generate-hobby-catalog.mjs"
+    "test": "jest"
   },
   "jest": {
     "preset": "jest-expo"

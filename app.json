@@ -22,11 +22,8 @@
           "fetch",
           "remote-notification"
         ],
-        "NSCameraUsageDescription": "Aura uses the camera to take the photo that proves you completed a quest, and to take photos for stories and chat messages. Quest proof must be taken in the moment — a photo from your library cannot be used.",
+        "NSCameraUsageDescription": "Aura uses the camera to take photos for your stories and chat messages. A photo is only sent when you choose to share it.",
         "NSPhotoLibraryUsageDescription": "Aura lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Aura never reads your library."
-      },
-      "entitlements": {
-        "com.apple.developer.devicecheck.appattest-environment": "development"
       }
     },
     "android": {
@@ -73,7 +70,7 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Aura uses the camera to take the photo that proves you completed a quest, and to take photos for stories and chat messages. Quest proof must be taken in the moment — a photo from your library cannot be used.",
+          "cameraPermission": "Aura uses the camera to take photos for your stories and chat messages. A photo is only sent when you choose to share it.",
           "photosPermission": "Aura lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Aura never reads your library.",
           "microphonePermission": false
         }

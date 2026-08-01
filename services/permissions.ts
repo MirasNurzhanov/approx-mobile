@@ -56,10 +56,10 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   camera: {
     title: 'Camera',
     primer:
-      'Quests are verified from a photo you take right now, so Aura needs the camera. Photos are only sent when you submit a quest, a story, or a message.',
-    purpose: 'Take quest proof photos, stories, and photos in chat.',
+      'Aura needs the camera to post a story or send a photo in chat. Photos are only sent when you choose to share one.',
+    purpose: 'Take stories and photos in chat.',
     denied:
-      'Quests need a live camera photo to be verified, so they can’t be completed until camera access is on.',
+      'Stories and photos in chat need camera access before you can capture one.',
   },
   location: {
     title: 'Location',

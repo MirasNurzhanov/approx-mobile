@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (signingOut.current) return;
     Alert.alert(
       'Sign out?',
-      "You'll need to sign in again to see your map, chats and quests.",
+      "You'll need to sign in again to see your map and chats.",
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign out', style: 'destructive', onPress: () => { logout(); } },

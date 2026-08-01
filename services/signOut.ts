@@ -27,12 +27,6 @@ const PENDING_REVOCATION = 'aura:auth:pendingRevocation';
  * describe the device and the person holding it, not the account, and wiping
  * them would re-run onboarding and silently reset the background-location
  * choice for the next sign-in.
- *
- * `aura:attestation:iosKeyId` is the non-obvious one. It looks device-scoped,
- * but the server registers attested keys per user (`unique_together
- * ('user', 'key_id')`), so leaving it behind means the next account's quest
- * photo proofs are checked against a key that was never registered to them and
- * get refused.
  */
 const ACCOUNT_SCOPED_KEYS = [
   'access_token',
@@ -45,6 +39,9 @@ const ACCOUNT_SCOPED_KEYS = [
   'aura:activity:feed',
   'aura:activity:seenNearby',
   'aura:activity:storyReactions',
+  // Device attestation went out with quests. Nothing writes this any more, but
+  // devices upgrading from a build that had it still hold the previous
+  // account's key — clear it rather than leave it stranded.
   'aura:attestation:iosKeyId',
 ];
 

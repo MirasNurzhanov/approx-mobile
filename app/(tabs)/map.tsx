@@ -47,6 +47,7 @@ import {
     IconPin,
     IconSearch,
     IconShield,
+    iconForInterest,
     type IconComponent,
 } from '@/components/ui/icons';
 import { ZonePlayer } from '@/components/ZonePlayer';
@@ -149,6 +150,14 @@ const APPROX_RADIUS_M = 500;
  *  hiding a card behind it. */
 const DOT_CORE = 14;
 const DOT_HALO = 30;
+/** Halo for a dot carrying an interest glyph. Bigger than DOT_HALO because the
+ *  core has to hold a 13pt icon and its ring, not a 14pt point. */
+const DOT_HALO_ICON = 38;
+
+/** Name plate under a marker. Shared by the avatar markers and by the stranger
+ *  dots, which now carry the interest that put them on your map. */
+const CAPTION_GAP = 5;
+const CAPTION_H = 17;
 
 
 /**
@@ -524,11 +533,26 @@ function distanceBand(m?: number): string | null {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function DotMarker({ coordinate, color, presence, zIndex, onPress }: {
+/**
+ * A matched stranger.
+ *
+ * They stay anonymous — no photo, no name, nothing to screenshot — but not
+ * unexplained. A stranger is only on this map because you share an interest
+ * with them (see `visibleNearby`), and until now that reason was invisible:
+ * the map showed a lit dot with no way to tell why it was there, or what the
+ * two of you had in common, short of tapping it.
+ *
+ * So the dot carries the interest itself. That is the one thing about them
+ * which is safe to show, because it is not really about them — it is the
+ * overlap, and you already know your own half of it.
+ */
+function DotMarker({ coordinate, color, presence, zIndex, sharedInterests, onPress }: {
   coordinate: { latitude: number; longitude: number };
   color: string;
   presence?: Presence;
   zIndex?: number;
+  /** Interests you both have. First one is shown; the rest become a count. */
+  sharedInterests?: string[];
   onPress?: () => void;
 }) {
   // Re-arm tracking briefly when the color changes (friend data arrives after
@@ -536,36 +560,75 @@ function DotMarker({ coordinate, color, presence, zIndex, onPress }: {
   // Presence is in the same bucket: it changes the rasterized bitmap, so it has
   // to re-arm too, but only when it actually flips — not on every poll.
   const online = presence?.is_online;
+  const primary = sharedInterests?.[0];
+  const extra = Math.max((sharedInterests?.length ?? 0) - 1, 0);
+  const InterestIcon = primary ? iconForInterest(primary) : null;
+
   const [settling, setSettling] = useState(true);
   useEffect(() => {
     setSettling(true);
     const t = setTimeout(() => setSettling(false), 400);
     return () => clearTimeout(t);
-  }, [color, online]);
+    // `primary` belongs here with the rest: the marker freezes its own bitmap
+    // once settled, so an interest that arrives on a later poll — the first
+    // one can land before the interest data does — would otherwise never be
+    // drawn at all.
+  }, [color, online, primary, extra]);
+
+  // The glyph needs a bigger core to sit in than a bare point does, and the
+  // caption makes the marker taller than its halo — so the anchor moves off
+  // centre to keep the *dot* over the coordinate rather than the whole box.
+  const haloH = primary ? DOT_HALO_ICON : DOT_HALO;
+  const totalH = primary ? haloH + CAPTION_GAP + CAPTION_H : haloH;
 
   return (
     <Marker
       coordinate={coordinate}
-      anchor={{ x: 0.5, y: 0.5 }}
+      anchor={{ x: 0.5, y: (haloH / 2) / totalH }}
       tracksViewChanges={settling}
       zIndex={zIndex}
+      accessibilityLabel={
+        primary
+          ? `Someone nearby who also likes ${primary}${extra > 0 ? `, and ${extra} more shared` : ''}`
+          : 'Someone nearby with a shared interest'
+      }
       onPress={onPress}
     >
-      {/* The wrapper is the full halo box rather than the dot with the halo
-          bleeding out of it: Android clips marker children to their parent
-          when it rasterizes, so anything outside these bounds would vanish. */}
-      <View style={styles.dotWrap}>
-        {/* Two discs, not one: a wide faint bloom and a tighter brighter one,
-            which is what makes the dot read as lit from within rather than as
-            a flat circle sitting on the map. */}
-        <View style={[styles.dotBloom, { backgroundColor: color }]} />
-        <View style={[styles.dotGlow, { backgroundColor: color }]} />
-        <View style={[styles.userDot, { backgroundColor: color, shadowColor: color }]} />
-        {/* Absent presence renders nothing — PresenceDot returns null — so a
-            hidden state never becomes a visible "offline". */}
-        <View style={styles.dotPresence}>
-          <PresenceDot presence={presence} size={8} haloColor={colors.bg} />
+      {/* Android clips marker children to their parent box when it rasterizes,
+          so the halo and the caption both have to live inside this column. */}
+      <View style={styles.dotColumn}>
+        <View style={[styles.dotWrap, { width: haloH, height: haloH }]}>
+          {/* Two discs, not one: a wide faint bloom and a tighter brighter one,
+              which is what makes the dot read as lit from within rather than as
+              a flat circle sitting on the map. */}
+          <View style={[styles.dotBloom, { width: haloH, height: haloH, borderRadius: haloH / 2, backgroundColor: color }]} />
+          {InterestIcon ? (
+            <View style={[styles.dotIconCore, { borderColor: color, shadowColor: color }]}>
+              <InterestIcon size={13} color={color} />
+            </View>
+          ) : (
+            <>
+              <View style={[styles.dotGlow, { backgroundColor: color }]} />
+              <View style={[styles.userDot, { backgroundColor: color, shadowColor: color }]} />
+            </>
+          )}
+          {/* Absent presence renders nothing — PresenceDot returns null — so a
+              hidden state never becomes a visible "offline". */}
+          <View style={[styles.dotPresence, primary && styles.dotPresenceIcon]}>
+            <PresenceDot presence={presence} size={8} haloColor={colors.bg} />
+          </View>
         </View>
+
+        {primary ? (
+          <View style={styles.markerCaption}>
+            <Text style={styles.markerCaptionText} numberOfLines={1}>
+              {primary}
+              {extra > 0 ? (
+                <Text style={[styles.markerCaptionTag, { color }]}>{` +${extra}`}</Text>
+              ) : null}
+            </Text>
+          </View>
+        ) : null}
       </View>
     </Marker>
   );
@@ -591,8 +654,6 @@ interface AvatarMarkerProps {
 
 /** Caption geometry, needed up front: the anchor has to be computed from the
  *  full marker height so the ring — not the whole box — sits on the point. */
-const CAPTION_GAP = 5;
-const CAPTION_H = 17;
 
 function AvatarMarker({
   coordinate,
@@ -2255,6 +2316,7 @@ export default function MapScreen() {
                 coordinate={layout.position}
                 color={color}
                 presence={user.presence}
+                sharedInterests={user.shared_interests}
                 zIndex={Z_STRANGER}
                 onPress={() => openSheet(user)}
               />
@@ -2443,11 +2505,28 @@ const styles = StyleSheet.create({
   // The box stays DOT_HALO wide whatever the core does — it is also the touch
   // target, and at latitudeDelta 0.012 (~2 m per pixel) a 30 px box is about
   // the smallest thing a thumb can reliably hit among neighbours.
+  /** Column so the caption sits under the halo and inside the rasterized box. */
+  dotColumn: { alignItems: 'center' },
   dotWrap: {
     width: DOT_HALO,
     height: DOT_HALO,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  /** The interest glyph's core. A ringed disc rather than a filled one: the
+   *  icon needs a dark field to stay legible over a light map, and the ring is
+   *  what keeps it reading as the same lit-point idiom as a bare dot. */
+  dotIconCore: {
+    width: DOT_CORE + 12,
+    height: DOT_CORE + 12,
+    borderRadius: (DOT_CORE + 12) / 2,
+    backgroundColor: colors.bg,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 0 },
   },
   /** Outer bloom: wide and very faint, so a cluster of matched strangers reads
    *  as a lit area before you can pick out the individual points. */
@@ -2488,6 +2567,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: (DOT_HALO - DOT_CORE) / 2 - 2,
     bottom: (DOT_HALO - DOT_CORE) / 2 - 2,
+  },
+  /** Same badge against the larger icon core, so it stays on its edge rather
+   *  than floating inside it. */
+  dotPresenceIcon: {
+    right: (DOT_HALO_ICON - (DOT_CORE + 12)) / 2 - 2,
+    bottom: (DOT_HALO_ICON - (DOT_CORE + 12)) / 2 - 2,
   },
 
   /** Same idiom on the avatar markers, where the ring is the parent box. */

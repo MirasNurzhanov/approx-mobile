@@ -108,12 +108,10 @@ export function peekRegion(id: number): Region | null {
 }
 
 // ─── Lookup ───────────────────────────────────────────────────────────────────
-export async function searchRegions(query: string): Promise<RegionSummary[]> {
-  const { data } = await api.get<RegionSummary[]>('/api/regions/search/', {
-    params: { q: query },
-  });
-  return Array.isArray(data) ? data : [];
-}
+// There is deliberately no search-by-name here. A zone covers a place you are
+// actually in, so the only way to choose one is to trace it from your current
+// position — and the server enforces that independently, rejecting any region
+// that does not contain you.
 
 /** What a "where am I" lookup produced. `region` is null when nothing of the
  *  requested size covers the point — at sea, in unmapped territory, or, for a

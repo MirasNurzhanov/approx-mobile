@@ -4,12 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,7 +24,6 @@ import {
   kindLabel,
   regionForPoint,
   regionViewport,
-  searchRegions,
   toLatLng,
   RADIUS_MAX_M,
   RADIUS_MIN_M,
@@ -122,10 +119,7 @@ export default function ZoneAreaScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<RegionSummary[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
   /** Which of the two lookup buttons is in flight, so only that one spins. */
   const [locating, setLocating] = useState<'city' | 'district' | null>(null);
 
@@ -208,9 +202,7 @@ export default function ZoneAreaScreen() {
     const previous = region;
     setRegion(next);
     setMode('region');
-    setResults([]);
-    setQuery('');
-    Keyboard.dismiss();
+    setLookupError(null);
     save({ zone_mode: 'region', zone_region: next.id }, () => {
       setRegion(previous);
       if (!previous) setMode('radius');
@@ -232,31 +224,7 @@ export default function ZoneAreaScreen() {
     });
   }, [region, save]);
 
-  // ── Lookup ─────────────────────────────────────────────────────────────────
-  // Debounced: every miss costs an upstream call that is rate-limited to one a
-  // second globally, so firing per keystroke would queue behind itself.
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) { setResults([]); setSearchError(null); return; }
-
-    let alive = true;
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      try {
-        const found = await searchRegions(q);
-        if (!alive) return;
-        setResults(found);
-        setSearchError(found.length === 0 ? 'No places found with a mapped border.' : null);
-      } catch {
-        if (alive) setSearchError('Could not search right now.');
-      } finally {
-        if (alive) setSearching(false);
-      }
-    }, 450);
-
-    return () => { alive = false; clearTimeout(timer); };
-  }, [query]);
-
+  // ── Lookup ───────────────────────────────────────────────────────────────
   /** Trace the place the user is standing in, at one of the two sizes.
    *
    * A district lookup that finds nothing offers the city by name rather than
@@ -264,11 +232,11 @@ export default function ZoneAreaScreen() {
    * larger one on someone's behalf is not a rounding error. */
   async function traceMyPlace(level: 'city' | 'district') {
     setLocating(level);
-    setSearchError(null);
+    setLookupError(null);
     try {
       const position = coords ?? (await currentCoords());
       if (!position) {
-        setSearchError('Location is off, so there is nothing to trace. Search for a place instead.');
+        setLookupError('Location is off, so there is nothing to trace. Search for a place instead.');
         return;
       }
       setCoords(position);
@@ -278,18 +246,18 @@ export default function ZoneAreaScreen() {
       if (found) {
         commitRegion(found);
       } else if (level === 'district' && cityName) {
-        setSearchError(
+        setLookupError(
           `No district is mapped inside ${cityName}. Tap “Use my city” to cover all of it.`,
         );
       } else {
-        setSearchError(
+        setLookupError(
           level === 'district'
             ? 'No district is mapped where you are. Try your city, or search.'
             : 'Nothing mapped covers where you are. Try searching.',
         );
       }
     } catch {
-      setSearchError('Could not find your area right now.');
+      setLookupError('Could not find your area right now.');
     } finally {
       setLocating(null);
     }
@@ -479,46 +447,12 @@ export default function ZoneAreaScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.searchRow}>
-              <Ionicons name="search" size={16} color={colors.t3} />
-              <TextInput
-                style={styles.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search a city or region"
-                placeholderTextColor={colors.t3}
-                autoCorrect={false}
-                returnKeyType="search"
-                accessibilityLabel="Search for a city or region"
-              />
-              {searching ? <ActivityIndicator color={colors.t3} size="small" /> : null}
-            </View>
-
-            {searchError ? <Text style={styles.error}>{searchError}</Text> : null}
-
-            {results.map((r) => (
-              <Pressable
-                key={r.id}
-                style={styles.result}
-                onPress={() => commitRegion(r)}
-                accessibilityRole="button"
-              >
-                <Ionicons name="map-outline" size={16} color={colors.t2} />
-                <View style={styles.resultText}>
-                  <View style={styles.chosenTitleRow}>
-                    <Text style={styles.resultName} numberOfLines={1}>{r.name}</Text>
-                    <View style={styles.kindTag}>
-                      <Text style={styles.kindTagText}>{kindLabel(r.kind)}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.resultWhere} numberOfLines={1}>{r.display_name}</Text>
-                </View>
-              </Pressable>
-            ))}
+            {lookupError ? <Text style={styles.error}>{lookupError}</Text> : null}
 
             <Text style={styles.hint}>
-              Your zone follows the real border of the place you pick, however big it is.
-              Only places with a mapped boundary can be chosen.
+              Your zone follows the real border of the place, however big it is. It can
+              only be somewhere you actually are — Aura traces it from your position
+              rather than letting you pick a place across the world.
             </Text>
           </Card>
         )}
@@ -648,26 +582,7 @@ const styles = StyleSheet.create({
     color: colors.t2,
   },
 
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: colors.surface2,
-    borderRadius: themeRadius.m,
-    paddingHorizontal: 12,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 11,
-    fontFamily: fonts.body,
-    fontSize: type.body,
-    color: colors.t1,
-  },
 
-  result: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
-  resultText: { flex: 1 },
-  resultName: { fontFamily: fonts.body, fontSize: type.small, fontWeight: '600', color: colors.t1 },
-  resultWhere: { fontFamily: fonts.body, fontSize: type.micro, color: colors.t3, marginTop: 1 },
 
   notice: {
     flexDirection: 'row',

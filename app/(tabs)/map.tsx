@@ -50,7 +50,7 @@ import {
     type IconComponent,
 } from '@/components/ui/icons';
 import { ZonePlayer } from '@/components/ZonePlayer';
-import { colors, fonts, radius } from '@/constants/theme';
+import { colors, fonts, radius, type } from '@/constants/theme';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -789,14 +789,19 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
   return (
     <View style={{ alignItems: 'center' }}>
       <View style={styles.storyCard}>
-        <View style={styles.storyAvatarWrap}>
-          {story.author.profile_picture ? (
-            <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
-          ) : (
-            <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
-              <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
-            </View>
-          )}
+        {/* The badge is a sibling of the clipped avatar, not a child of it.
+            Inside `storyAvatarWrap` — which is a circle with overflow hidden —
+            a badge in the corner is cut in half by the curve. */}
+        <View style={styles.storyAvatarStack}>
+          <View style={styles.storyAvatarWrap}>
+            {story.author.profile_picture ? (
+              <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
+            ) : (
+              <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
+                <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
+              </View>
+            )}
+          </View>
           {count > 1 && (
             <View style={styles.storyCountBadge}>
               <Text style={styles.storyCountText}>{count}</Text>
@@ -2902,23 +2907,33 @@ const styles = StyleSheet.create({
   },
 
   // ─── Story count badge (inside avatar, bottom-right) ───
+  // Sized to the avatar it sits on, so the badge below can overhang its edge
+  // without being clipped by the avatar's own rounding.
+  storyAvatarStack: { width: 40, height: 40 },
   storyCountBadge: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: 'rgba(10,10,11,0.72)',
+    // Top-right, not bottom-right: the bottom corner is where the card's tail
+    // points, and the two were overlapping.
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.teal,
+    borderWidth: 1.5,
+    borderColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 3,
+    paddingHorizontal: 4,
   },
   storyCountText: {
     fontFamily: fonts.body,
-    fontSize: 9,
+    // 9pt was below the 11pt floor constants/theme.ts documents as the limit
+    // of legibility. Dark on teal, matching every other filled badge here —
+    // white on teal is the app's lowest-contrast pairing.
+    fontSize: type.micro,
     fontWeight: '700',
-    color: colors.t1,
+    color: colors.bg,
   },
 
   // ─── Create story modal ───

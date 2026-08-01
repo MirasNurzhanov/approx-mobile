@@ -12,7 +12,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { SwiftActions } from '@/components/swifts/SwiftActions';
 import { SwiftProgress } from '@/components/swifts/SwiftProgress';
-import { SwiftScrim } from '@/components/swifts/SwiftScrim';
+import { Scrim } from '@/components/ui/Scrim';
 import { Avatar } from '@/components/ui/Avatar';
 import { useDoubleTap } from '@/hooks/useDoubleTap';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
@@ -142,8 +142,8 @@ export function SwiftCard({
         />
       </Pressable>
 
-      <SwiftScrim edge="top" height={140} opacity={0.5} />
-      <SwiftScrim edge="bottom" height={Math.max(220, navClearance + 160)} />
+      <Scrim edge="top" height={140} opacity={0.5} />
+      <Scrim edge="bottom" height={Math.max(220, navClearance + 160)} />
 
       {/* Double-tap feedback */}
       <View style={styles.heartWrap} pointerEvents="none">

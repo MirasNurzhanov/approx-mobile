@@ -272,14 +272,14 @@ export default function ZoneAreaScreen() {
         return;
       }
       setCoords(position);
-      const { region: found, fallback } = await regionForPoint(
+      const { region: found, cityName } = await regionForPoint(
         position.latitude, position.longitude, level,
       );
       if (found) {
         commitRegion(found);
-      } else if (fallback) {
+      } else if (level === 'district' && cityName) {
         setSearchError(
-          `No smaller area is mapped inside ${fallback.name}. Tap "Use my city" to cover all of it.`,
+          `No district is mapped inside ${cityName}. Tap “Use my city” to cover all of it.`,
         );
       } else {
         setSearchError(

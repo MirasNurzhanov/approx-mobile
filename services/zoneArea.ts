@@ -117,12 +117,14 @@ export async function searchRegions(query: string): Promise<RegionSummary[]> {
 
 /** What a "where am I" lookup produced. `region` is null when nothing of the
  *  requested size covers the point — at sea, in unmapped territory, or, for a
- *  district lookup, in a city with no mapped subdivisions. In that last case
- *  `fallback` carries the city, so the screen can offer it by name instead of
- *  saying only that it found nothing. */
+ *  district lookup, in a city with no mapped subdivisions.
+ *
+ *  `cityName` survives a miss, because the server reads the place's name out
+ *  of the address hierarchy even when no boundary is mapped for it. It is what
+ *  lets the screen say which city it searched rather than just "not found". */
 export interface RegionLookup {
   region: RegionSummary | null;
-  fallback: RegionSummary | null;
+  cityName: string | null;
 }
 
 /** The place containing a point, at the size asked for.
@@ -139,10 +141,10 @@ export async function regionForPoint(
     const { data } = await api.get<RegionSummary>('/api/regions/for-point/', {
       params: { lat: latitude, lon: longitude, level },
     });
-    return { region: data ?? null, fallback: null };
+    return { region: data ?? null, cityName: null };
   } catch (e: any) {
     if (e?.response?.status === 404) {
-      return { region: null, fallback: e.response.data?.fallback ?? null };
+      return { region: null, cityName: e.response.data?.city_name ?? null };
     }
     throw e;
   }

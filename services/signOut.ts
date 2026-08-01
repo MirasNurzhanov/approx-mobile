@@ -8,6 +8,7 @@ import { resetBlocked } from './blocked';
 import { resetOwnMotion } from './ownMotion';
 import { resetPrivacy } from './privacy';
 import { resetArchive } from './stories';
+import { resetRegionCache } from './zoneArea';
 
 // Signing out, properly.
 //
@@ -119,6 +120,10 @@ export async function performSignOut(): Promise<void> {
   // story archive.
   await resetPrivacy().catch(() => {});
   await resetArchive().catch(() => {});
+  // City outlines are public geometry, not private data — but they are keyed
+  // to the cities the previous account chose, and the next one should not
+  // inherit them.
+  await resetRegionCache().catch(() => {});
   resetBlocked();
   resetAlertsCount();
   // Otherwise a user who signed out mid-journey leaves the next session

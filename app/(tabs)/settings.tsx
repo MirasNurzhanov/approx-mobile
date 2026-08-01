@@ -61,6 +61,8 @@ import { colors, fonts, radius } from '@/constants/theme';
 interface SelfZone {
   zone_active?: boolean;
   zone_radius?: number;
+  zone_mode?: 'radius' | 'region';
+  zone_region_detail?: { name: string } | null;
 }
 
 const FEEDBACK_EMAIL = 'support@aura-app.com';
@@ -146,6 +148,16 @@ function PrefSwitch({
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
+/** The one-line summary on the Zone size row, so the current shape is legible
+ *  without opening the screen. */
+function describeZone(zone: SelfZone): string {
+  if (zone.zone_mode === 'region' && zone.zone_region_detail?.name) {
+    return zone.zone_region_detail.name;
+  }
+  const m = zone.zone_radius && zone.zone_radius > 0 ? zone.zone_radius : 500;
+  return m < 1000 ? `${m} m` : `${(m / 1000) % 1 === 0 ? m / 1000 : (m / 1000).toFixed(1)} km`;
+}
+
 export default function SettingsScreen() {
   const { logout, confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
@@ -157,6 +169,7 @@ export default function SettingsScreen() {
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   const [zoneActive, setZoneActive] = useState<boolean | null>(null);
+  const [zoneShape, setZoneShape] = useState<string | null>(null);
   const [zoneSaving, setZoneSaving] = useState(false);
   const [bgLocation, setBgLocation] = useState(true);
   const [notifAllowed, setNotifAllowed] = useState<boolean | null>(null);
@@ -192,7 +205,10 @@ export default function SettingsScreen() {
   useFocusEffect(
     useCallback(() => {
       api.get<SelfZone>('/api/users/zone/')
-        .then((r) => setZoneActive(!!r.data.zone_active))
+        .then((r) => {
+          setZoneActive(!!r.data.zone_active);
+          setZoneShape(describeZone(r.data));
+        })
         .catch(() => setZoneActive(false));
     }, []),
   );
@@ -407,6 +423,17 @@ export default function SettingsScreen() {
                 this card too; nothing plays by itself any more, so the switch
                 had nothing left to turn off. */}
             <SettingsRow
+              icon={IconLocate}
+              label="Zone size"
+              onPress={() => router.push('/zone-area')}
+              right={
+                <View style={styles.rowTrailing}>
+                  {zoneShape ? <Text style={styles.rowTrailingText}>{zoneShape}</Text> : null}
+                  <IconChevron size={16} color={colors.t3} />
+                </View>
+              }
+            />
+            <SettingsRow
               icon={IconMusic}
               label="Zone music"
               last
@@ -599,6 +626,8 @@ const styles = StyleSheet.create({
     color: colors.t1,
   },
   settingsRight: { flexDirection: 'row', alignItems: 'center' },
+  rowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowTrailingText: { fontFamily: fonts.body, fontSize: 13, color: colors.t3 },
   rowValue: {
     fontFamily: fonts.body,
     fontSize: 13,

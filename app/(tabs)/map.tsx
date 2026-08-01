@@ -19,7 +19,7 @@ import {
     View,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import MapView, { Circle, Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import MapView, { Circle, Marker, Polygon, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, {
     runOnJS,
     useAnimatedStyle,
@@ -79,6 +79,13 @@ import {
     type ZonePreset,
 } from '@/services/zoneAudio';
 import {
+    getRegion,
+    regionContains,
+    toLatLng,
+    type Region as ZoneRegion,
+    type ZoneMode,
+} from '@/services/zoneArea';
+import {
     recordOwnStory,
     useStoryArchive,
     type ReactionType,
@@ -100,6 +107,12 @@ interface NearbyUser {
   profile_picture?: string;
   zone_active?: boolean;
   zone_radius?: number;
+  /** 'region' means the zone is a real place's border, not a circle — draw
+   *  `zone_region_id`'s outline instead of `zone_radius`. */
+  zone_mode?: ZoneMode;
+  /** Id only: the outline is ~1500 points and this payload is polled every
+   *  10s. Resolved through services/zoneArea, which caches per region. */
+  zone_region_id?: number | null;
   zone_audio_url?: string;
   /** 'approximate' means the position is snapped to a ~500m cell, so it should
    * be drawn as an area rather than a point that looks exact. */
@@ -116,6 +129,8 @@ interface NearbyUser {
 interface SelfZone {
   zone_active: boolean;
   zone_radius: number;
+  zone_mode: ZoneMode;
+  zone_region_id: number | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1077,9 +1092,16 @@ interface SheetProps {
   sheetY: SharedValue<number>;
   onDismiss: () => void;
   onFriendChange: () => void;
+  /** Where the viewer is. Needed because being inside a region zone is a
+   *  point-in-polygon question, which a scalar distance cannot answer. */
+  viewerCoords: { latitude: number; longitude: number } | null;
+  /** This user's zone outline when they are in region mode, once resolved. */
+  zoneRegion: ZoneRegion | null;
 }
 
-function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
+function UserSheet({
+  user, sheetY, onDismiss, onFriendChange, viewerCoords, zoneRegion,
+}: SheetProps) {
   const router = useRouter();
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({
@@ -1141,9 +1163,18 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
   const zoneUrl = isFriend && user.zone_active ? user.zone_audio_url : undefined;
   const zoneRadius = user.zone_radius && user.zone_radius > 0 ? user.zone_radius : 500;
   const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
-  // Unknown distance is not "out of range" — a card that refuses to play with
+  // A region zone is a shape, not a distance: someone 3km away can be well
+  // inside a city while someone 300m away across the boundary is outside, so
+  // the radius comparison would be wrong in both directions.
+  const isRegionZone = user.zone_mode === 'region' && !!zoneRegion;
+  // What the zone is *called* in the copy below — "800 m" or "Almaty".
+  const zoneLabel = isRegionZone ? zoneRegion!.name : fmtRadius(zoneRadius);
+  // Unknown position is not "out of range" — a card that refuses to play with
   // no reason it can name is worse than one that plays a track you can hear.
-  const insideZone = distanceM == null || distanceM < zoneRadius;
+  const insideZone = isRegionZone
+    ? (!viewerCoords ||
+       regionContains(zoneRegion!, viewerCoords.latitude, viewerCoords.longitude))
+    : (distanceM == null || distanceM < zoneRadius);
 
   // Preset names arrive from the API; until they do, the fallback list stands
   // in and an upload is named after its file either way.
@@ -1228,13 +1259,13 @@ function UserSheet({ user, sheetY, onDismiss, onFriendChange }: SheetProps) {
               title={trackTitle(zoneUrl, presets)}
               subtitle={
                 insideZone
-                  ? `@${user.username} · inside their ${fmtRadius(zoneRadius)} zone`
-                  : `@${user.username} · ${fmtRadius(zoneRadius)} zone`
+                  ? `@${user.username} · inside their ${zoneLabel} zone`
+                  : `@${user.username} · ${zoneLabel} zone`
               }
               blockedReason={
                 insideZone
                   ? null
-                  : `Out of range — step inside their ${fmtRadius(zoneRadius)} zone to listen`
+                  : `Out of range — step inside their ${zoneLabel} zone to listen`
               }
               accessibilityName={`${user.username}'s zone track`}
             />
@@ -1446,15 +1477,61 @@ export default function MapScreen() {
   // disappears from `visibleNearby` takes their trail history with them.
   const motionTrails = useMotionTrails(visibleNearby);
 
+  /** Outlines for every region zone currently on screen.
+   *
+   * The nearby payload carries region *ids*; the geometry is fetched once per
+   * region and cached across sessions, so a hundred people sharing a city cost
+   * one request between them. Held in state rather than read straight from the
+   * cache because a fetch that lands must trigger a re-render — otherwise the
+   * outline arrives and nothing draws it until the next unrelated poll. */
+  const [regionOutlines, setRegionOutlines] = useState<Map<number, ZoneRegion>>(new Map());
+
+  const neededRegionIds = useMemo(() => {
+    const ids = new Set<number>();
+    if (selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id) {
+      ids.add(selfZone.zone_region_id);
+    }
+    for (const u of visibleNearby) {
+      if (u.zone_active && u.zone_mode === 'region' && u.zone_region_id) ids.add(u.zone_region_id);
+    }
+    return ids;
+  }, [visibleNearby, selfZone]);
+
+  useEffect(() => {
+    let alive = true;
+    const missing = [...neededRegionIds].filter((id) => !regionOutlines.has(id));
+    if (missing.length === 0) return;
+
+    Promise.all(missing.map((id) => getRegion(id))).then((fetched) => {
+      if (!alive) return;
+      const landed = fetched.filter((r): r is ZoneRegion => r != null);
+      if (landed.length === 0) return;
+      setRegionOutlines((prev) => {
+        const next = new Map(prev);
+        for (const r of landed) next.set(r.id, r);
+        return next;
+      });
+    });
+    return () => { alive = false; };
+  }, [neededRegionIds, regionOutlines]);
+
   /** Every live sound zone, so the fan can be held inside the circles people
    *  are audibly standing in. */
+  // Region zones are deliberately absent: this constraint exists to stop a
+  // fanned marker being flung out of a circle it is standing in, and the fan
+  // is capped at tens of metres. No displacement that small can move anyone
+  // out of a city, so a polygon has nothing to constrain here.
   const zoneAreas = useMemo<ZoneArea[]>(() => {
     const areas: ZoneArea[] = [];
-    if (displayCoords && selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0) {
+    if (
+      displayCoords && selfZone?.zone_active &&
+      selfZone.zone_mode === 'radius' && (selfZone.zone_radius ?? 0) > 0
+    ) {
       areas.push({ ...displayCoords, radius: selfZone.zone_radius });
     }
     for (const u of visibleNearby) {
-      if (!u.zone_active || !(u.zone_radius ?? 0) || u.latitude == null || u.longitude == null) continue;
+      if (!u.zone_active || u.zone_mode === 'region') continue;
+      if (!(u.zone_radius ?? 0) || u.latitude == null || u.longitude == null) continue;
       areas.push({ latitude: u.latitude, longitude: u.longitude, radius: u.zone_radius! });
     }
     return areas;
@@ -1619,6 +1696,10 @@ export default function MapScreen() {
         const normalized: SelfZone = {
           zone_active: Boolean(d.zone_active ?? d.active ?? false),
           zone_radius: Number(d.zone_radius) > 0 ? Number(d.zone_radius) : 500,
+          // `effective_zone_mode`, not the raw one: a region evicted from the
+          // cache leaves the stored mode saying 'region' with nothing to draw.
+          zone_mode: (d.effective_zone_mode ?? d.zone_mode) === 'region' ? 'region' : 'radius',
+          zone_region_id: d.zone_region ?? null,
         };
         console.log('[Zone] self zone:', JSON.stringify(normalized));
         setSelfZone(normalized);
@@ -2035,11 +2116,27 @@ export default function MapScreen() {
             locationToastTimer.current = setTimeout(() => setLocationToast(false), 2000);
           }}
         >
-          {/* Zone circles for nearby users */}
+          {/* Zones for nearby users — a circle, or the outline of the place
+              they picked. A region whose outline has not landed yet draws
+              nothing rather than falling back to a circle: a 500m ring where a
+              city belongs is a worse answer than a moment's absence. */}
           {visibleNearby
-            .filter((u) => u.zone_active && (u.zone_radius ?? 0) > 0 && u.latitude != null && u.longitude != null)
+            .filter((u) => u.zone_active && u.latitude != null && u.longitude != null)
             .map((u) => {
-              console.log('[Map] drawing zone for:', u.username, 'active:', u.zone_active, 'lat:', u.latitude, 'lng:', u.longitude, 'radius:', u.zone_radius);
+              if (u.zone_mode === 'region') {
+                const outline = u.zone_region_id ? regionOutlines.get(u.zone_region_id) : null;
+                if (!outline) return null;
+                return outline.rings.map((ring, i) => (
+                  <Polygon
+                    key={`zone-${u.id}-${i}`}
+                    coordinates={toLatLng(ring)}
+                    fillColor="rgba(31,199,182,0.06)"
+                    strokeColor="rgba(31,199,182,0.35)"
+                    strokeWidth={1.5}
+                  />
+                ));
+              }
+              if (!(u.zone_radius ?? 0)) return null;
               return (
                 <Circle
                   key={`zone-${u.id}`}
@@ -2052,16 +2149,26 @@ export default function MapScreen() {
               );
             })}
 
-          {/* Zone circle for self */}
-          {selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
-            <Circle
-              center={displayCoords}
-              radius={selfZone.zone_radius}
-              fillColor="rgba(139,92,246,0.07)"
-              strokeColor="rgba(139,92,246,0.35)"
-              strokeWidth={1.5}
-            />
-          )}
+          {/* Own zone */}
+          {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
+            ? regionOutlines.get(selfZone.zone_region_id)?.rings.map((ring, i) => (
+                <Polygon
+                  key={`self-zone-${i}`}
+                  coordinates={toLatLng(ring)}
+                  fillColor="rgba(139,92,246,0.05)"
+                  strokeColor="rgba(139,92,246,0.35)"
+                  strokeWidth={1.5}
+                />
+              ))
+            : selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
+              <Circle
+                center={displayCoords}
+                radius={selfZone.zone_radius}
+                fillColor="rgba(139,92,246,0.07)"
+                strokeColor="rgba(139,92,246,0.35)"
+                strokeWidth={1.5}
+              />
+            )}
 
           {/* Approximate sharers get a haze instead of a precise-looking pin —
               the marker would otherwise imply accuracy the data doesn't have. */}
@@ -2218,6 +2325,12 @@ export default function MapScreen() {
           sheetY={sheetY}
           onDismiss={closeSheet}
           onFriendChange={handleHiSent}
+          viewerCoords={displayCoords ?? null}
+          zoneRegion={
+            selectedUser.zone_region_id
+              ? regionOutlines.get(selectedUser.zone_region_id) ?? null
+              : null
+          }
         />
       )}
 

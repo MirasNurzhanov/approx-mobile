@@ -93,16 +93,17 @@ interface Section {
   owns?: string[];
 }
 
+// Five wedges divide the 0–180° arc into 36° each. The angles are written out
+// rather than derived so a section can be nudged without moving its neighbours.
 const SECTIONS: Section[] = [
-  { label: 'Map',      icon: 'map-outline',         activeIcon: 'map',            route: '/(tabs)/map',      name: 'map',      start: 150, end: 180, mid: 165 },
-  { label: 'Profile',  icon: 'person-outline',      activeIcon: 'person',         route: '/(tabs)/profile',  name: 'profile',  start: 120, end: 150, mid: 135 },
-  { label: 'Chat',     icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 90,  end: 120, mid: 105, owns: ['notification', 'messages', 'clubs', 'create-club'] },
+  { label: 'Map',      icon: 'map-outline',         activeIcon: 'map',            route: '/(tabs)/map',      name: 'map',      start: 144, end: 180, mid: 162 },
+  { label: 'Profile',  icon: 'person-outline',      activeIcon: 'person',         route: '/(tabs)/profile',  name: 'profile',  start: 108, end: 144, mid: 126 },
+  { label: 'Chat',     icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 72,  end: 108, mid: 90, owns: ['notification', 'messages', 'clubs', 'create-club'] },
   // The swift is a wide, shallow silhouette — at the same nominal size as the
   // Ionicons around it, which fill their square, it reads smaller than its
   // neighbours. The bump is optical, not a size change.
-  { label: 'Swifts',   Glyph: IconSwift, glyphScale: 1.3,                         route: '/(tabs)/swifts',   name: 'swifts',   start: 60,  end: 90,  mid: 75  },
-  { label: 'Quests',   icon: 'compass-outline',     activeIcon: 'compass',        route: '/(tabs)/quests',   name: 'quests',   start: 30,  end: 60,  mid: 45  },
-  { label: 'Settings', icon: 'settings-outline',    activeIcon: 'settings-sharp', route: '/(tabs)/settings', name: 'settings', start: 0,   end: 30,  mid: 15  },
+  { label: 'Swifts',   Glyph: IconSwift, glyphScale: 1.3,                         route: '/(tabs)/swifts',   name: 'swifts',   start: 36,  end: 72,  mid: 54  },
+  { label: 'Settings', icon: 'settings-outline',    activeIcon: 'settings-sharp', route: '/(tabs)/settings', name: 'settings', start: 0,   end: 36,  mid: 18  },
 ];
 
 function SectionGlyph({

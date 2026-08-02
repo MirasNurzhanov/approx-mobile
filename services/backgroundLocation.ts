@@ -43,12 +43,22 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 
     try {
       const { data: nearbyUsers } = await api.get<
-        { id: number; username: string; zone_active?: boolean; zone_radius?: number; distance_km?: number }[]
+        {
+          id: number; username: string; zone_active?: boolean; zone_radius?: number;
+          zone_mode?: 'radius' | 'region'; distance_km?: number;
+        }[]
       >('/api/proximity/nearby/');
       console.log('[BG Task] nearby users:', nearbyUsers.length);
 
+      // Region zones are deliberately excluded. "You entered a zone" is worth
+      // interrupting someone for because walking into a 500m circle is an
+      // event; being in the same city as a friend is the standing state of
+      // most friendships, so the same notification would fire on arrival and
+      // then again for every friend who lives there. Region zones are still
+      // fully live on the map and in the player — they just do not push.
       const zoneUser = nearbyUsers.find(
-        (u) => u.zone_active && (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
+        (u) => u.zone_active && u.zone_mode !== 'region' &&
+          (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
       );
       console.log('[BG Task] zone found:', zoneUser?.username);
 

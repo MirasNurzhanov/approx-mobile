@@ -49,10 +49,10 @@ interface Profile {
   id: number;
   username: string;
   bio?: string;
-  aura_points?: number;
   links?: ProfileLink[];
   date_joined?: string;
   interests?: { icon: string; name: string }[];
+  aura_points?: number;
   profile_picture?: string;
 }
 
@@ -100,7 +100,6 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [friendCount, setFriendCount] = useState(0);
   const [connectionCount, setConnectionCount] = useState(0);
-  const [questCount, setQuestCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -111,10 +110,9 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
 
   async function fetchAll() {
-    const [profileRes, friendsRes, questsRes] = await Promise.allSettled([
+    const [profileRes, friendsRes] = await Promise.allSettled([
       api.get<Profile>('/api/users/profile/'),
       api.get<FriendList>('/api/friends/list/'),
-      api.get<unknown>('/api/quests/'),
     ]);
     if (profileRes.status === 'fulfilled') setProfile(profileRes.value.data);
     if (friendsRes.status === 'fulfilled') {
@@ -122,14 +120,6 @@ export default function ProfileScreen() {
       const friendIds = new Set(data.friends.map((f) => f.id));
       setFriendCount(data.friends.length);
       setConnectionCount(data.connections.filter((c) => !friendIds.has(c.id)).length);
-    }
-    if (questsRes.status === 'fulfilled') {
-      const data = questsRes.value.data as any;
-      if (Array.isArray(data)) {
-        setQuestCount(data.filter((q: any) => q.completed || q.status === 'completed').length);
-      } else if (data && typeof data === 'object' && 'completed' in data) {
-        setQuestCount(Number(data.completed) || 0);
-      }
     }
   }
 
@@ -270,11 +260,6 @@ export default function ProfileScreen() {
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{friendCount}</Text>
             <Text style={styles.statLabel}>Friends</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{questCount}</Text>
-            <Text style={styles.statLabel}>Quests</Text>
           </View>
         </Card>
 

@@ -27,7 +27,6 @@ export interface PrivacySettings {
    * additionally capped to friends and connections server-side — a stranger
    * never sees it whatever this is set to. */
   visibility_presence: Audience;
-  show_on_leaderboard: boolean;
   discoverable_by_username: boolean;
   discoverable_by_interest: boolean;
 }

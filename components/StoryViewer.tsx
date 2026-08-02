@@ -25,6 +25,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/ui/Avatar';
+import { Scrim } from '@/components/ui/Scrim';
 import {
   IconBookmark,
   IconChevron,
@@ -36,7 +37,7 @@ import {
   IconStar,
   type IconComponent,
 } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { colors, fonts, radius, type } from '@/constants/theme';
 import { api } from '@/services/api';
 import {
   saveStory,
@@ -47,8 +48,14 @@ import {
 } from '@/services/stories';
 import { encodeStoryReply } from '@/services/storyReply';
 
-// Full-screen Instagram-style story viewer, shared by the map and the
-// saved-stories archive.
+// Full-screen story viewer, shared by the map and the saved-stories archive.
+//
+// The chrome sits on two gradient scrims rather than in translucent panels.
+// Panels were the original approach and they read as three grey slabs pasted
+// over the photo — and worse, the story *text* had no panel at all, so white
+// 18pt copy over a bright photo was simply unreadable. A gradient disappears
+// where the image is already dark and does its work where it is not, which is
+// the whole reason every full-bleed photo UI uses one.
 
 export const STORY_DURATION_MS = 7_000;
 
@@ -206,17 +213,45 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.svContainer} {...panResponder.panHandlers}>
-        {/* Background — photo fills entire screen or solid dark for text-only */}
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
-        {hasPhoto && (
+        {/* Background — photo fills the screen; a text-only story gets a soft
+            vertical wash rather than flat black, which read as a dead screen. */}
+        <View style={[StyleSheet.absoluteFill, styles.svBackdrop]} />
+        {hasPhoto ? (
           <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <Scrim edge="top" height={420} opacity={0.55} />
         )}
 
-        {/* Nav tap zones — cover full screen, interactive elements rendered after override them */}
-        <TouchableOpacity style={styles.svNavLeft}  activeOpacity={1} onPress={() => goTo(index - 1)} />
-        <TouchableOpacity style={styles.svNavRight} activeOpacity={1} onPress={() => goTo(index + 1)} />
+        {/* Nav tap zones. Left third goes back, the rest goes forward — the
+            old 30/30 split left a dead 40% down the middle where a tap did
+            nothing at all. Everything interactive renders after these and so
+            takes precedence. */}
+        <TouchableOpacity
+          style={styles.svNavLeft}
+          activeOpacity={1}
+          onPress={() => goTo(index - 1)}
+          accessibilityRole="button"
+          accessibilityLabel="Previous story"
+        />
+        <TouchableOpacity
+          style={styles.svNavRight}
+          activeOpacity={1}
+          onPress={() => goTo(index + 1)}
+          accessibilityRole="button"
+          accessibilityLabel="Next story"
+        />
 
-        {/* Progress bars */}
+        {/* Scrims carry every piece of chrome below. Heights are generous
+            enough that the gradient has faded to nothing before it reaches
+            the middle of the photo. */}
+        {hasPhoto && <Scrim edge="top" height={top + 130} opacity={0.6} />}
+        {/* Tall enough for a full 280-character story: ~7 lines at this size,
+            stacked above the reactions and the reply bar. Too short and the
+            first line of a long story sits on raw photo. */}
+        <Scrim edge="bottom" height={bottom + (replyTo ? 360 : 310)} opacity={0.72} />
+
+        {/* Progress bars, flush to the top edge where a story's are expected
+            to be. They used to sit in a rounded translucent box of their own. */}
         <View style={[styles.svProgressRow, { top: top + 8 }]} pointerEvents="none">
           {stories.map((_, i) => (
             <ProgressBar key={i} active={i === index} past={i < index} progress={progress} />
@@ -224,29 +259,46 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
         </View>
 
         {/* Header: avatar + username + time + save + close */}
-        <View style={[styles.svHeader, { top: top + 22 }]}>
+        <View style={[styles.svHeader, { top: top + 24 }]}>
           <Avatar uri={story.author.profile_picture} name={story.author.username} size="xs" />
           <View style={styles.svAuthorInfo}>
-            <Text style={styles.svAuthorName}>{story.author.username}</Text>
-            <Text style={styles.svTimeAgo}>{timeAgo(story.created_at)}</Text>
+            <Text style={styles.svAuthorName} numberOfLines={1}>{story.author.username}</Text>
+            {/* One line, not two competing timestamps stacked beside each
+                other — "posted" and "expires" are the same kind of fact. */}
+            <Text style={styles.svMeta} numberOfLines={1}>
+              {timeAgo(story.created_at)} · {timeLeft(story.expires_at)}
+            </Text>
           </View>
-          <Text style={styles.svTimeLeft}>{timeLeft(story.expires_at)}</Text>
           {canSave && (
-            <TouchableOpacity onPress={toggleSave} hitSlop={12} style={styles.svSaveBtn}>
-              <IconBookmark size={17} color={isSaved ? colors.teal : colors.t1} filled={isSaved} />
+            <TouchableOpacity
+              onPress={toggleSave}
+              hitSlop={12}
+              style={[styles.svGlassBtn, isSaved && styles.svGlassBtnActive]}
+              accessibilityRole="button"
+              accessibilityLabel={isSaved ? 'Remove from saved' : 'Save story'}
+              accessibilityState={{ selected: isSaved, disabled: togglingSave }}
+            >
+              <IconBookmark size={16} color={isSaved ? colors.teal : colors.t1} filled={isSaved} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={onClose} hitSlop={12} style={styles.svCloseBtn}>
-            <IconClose size={18} color={colors.t1} />
+          <TouchableOpacity
+            onPress={onClose}
+            hitSlop={12}
+            style={styles.svGlassBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Close stories"
+          >
+            <IconClose size={17} color={colors.t1} />
           </TouchableOpacity>
         </View>
 
-        {/* Story text above reactions */}
+        {/* Story text. Legible now because the bottom scrim runs underneath
+            it — before, this block had no background of any kind. */}
         {hasText && (
-          <View style={[styles.svTextBlock, { bottom: bottom + (replyTo ? 152 : 96) }]} pointerEvents="none">
+          <View style={[styles.svTextBlock, { bottom: bottom + (replyTo ? 150 : 92) }]} pointerEvents="none">
             {story.place_name ? (
               <View style={styles.svPlaceRow}>
-                <IconPin size={12} color={colors.t2} />
+                <IconPin size={11} color={colors.t1} />
                 <Text style={styles.svPlaceName} numberOfLines={1}>{story.place_name}</Text>
               </View>
             ) : null}
@@ -291,19 +343,30 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
           </View>
         )}
 
-        {/* Reactions — read-only counts when reacting isn't available here */}
-        <View style={[styles.svReactions, { bottom: bottom + 20 }]}>
+        {/* Reactions. Compact pills that size to their content, rather than
+            four stretched boxes filling the width — they were the heaviest
+            thing on screen and the story was competing with its own chrome. */}
+        <View style={[styles.svReactions, { bottom: bottom + 18 }]}>
           {REACTIONS.map(({ type, Icon }) => {
             const count = story.reactions?.[type] ?? 0;
             const isActive = story.user_reaction === type;
             return (
               <Pressable
                 key={type}
-                style={[styles.svReactionBtn, isActive && styles.svReactionBtnActive]}
+                style={({ pressed }) => [
+                  styles.svReactionBtn,
+                  isActive && styles.svReactionBtnActive,
+                  pressed && onReact && styles.svReactionBtnPressed,
+                ]}
                 onPress={onReact ? () => onReact(story.id, type) : undefined}
                 disabled={!onReact}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  count > 0 ? `${type}, ${count} ${count === 1 ? 'reaction' : 'reactions'}` : type
+                }
+                accessibilityState={{ selected: isActive, disabled: !onReact }}
               >
-                <Icon size={20} color={isActive ? colors.teal : colors.t2} />
+                <Icon size={19} color={isActive ? colors.teal : colors.t1} />
                 {count > 0 && (
                   <Text style={[styles.svReactionCount, isActive && styles.svReactionCountActive]}>
                     {count}
@@ -322,95 +385,91 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   svContainer: { flex: 1, backgroundColor: '#000' },
-  svNavLeft: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: '30%',
-  },
-  svNavRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: '30%',
-  },
+  // Not flat #000: a text-only story on pure black reads as a screen that
+  // failed to load. This is the app's own surface colour, warmed very slightly.
+  svBackdrop: { backgroundColor: '#0E0E12' },
+
+  // Left third back, the rest forward. Anything interactive renders after
+  // these and so wins the touch.
+  svNavLeft:  { position: 'absolute', left: 0, top: 0, bottom: 0, width: '33%' },
+  svNavRight: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '67%' },
+
+  // ── Progress ──
   svProgressRow: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 10,
+    right: 10,
     flexDirection: 'row',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 6,
+    gap: 3,
   },
   svTrack: {
     flex: 1,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    borderRadius: 1,
+    height: 2.5,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderRadius: 2,
     overflow: 'hidden',
   },
-  svFill: {
-    height: '100%',
-    backgroundColor: colors.t1,
-    borderRadius: 1,
-  },
+  svFill: { height: '100%', backgroundColor: '#FFFFFF', borderRadius: 2 },
+
+  // ── Header ──
   svHeader: {
     position: 'absolute',
     left: 12,
     right: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    gap: 8,
   },
-  svAuthorInfo: { flex: 1, marginLeft: 8 },
+  svAuthorInfo: { flex: 1, marginLeft: 2 },
   svAuthorName: {
     fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 13,
-    color: colors.t1,
+    fontWeight: '700',
+    fontSize: type.small,
+    color: '#FFFFFF',
   },
-  svTimeAgo: { fontFamily: fonts.body, fontSize: 11, color: 'rgba(255,255,255,0.7)' },
-  svTimeLeft: { fontFamily: fonts.body, fontSize: 11, color: 'rgba(255,255,255,0.7)', marginRight: 10 },
-  svSaveBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+  svMeta: {
+    fontFamily: fonts.body,
+    fontSize: type.micro,
+    color: 'rgba(255,255,255,0.72)',
+    marginTop: 1,
+  },
+  /** Circular glass button. Kept subtly filled even on the scrim: these sit
+   *  over arbitrary photos, and an unfilled icon disappears on a busy one. */
+  svGlassBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
   },
-  svCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  svGlassBtnActive: {
+    backgroundColor: colors.tealTint,
+    borderColor: colors.tealLine,
   },
-  svTextBlock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
-  },
+
+  // ── Story text ──
+  svTextBlock: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 20 },
   svTextLarge: {
     fontFamily: fonts.body,
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '500',
-    color: colors.t1,
-    lineHeight: 26,
+    color: '#FFFFFF',
+    lineHeight: 27,
   },
-  svPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
-  svPlaceName: { fontFamily: fonts.body, fontSize: 12, color: 'rgba(255,255,255,0.7)' },
+  svPlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 7 },
+  svPlaceName: {
+    fontFamily: fonts.body,
+    fontSize: type.micro,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.85)',
+  },
+
+  // ── Reply ──
   svReplyRow: {
     position: 'absolute',
     left: 0,
@@ -418,36 +477,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: 'rgba(10,10,11,0.82)',
   },
   svReplyInput: {
     flex: 1,
-    height: 40,
+    height: 42,
     borderRadius: 100,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     paddingHorizontal: 16,
     fontFamily: fonts.body,
     fontSize: 14,
-    color: colors.t1,
+    color: '#FFFFFF',
   },
   svReplySend: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
   },
-  svReplySendActive: {
-    backgroundColor: colors.teal,
-    borderColor: colors.teal,
-  },
+  svReplySendActive: { backgroundColor: colors.teal, borderColor: colors.teal },
+
   svSentToast: {
     position: 'absolute',
     alignSelf: 'center',
@@ -460,37 +516,43 @@ const styles = StyleSheet.create({
   },
   svSentToastText: {
     fontFamily: fonts.body,
-    fontSize: 13,
+    fontSize: type.small,
     fontWeight: '500',
     color: colors.t1,
   },
+
+  // ── Reactions ──
+  // No container panel — the bottom scrim is the background. The row centres
+  // so four pills of differing widths (counts appear and disappear) stay
+  // balanced instead of drifting left.
   svReactions: {
     position: 'absolute',
     left: 12,
     right: 12,
     flexDirection: 'row',
+    justifyContent: 'center',
     gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 12,
   },
   svReactionBtn: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: radius.m,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    // 44pt tall including padding: these are the primary controls on the
+    // screen and were previously the only ones near the touch-target floor.
+    minHeight: 44,
+    paddingHorizontal: 16,
+    borderRadius: radius.l,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
   },
-  svReactionBtnActive: {
-    backgroundColor: colors.tealTint,
-    borderColor: colors.tealLine,
+  svReactionBtnActive: { backgroundColor: colors.tealTint, borderColor: colors.tealLine },
+  svReactionBtnPressed: { opacity: 0.6 },
+  svReactionCount: {
+    fontFamily: fonts.body,
+    color: '#FFFFFF',
+    fontSize: type.small,
+    fontWeight: '600',
   },
-  svReactionCount: { fontFamily: fonts.body, color: colors.t3, fontSize: 13, fontWeight: '500' },
   svReactionCountActive: { color: colors.teal },
 });

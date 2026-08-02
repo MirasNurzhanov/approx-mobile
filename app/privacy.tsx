@@ -68,7 +68,7 @@ const AUDIENCE_FIELDS: {
   { key: 'visibility_presence',    label: 'Online status',  hint: 'Who can see when you’re active, and when you were last online' },
   { key: 'visibility_stories',     label: 'Stories',        hint: 'Who can see stories you post' },
   { key: 'visibility_interests',   label: 'Interests',      hint: 'Hiding these makes you harder to match with' },
-  { key: 'visibility_stats',       label: 'Stats & points', hint: 'Connections, friends, quests and Aura points' },
+  { key: 'visibility_stats',       label: 'Stats',          hint: 'Your connection and friend counts' },
   { key: 'visibility_zone_audio',  label: 'Zone audio',     hint: 'Who can hear your sound zone' },
   { key: 'visibility_connections', label: 'Connections',    hint: 'Who can see who you’re connected to' },
   { key: 'visibility_links',       label: 'Links',          hint: 'Instagram, Spotify and other links on your profile' },
@@ -344,13 +344,6 @@ export default function PrivacyScreen() {
               hint="Also keeps you off strangers’ maps, which match on shared interests"
               value={settings.discoverable_by_interest}
               onValueChange={(v) => save({ discoverable_by_interest: v })}
-              disabled={saving}
-            />
-            <ToggleRow
-              label="Show on leaderboard"
-              hint="Your points still count, you just aren’t listed"
-              value={settings.show_on_leaderboard}
-              onValueChange={(v) => save({ show_on_leaderboard: v })}
               disabled={saving}
               last
             />

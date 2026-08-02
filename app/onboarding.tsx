@@ -35,12 +35,6 @@ const SLIDES: { id: string; icon: IoniconsName; title: string; body: string }[] 
   },
   {
     id: '3',
-    icon: 'trophy-outline',
-    title: 'Complete Quests',
-    body: 'Earn Aura Points by completing challenges and climb to the top of the leaderboard.',
-  },
-  {
-    id: '4',
     icon: 'people-outline',
     title: 'Make Real Connections',
     body: 'Go from stranger to friend in real life. Every connection starts with being in the same place.',

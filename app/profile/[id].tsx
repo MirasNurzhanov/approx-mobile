@@ -16,7 +16,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
 import { blockUser } from '@/services/blocked';
-import { AuraMark } from '@/components/ui/AuraMark';
 import { IconBack, IconMore } from '@/components/ui/icons';
 import { RelationshipBadge } from '@/components/ui/RelationshipBadge';
 import { ProfileLinks } from '@/components/ProfileLinks';
@@ -40,9 +39,8 @@ interface UserProfile {
   date_joined?: string;
   interests?: Interest[];
   relationship?: Relationship;
-  aura_points?: number;
   profile_picture?: string;
-  stats?: { friends: number; connections: number; quests: number };
+  stats?: { friends: number; connections: number };
   // Absent entirely when the viewer isn't allowed to see them.
   links?: ProfileLink[];
   presence?: Presence;
@@ -356,14 +354,6 @@ export default function UserProfileScreen() {
                 <Text style={styles.bioEmpty}>No bio</Text>
               )}
 
-              {profile.aura_points != null && (
-                <View style={styles.auraRow}>
-                  <AuraMark size={15} color="#8b5cf6" />
-                  <Text style={styles.auraValue}>{profile.aura_points.toLocaleString()}</Text>
-                  <Text style={styles.auraLabel}>Aura Points</Text>
-                </View>
-              )}
-
               {profile.date_joined && (
                 <Text style={styles.joinDate}>Member since {fmtDate(profile.date_joined)}</Text>
               )}
@@ -511,9 +501,6 @@ const styles = StyleSheet.create({
   lockedTitle: { color: '#F4F4F6', fontSize: 15, fontWeight: '600' },
   lockedBody: { color: '#9C9CA6', fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
-  auraRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 8 },
-  auraValue: { color: '#8b5cf6', fontSize: 15, fontWeight: '700' },
-  auraLabel: { color: '#9C9CA6', fontSize: 13 },
 
   joinDate: { color: '#8A8A94', fontSize: 12 },
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   TextInput,
   View,
@@ -7,7 +7,9 @@ import {
   StyleSheet,
   type TextInputProps,
 } from 'react-native'
-import { colors, radius, fonts } from '@/constants/theme'
+import { radius, fonts } from '@/constants/theme'
+import type { ColorPalette } from '@/constants/theme'
+import { useTheme } from '@/context/ThemeContext'
 
 interface InputProps extends TextInputProps {
   label?: string
@@ -17,7 +19,40 @@ interface InputProps extends TextInputProps {
   suffix?: React.ReactNode
 }
 
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  wrapper: { gap: 6 },
+  label: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.t2,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+  },
+  rowFocused: { borderColor: colors.tealLine },
+  rowError: { borderColor: colors.red },
+  input: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+    paddingVertical: 13,
+  },
+  adornment: { marginHorizontal: 4 },
+  error: { fontFamily: fonts.body, fontSize: 12, color: colors.red },
+  hint: { fontFamily: fonts.body, fontSize: 12, color: colors.t3 },
+})
+
 export function Input({ label, error, hint, prefix, suffix, style, ...rest }: InputProps) {
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
   const [focused, setFocused] = useState(false)
 
   return (
@@ -49,34 +84,3 @@ export function Input({ label, error, hint, prefix, suffix, style, ...rest }: In
     </View>
   )
 }
-
-const styles = StyleSheet.create({
-  wrapper: { gap: 6 },
-  label: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.t2,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: radius.m,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 14,
-  },
-  rowFocused: { borderColor: colors.tealLine },
-  rowError: { borderColor: colors.red },
-  input: {
-    flex: 1,
-    fontFamily: fonts.body,
-    fontSize: 15,
-    color: colors.t1,
-    paddingVertical: 13,
-  },
-  adornment: { marginHorizontal: 4 },
-  error: { fontFamily: fonts.body, fontSize: 12, color: colors.red },
-  hint: { fontFamily: fonts.body, fontSize: 12, color: colors.t3 },
-})

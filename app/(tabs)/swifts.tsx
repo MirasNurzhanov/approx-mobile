@@ -1,14 +1,18 @@
-import { StatusBar } from 'expo-status-bar';
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Speedometer } from '@/components/Speedometer';
 import { SwiftsFeed } from '@/components/swifts/SwiftsFeed';
+import { fonts } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 export default function SwiftsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
-
       <View style={styles.contentArea} pointerEvents="none">
         <SwiftsFeed />
       </View>
@@ -16,34 +20,36 @@ export default function SwiftsScreen() {
       <Speedometer />
 
       {/* Coming Soon overlay */}
-      <View style={styles.comingSoonOverlay} pointerEvents="none">
-        <Text style={styles.comingSoonTitle}>Swifts — Coming Soon 🔒</Text>
-        <Text style={styles.comingSoonSubtitle}>We're working on something exciting</Text>
+      <View style={styles.overlay} pointerEvents="none">
+        <Text style={styles.overlayTitle}>Swifts — Coming Soon 🔒</Text>
+        <Text style={styles.overlaySubtitle}>We're working on something exciting</Text>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000000' },
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
   contentArea: { flex: 1 },
-  comingSoonOverlay: {
+  overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(10, 10, 10, 0.85)',
+    backgroundColor: colors.bg + 'CC',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 50,
     gap: 10,
   },
-  comingSoonTitle: {
-    color: '#ffffff',
-    fontSize: 22,
+  overlayTitle: {
+    fontFamily: fonts.display,
     fontWeight: '700',
+    fontSize: 22,
+    color: colors.t1,
     textAlign: 'center',
   },
-  comingSoonSubtitle: {
-    color: '#555',
+  overlaySubtitle: {
+    fontFamily: fonts.body,
     fontSize: 14,
+    color: colors.t2,
     textAlign: 'center',
   },
 });

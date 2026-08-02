@@ -13,9 +13,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
-import { Button } from '@/components/ui/Button';
 import { InterestChipIcon } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, lightColors as L, radius } from '@/constants/theme';
+
+const BLOB = 300;
 
 interface Interest {
   id: number;
@@ -27,13 +28,13 @@ export default function InterestsSetupScreen() {
   const { top, bottom } = useSafeAreaInsets();
 
   const [interests, setInterests] = useState<Interest[]>([]);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
+  const [selected, setSelected]   = useState<Set<number>>(new Set());
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+  const [query, setQuery]         = useState('');
 
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery  = query.trim().toLowerCase();
   const visibleInterests = normalizedQuery
     ? interests.filter((i) => i.name.toLowerCase().includes(normalizedQuery))
     : interests;
@@ -57,7 +58,6 @@ export default function InterestsSetupScreen() {
     });
   }
 
-
   async function handleContinue() {
     setSaving(true);
     try {
@@ -73,61 +73,74 @@ export default function InterestsSetupScreen() {
   const canContinue = selected.size > 0;
 
   return (
-    <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Choose your interests</Text>
-        <Text style={styles.subtitle}>Find people who share your passions</Text>
+    <View style={[s.root, { paddingTop: top }]}>
+      {/* Decorative blobs */}
+      <View style={s.blobTL} />
+      <View style={s.blobBR} />
+
+      <View style={s.header}>
+        <Text style={s.title}>Choose your interests</Text>
+        <Text style={s.subtitle}>Find people who share your passions</Text>
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.teal} size="large" />
+        <View style={s.center}>
+          <ActivityIndicator color={L.teal} size="large" />
         </View>
       ) : error ? (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{error}</Text>
-          <Button label="Retry" variant="ghost" size="sm" onPress={loadInterests} />
+        <View style={s.center}>
+          <Text style={s.errorText}>{error}</Text>
+          <Pressable
+            onPress={loadInterests}
+            style={({ pressed }) => [s.retryBtn, pressed && s.dimmed]}
+            accessibilityRole="button"
+            accessibilityLabel="Retry"
+          >
+            <Text style={s.retryLabel}>Retry</Text>
+          </Pressable>
         </View>
       ) : (
         <>
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color={colors.t3} />
+          <View style={s.searchBar}>
+            <Ionicons name="search" size={18} color={L.t3} />
             <TextInput
-              style={styles.searchInput}
+              style={s.searchInput}
               value={query}
               onChangeText={setQuery}
               placeholder="Search interests..."
-              placeholderTextColor={colors.t3}
+              placeholderTextColor={L.t3}
+              selectionColor={L.teal}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
             />
             {query.length > 0 && (
               <Pressable onPress={() => setQuery('')} hitSlop={10}>
-                <Ionicons name="close-circle" size={18} color={colors.t3} />
+                <Ionicons name="close-circle" size={18} color={L.t3} />
               </Pressable>
             )}
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.grid}
+            contentContainerStyle={s.grid}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            style={{ backgroundColor: 'transparent' }}
           >
             {visibleInterests.length === 0 && (
-              <Text style={styles.emptyText}>No interests match “{query.trim()}”</Text>
+              <Text style={s.emptyText}>No interests match "{query.trim()}"</Text>
             )}
-            <View style={styles.chips}>
+            <View style={s.chips}>
               {visibleInterests.map((item) => {
                 const sel = selected.has(item.id);
                 return (
                   <Pressable
                     key={item.id}
                     onPress={() => toggle(item.id)}
-                    style={[styles.chip, sel && styles.chipSelected]}
+                    style={[s.chip, sel && s.chipSelected]}
                   >
                     <InterestChipIcon name={item.name} icon={item.icon} />
-                    <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
+                    <Text style={[s.chipLabel, sel && s.chipLabelSelected]}>
                       {item.name}
                     </Text>
                   </Pressable>
@@ -138,27 +151,52 @@ export default function InterestsSetupScreen() {
         </>
       )}
 
-      <View style={[styles.footer, { paddingBottom: bottom + 16 }]}>
-        <Text style={styles.count}>
+      <View style={[s.footer, { paddingBottom: bottom + 16 }]}>
+        <Text style={s.count}>
           {selected.size > 0 ? `${selected.size} selected` : ' '}
         </Text>
-        <Button
-          label="Continue"
-          variant="primary"
-          size="lg"
-          fullWidth
-          loading={saving}
-          disabled={!canContinue}
+        <Pressable
           onPress={handleContinue}
-        />
+          disabled={!canContinue || saving}
+          style={({ pressed }) => [
+            s.continueBtn,
+            (!canContinue || pressed || saving) && s.dimmed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Continue"
+        >
+          {saving
+            ? <ActivityIndicator color={L.bg} size="small" />
+            : <Text style={s.continueBtnLabel}>Continue</Text>
+          }
+        </Pressable>
       </View>
-
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: L.bg },
+
+  blobTL: {
+    position: 'absolute',
+    top: -BLOB * 0.35,
+    left: -BLOB * 0.28,
+    width: BLOB,
+    height: BLOB,
+    borderRadius: BLOB / 2,
+    backgroundColor: L.surface2,
+  },
+  blobBR: {
+    position: 'absolute',
+    bottom: -BLOB * 0.35,
+    right: -BLOB * 0.28,
+    width: BLOB,
+    height: BLOB,
+    borderRadius: BLOB / 2,
+    backgroundColor: '#E8E4F5',
+  },
+
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
 
   header: {
@@ -171,12 +209,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 28,
-    color: colors.t1,
+    color: L.t1,
   },
   subtitle: {
     fontFamily: fonts.body,
     fontSize: 15,
-    color: colors.t2,
+    color: L.t2,
     lineHeight: 22,
   },
 
@@ -188,34 +226,29 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingHorizontal: 14,
     borderRadius: radius.m,
-    backgroundColor: colors.surface,
+    backgroundColor: L.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: L.border,
   },
   searchInput: {
     flex: 1,
     paddingVertical: 12,
     fontFamily: fonts.body,
     fontSize: 14,
-    color: colors.t1,
+    color: L.t1,
   },
+
   emptyText: {
     fontFamily: fonts.body,
     fontSize: 14,
-    color: colors.t3,
+    color: L.t3,
     textAlign: 'center',
     marginTop: 32,
   },
 
-  grid: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-  chips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
+  grid: { paddingHorizontal: 20, paddingBottom: 16 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -223,43 +256,74 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: radius.l,
-    backgroundColor: colors.surface,
+    backgroundColor: L.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: L.border,
   },
   chipSelected: {
-    backgroundColor: colors.tealTint,
-    borderColor: colors.tealLine,
+    backgroundColor: L.tealTint,
+    borderColor: L.tealLine,
   },
   chipLabel: {
     fontFamily: fonts.body,
     fontSize: 14,
     fontWeight: '500',
-    color: colors.t2,
+    color: L.t2,
   },
   chipLabelSelected: {
-    color: colors.teal,
+    color: L.teal,
     fontWeight: '600',
   },
 
   footer: {
     paddingHorizontal: 24,
     paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: L.border,
     gap: 8,
   },
   count: {
     fontFamily: fonts.body,
     fontSize: 13,
-    color: colors.t3,
+    color: L.t3,
     textAlign: 'center',
+  },
+
+  continueBtn: {
+    backgroundColor: L.teal,
+    borderRadius: 14,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  continueBtnLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 17,
+    color: L.bg,
+  },
+
+  retryBtn: {
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: L.border,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+  },
+  retryLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 14,
+    color: L.t1,
   },
 
   errorText: {
     fontFamily: fonts.body,
     fontSize: 14,
-    color: colors.red,
+    color: L.red,
     textAlign: 'center',
   },
+
+  dimmed: { opacity: 0.5 },
 });

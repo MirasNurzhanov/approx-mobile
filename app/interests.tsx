@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -15,7 +15,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/Button';
 import { IconBack, InterestChipIcon } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 interface Interest {
   id: number;
@@ -24,6 +26,8 @@ interface Interest {
 }
 
 export default function EditInterestsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
 
   const [interests, setInterests] = useState<Interest[]>([]);
@@ -190,7 +194,7 @@ export default function EditInterestsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
 

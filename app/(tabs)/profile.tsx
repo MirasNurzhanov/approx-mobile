@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -42,7 +42,9 @@ import {
   type IconProps,
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Profile {
@@ -67,6 +69,8 @@ function ActionRow({ icon: Icon, label, onPress }: {
   label: string;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Pressable
       style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
@@ -80,6 +84,7 @@ function ActionRow({ icon: Icon, label, onPress }: {
 }
 
 function IconMarket({ size = 24 }: IconProps): React.JSX.Element {
+  const { colors } = useTheme();
   return <Ionicons name="storefront-outline" size={size} color={colors.teal} />;
 }
 
@@ -92,6 +97,8 @@ function fmtJoined(iso: string): string {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
@@ -373,7 +380,7 @@ export default function ProfileScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 20 },

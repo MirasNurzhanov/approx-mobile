@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -8,6 +9,8 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  type TextInputProps,
   View,
 } from 'react-native';
 import axios from 'axios';
@@ -16,9 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { loginRequest } from '@/services/auth';
 import { BASE_URL } from '@/services/api';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, lightColors as L, radius } from '@/constants/theme';
 
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
 const MONTH_KEYS = ['01','02','03','04','05','06','07','08','09','10','11','12'];
@@ -27,10 +28,54 @@ const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 100 }, (_, i) => String(CURRENT_YEAR - i));
 
 const ITEM_H = 44;
+const BLOB   = 300;
 
 type FieldErrors = Record<string, string[]>;
 
-// ─── Wheel column ────────────────────────────────────────────────────────────
+// ─── Shared light-themed input (always cream/white palette) ───────────────────
+
+function AuthInput({ label, error, style, onFocus, onBlur, ...rest }: {
+  label?: string;
+  error?: string;
+} & TextInputProps) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <View style={ai.wrapper}>
+      {label ? <Text style={ai.label}>{label}</Text> : null}
+      <TextInput
+        {...rest}
+        style={[ai.input, focused && ai.inputFocused, !!error && ai.inputError, style]}
+        placeholderTextColor={L.t3}
+        selectionColor={L.teal}
+        onFocus={(e) => { setFocused(true); onFocus?.(e); }}
+        onBlur={(e) => { setFocused(false); onBlur?.(e); }}
+      />
+      {error ? <Text style={ai.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
+const ai = StyleSheet.create({
+  wrapper: { gap: 4 },
+  label: { fontFamily: fonts.body, fontSize: 13, fontWeight: '500', color: L.t2 },
+  input: {
+    backgroundColor: L.surface,
+    borderWidth: 1,
+    borderColor: L.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
+    height: 52,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: L.t1,
+  },
+  inputFocused: { borderColor: L.teal },
+  inputError:   { borderColor: L.red },
+  error: { fontFamily: fonts.body, fontSize: 12, color: L.red },
+});
+
+// ─── Wheel column ─────────────────────────────────────────────────────────────
 
 interface WheelProps {
   items: string[];
@@ -45,7 +90,7 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
   const ref = useRef<FlatList<string>>(null);
 
   return (
-    <View style={wheel.wrap}>
+    <View style={wh.wrap}>
       <FlatList
         ref={ref}
         data={padded}
@@ -53,10 +98,10 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
         renderItem={({ index }) => {
           const ai = index - 2;
           const isSel = ai === activeIdx;
-          const label = ai >= 0 && ai < items.length ? (labels ? labels[ai] : items[ai]) : '';
+          const text = ai >= 0 && ai < items.length ? (labels ? labels[ai] : items[ai]) : '';
           return (
-            <View style={wheel.item}>
-              <Text style={[wheel.label, isSel && wheel.labelSel]}>{label}</Text>
+            <View style={wh.item}>
+              <Text style={[wh.label, isSel && wh.labelSel]}>{text}</Text>
             </View>
           );
         }}
@@ -82,20 +127,11 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
   );
 }
 
-const wheel = StyleSheet.create({
+const wh = StyleSheet.create({
   wrap: { flex: 1, height: ITEM_H * 5, overflow: 'hidden' },
   item: { height: ITEM_H, justifyContent: 'center', alignItems: 'center' },
-  label: {
-    fontFamily: fonts.body,
-    color: colors.t3,
-    fontSize: 15,
-  },
-  labelSel: {
-    fontFamily: fonts.body,
-    color: colors.t1,
-    fontWeight: '600',
-    fontSize: 16,
-  },
+  label:    { fontFamily: fonts.body, color: L.t3, fontSize: 15 },
+  labelSel: { fontFamily: fonts.body, color: L.t1, fontWeight: '600', fontSize: 16 },
 });
 
 // ─── DatePickerField ──────────────────────────────────────────────────────────
@@ -109,25 +145,11 @@ interface DatePickerFieldProps {
 function DatePickerField({ value, onChange, error }: DatePickerFieldProps) {
   const [open, setOpen] = useState(false);
 
-  const [dayIdx, setDayIdx] = useState(() => {
-    if (!value) return 0;
-    const i = DAYS.indexOf(value.split('-')[2]);
-    return i >= 0 ? i : 0;
-  });
-  const [monthIdx, setMonthIdx] = useState(() => {
-    if (!value) return 0;
-    const i = MONTH_KEYS.indexOf(value.split('-')[1]);
-    return i >= 0 ? i : 0;
-  });
-  const [yearIdx, setYearIdx] = useState(() => {
-    if (!value) return 20;
-    const i = YEARS.indexOf(value.split('-')[0]);
-    return i >= 0 ? i : 20;
-  });
+  const [dayIdx,   setDayIdx]   = useState(() => { const i = DAYS.indexOf(value.split('-')[2]);       return i >= 0 ? i : 0;  });
+  const [monthIdx, setMonthIdx] = useState(() => { const i = MONTH_KEYS.indexOf(value.split('-')[1]); return i >= 0 ? i : 0;  });
+  const [yearIdx,  setYearIdx]  = useState(() => { const i = YEARS.indexOf(value.split('-')[0]);       return i >= 0 ? i : 20; });
 
-  const displayValue = value
-    ? `${DAYS[dayIdx]} ${MONTH_LABELS[monthIdx]} ${YEARS[yearIdx]}`
-    : '';
+  const displayValue = value ? `${DAYS[dayIdx]} ${MONTH_LABELS[monthIdx]} ${YEARS[yearIdx]}` : '';
 
   function handleDone() {
     onChange(`${YEARS[yearIdx]}-${MONTH_KEYS[monthIdx]}-${DAYS[dayIdx]}`);
@@ -152,15 +174,24 @@ function DatePickerField({ value, onChange, error }: DatePickerFieldProps) {
           <View style={dp.sheet}>
             <Text style={dp.sheetTitle}>Date of birth</Text>
             <View style={dp.wheelRow}>
-              {/* selection band — rendered first so the wheel labels stay visible above it */}
               <View pointerEvents="none" style={dp.band} />
-              <Wheel items={DAYS} selectedIdx={dayIdx} onSelect={setDayIdx} />
-              <Wheel items={MONTH_KEYS} labels={MONTH_LABELS} selectedIdx={monthIdx} onSelect={setMonthIdx} />
-              <Wheel items={YEARS} selectedIdx={yearIdx} onSelect={setYearIdx} />
+              <Wheel items={DAYS}       selectedIdx={dayIdx}   onSelect={setDayIdx}   />
+              <Wheel items={MONTH_KEYS} labels={MONTH_LABELS}  selectedIdx={monthIdx} onSelect={setMonthIdx} />
+              <Wheel items={YEARS}      selectedIdx={yearIdx}  onSelect={setYearIdx}  />
             </View>
             <View style={dp.sheetBtns}>
-              <Button label="Cancel" variant="secondary" size="md" onPress={() => setOpen(false)} />
-              <Button label="Done" variant="primary" size="md" onPress={handleDone} />
+              <Pressable
+                onPress={() => setOpen(false)}
+                style={({ pressed }) => [dp.modalBtn, dp.modalBtnSecondary, pressed && dp.pressed]}
+              >
+                <Text style={dp.modalBtnTextSecondary}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleDone}
+                style={({ pressed }) => [dp.modalBtn, dp.modalBtnPrimary, pressed && dp.pressed]}
+              >
+                <Text style={dp.modalBtnTextPrimary}>Done</Text>
+              </Pressable>
             </View>
           </View>
         </View>
@@ -170,46 +201,42 @@ function DatePickerField({ value, onChange, error }: DatePickerFieldProps) {
 }
 
 const dp = StyleSheet.create({
-  wrapper: { gap: 6 },
-  fieldLabel: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.t2,
-  },
+  wrapper:   { gap: 4 },
+  fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '500', color: L.t2 },
   trigger: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.m,
+    backgroundColor: L.surface,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: L.border,
     paddingHorizontal: 14,
-    paddingVertical: 13,
+    height: 52,
+    justifyContent: 'center',
   },
-  triggerError: { borderColor: colors.red },
-  valueText: { fontFamily: fonts.body, fontSize: 15, color: colors.t1 },
-  placeholder: { fontFamily: fonts.body, fontSize: 15, color: colors.t3 },
-  error: { fontFamily: fonts.body, fontSize: 12, color: colors.red },
+  triggerError: { borderColor: L.red },
+  valueText:   { fontFamily: fonts.body, fontSize: 15, color: L.t1 },
+  placeholder: { fontFamily: fonts.body, fontSize: 15, color: L.t3 },
+  error:       { fontFamily: fonts.body, fontSize: 12, color: L.red },
 
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   sheet: {
     width: '100%',
-    backgroundColor: colors.surface,
+    backgroundColor: L.surface,
     borderRadius: radius.l,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: L.border,
     padding: 20,
   },
   sheetTitle: {
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 17,
-    color: colors.t1,
+    color: L.t1,
     textAlign: 'center',
     marginBottom: 16,
   },
@@ -220,27 +247,36 @@ const dp = StyleSheet.create({
     left: 0,
     right: 0,
     height: ITEM_H,
-    backgroundColor: colors.surface2,
+    backgroundColor: L.surface2,
     borderRadius: radius.s,
   },
-  sheetBtns: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
+  sheetBtns: { flexDirection: 'row', gap: 12, marginTop: 20 },
+  modalBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
   },
+  modalBtnPrimary:   { backgroundColor: L.teal, borderColor: 'transparent' },
+  modalBtnSecondary: { backgroundColor: 'transparent', borderColor: L.border },
+  modalBtnTextPrimary:   { fontFamily: fonts.body, fontWeight: '600', fontSize: 15, color: L.bg },
+  modalBtnTextSecondary: { fontFamily: fonts.body, fontWeight: '600', fontSize: 15, color: L.t1 },
+  pressed: { opacity: 0.65 },
 });
 
 // ─── RegisterScreen ───────────────────────────────────────────────────────────
 
 export default function RegisterScreen() {
   const { top } = useSafeAreaInsets();
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [dob, setDob] = useState('');
-  const [password, setPassword] = useState('');
+  const [username,        setUsername]        = useState('');
+  const [email,           setEmail]           = useState('');
+  const [dob,             setDob]             = useState('');
+  const [password,        setPassword]        = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [errors, setErrors] = useState<FieldErrors>({});
-  const [submitting, setSubmitting] = useState(false);
+  const [errors,          setErrors]          = useState<FieldErrors>({});
+  const [submitting,      setSubmitting]      = useState(false);
 
   async function handleRegister() {
     setErrors({});
@@ -280,29 +316,33 @@ export default function RegisterScreen() {
   }
 
   const fe = (field: string) => errors[field]?.[0];
-
   const globalError = errors.non_field_errors?.[0] ?? errors.detail?.[0];
 
   return (
     <KeyboardAvoidingView
-      style={styles.flex}
+      style={rs.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {/* Decorative blobs */}
+      <View style={rs.blobTL} />
+      <View style={rs.blobBR} />
+
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: top + 32 }]}
+        contentContainerStyle={[rs.container, { paddingTop: top + 32 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        style={{ backgroundColor: 'transparent' }}
       >
-        <Text style={styles.title}>Create account</Text>
+        <Text style={rs.title}>Create account</Text>
 
         {globalError ? (
-          <View style={styles.globalError}>
-            <Text style={styles.globalErrorText}>{globalError}</Text>
+          <View style={rs.globalError}>
+            <Text style={rs.globalErrorText}>{globalError}</Text>
           </View>
         ) : null}
 
-        <View style={styles.form}>
-          <Input
+        <View style={rs.form}>
+          <AuthInput
             label="Username"
             placeholder="yourhandle"
             value={username}
@@ -311,7 +351,7 @@ export default function RegisterScreen() {
             autoCorrect={false}
             error={fe('username')}
           />
-          <Input
+          <AuthInput
             label="Email"
             placeholder="you@example.com"
             value={email}
@@ -322,7 +362,7 @@ export default function RegisterScreen() {
             error={fe('email')}
           />
           <DatePickerField value={dob} onChange={setDob} error={fe('date_of_birth')} />
-          <Input
+          <AuthInput
             label="Password"
             placeholder="••••••••"
             value={password}
@@ -330,7 +370,7 @@ export default function RegisterScreen() {
             secureTextEntry
             error={fe('password')}
           />
-          <Input
+          <AuthInput
             label="Confirm password"
             placeholder="••••••••"
             value={confirmPassword}
@@ -340,19 +380,23 @@ export default function RegisterScreen() {
           />
         </View>
 
-        <Button
-          label="Create Account"
-          variant="primary"
-          size="lg"
-          fullWidth
-          loading={submitting}
+        <Pressable
           onPress={handleRegister}
-        />
+          disabled={submitting}
+          style={({ pressed }) => [rs.btn, (pressed || submitting) && rs.btnDimmed]}
+          accessibilityRole="button"
+          accessibilityLabel="Create Account"
+        >
+          {submitting
+            ? <ActivityIndicator color={L.bg} size="small" />
+            : <Text style={rs.btnLabel}>Create Account</Text>
+          }
+        </Pressable>
 
-        <View style={styles.signinRow}>
-          <Text style={styles.signinText}>Already have an account? </Text>
+        <View style={rs.signinRow}>
+          <Text style={rs.signinText}>Already have an account? </Text>
           <Pressable onPress={() => router.replace('/login')} hitSlop={8}>
-            <Text style={styles.signinLink}>Sign in</Text>
+            <Text style={rs.signinLink}>Sign in</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -360,8 +404,28 @@ export default function RegisterScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.bg },
+const rs = StyleSheet.create({
+  root: { flex: 1, backgroundColor: L.bg },
+
+  blobTL: {
+    position: 'absolute',
+    top: -BLOB * 0.35,
+    left: -BLOB * 0.28,
+    width: BLOB,
+    height: BLOB,
+    borderRadius: BLOB / 2,
+    backgroundColor: L.surface2,
+  },
+  blobBR: {
+    position: 'absolute',
+    bottom: -BLOB * 0.35,
+    right: -BLOB * 0.28,
+    width: BLOB,
+    height: BLOB,
+    borderRadius: BLOB / 2,
+    backgroundColor: '#E8E4F5',
+  },
+
   container: {
     flexGrow: 1,
     paddingHorizontal: 24,
@@ -371,30 +435,47 @@ const styles = StyleSheet.create({
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 28,
-    color: colors.t1,
+    color: L.t1,
     marginBottom: 28,
   },
   globalError: {
-    backgroundColor: `${colors.red}18`,
+    backgroundColor: `${L.red}18`,
     borderRadius: radius.m,
     borderWidth: 1,
-    borderColor: colors.red,
+    borderColor: L.red,
     padding: 12,
     marginBottom: 20,
   },
   globalErrorText: {
     fontFamily: fonts.body,
     fontSize: 13,
-    color: colors.red,
+    color: L.red,
     textAlign: 'center',
   },
   form: { gap: 16, marginBottom: 28 },
+
+  btn: {
+    backgroundColor: L.teal,
+    borderRadius: 14,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  btnDimmed: { opacity: 0.65 },
+  btnLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 17,
+    color: L.bg,
+  },
+
   signinRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 28,
   },
-  signinText: { fontFamily: fonts.body, fontSize: 14, color: colors.t2 },
-  signinLink: { fontFamily: fonts.body, fontSize: 14, color: colors.teal, fontWeight: '600' },
+  signinText: { fontFamily: fonts.body, fontSize: 14, color: L.t2 },
+  signinLink: { fontFamily: fonts.body, fontSize: 14, color: L.teal, fontWeight: '600' },
 });

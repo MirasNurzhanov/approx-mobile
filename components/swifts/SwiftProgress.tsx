@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { colors } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 interface SwiftProgressProps {
   /** 0–1. Values outside the range are clamped rather than trusted. */
@@ -8,16 +10,7 @@ interface SwiftProgressProps {
   bottom: number;
 }
 
-export function SwiftProgress({ progress, bottom }: SwiftProgressProps) {
-  const pct = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
-  return (
-    <View style={[styles.track, { bottom }]} pointerEvents="none">
-      <View style={[styles.fill, { width: `${pct * 100}%` }]} />
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   track: {
     position: 'absolute',
     left: 0,
@@ -30,3 +23,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.teal,
   },
 });
+
+export function SwiftProgress({ progress, bottom }: SwiftProgressProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const pct = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
+  return (
+    <View style={[styles.track, { bottom }]} pointerEvents="none">
+      <View style={[styles.fill, { width: `${pct * 100}%` }]} />
+    </View>
+  );
+}

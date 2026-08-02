@@ -1,5 +1,8 @@
+import { useMemo } from 'react'
 import { View, Text, Image, StyleSheet } from 'react-native'
-import { colors, fonts, radius } from '@/constants/theme'
+import { fonts, radius } from '@/constants/theme'
+import type { ColorPalette } from '@/constants/theme'
+import { useTheme } from '@/context/ThemeContext'
 import { PresenceDot } from '@/components/PresenceDot'
 import type { Presence } from '@/services/presence'
 
@@ -39,7 +42,30 @@ interface AvatarProps {
   presence?: Presence | null
 }
 
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  ring: {
+    borderWidth: 2,
+    borderColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  presence: { position: 'absolute', right: -1, bottom: -1 },
+  container: {
+    backgroundColor: colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  initials: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    color: colors.t2,
+  },
+})
+
 export function Avatar({ uri, name, size = 'md', active = false, ringColor, presence }: AvatarProps) {
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
   const dim = SIZE_MAP[size]
   const dot = DOT_MAP[size]
   const fontSize = Math.round(dim * 0.38)
@@ -77,25 +103,3 @@ export function Avatar({ uri, name, size = 'md', active = false, ringColor, pres
     </View>
   )
 }
-
-const styles = StyleSheet.create({
-  ring: {
-    borderWidth: 2,
-    borderColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ringActive: { borderColor: colors.teal },
-  presence: { position: 'absolute', right: -1, bottom: -1 },
-  container: {
-    backgroundColor: colors.surface2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  initials: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    color: colors.t2,
-  },
-})

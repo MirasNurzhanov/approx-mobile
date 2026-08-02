@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,7 +20,9 @@ import { api } from '@/services/api';
 import { clubsApi, type Club, type ClubMember, type ClubRole } from '@/services/clubs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface InviteUser {
@@ -52,6 +54,8 @@ function MemberRow({
   currentUserId: number | null;
   onMenu: (member: ClubMember) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const isSelf = Number(member.user.id) === Number(currentUserId);
   const showMenu = !isSelf && viewerIsCreator;
 
@@ -75,6 +79,8 @@ function MemberRow({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ClubDetailScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { id, fromCreate } = useLocalSearchParams<{ id: string; fromCreate?: string }>();
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
@@ -521,7 +527,7 @@ export default function ClubDetailScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -37,7 +37,9 @@ import {
   IconStar,
   type IconComponent,
 } from '@/components/ui/icons';
-import { colors, fonts, radius, type } from '@/constants/theme';
+import { fonts, radius, type } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { api } from '@/services/api';
 import {
   saveStory,
@@ -89,6 +91,8 @@ function ProgressBar({ active, past, progress }: {
   past: boolean;
   progress: SharedValue<number>;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const style = useAnimatedStyle(() => {
     const pct = active ? progress.value : past ? 1 : 0;
     return { width: `${pct * 100}%` };
@@ -113,6 +117,8 @@ export interface StoryViewerProps {
 }
 
 export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId }: StoryViewerProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);
@@ -383,7 +389,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   svContainer: { flex: 1, backgroundColor: '#000' },
   // Not flat #000: a text-only story on pure black reads as a screen that
   // failed to load. This is the app's own surface colour, warmed very slightly.

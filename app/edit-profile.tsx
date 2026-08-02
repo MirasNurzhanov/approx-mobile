@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -18,6 +18,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Profile {
@@ -39,13 +42,15 @@ function avatarColor(username: string): string {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function EditProfileScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [username, setUsername] = useState('');
-  const [bio, setBio] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [profile,   setProfile]   = useState<Profile | null>(null);
+  const [username,  setUsername]  = useState('');
+  const [bio,       setBio]       = useState('');
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -60,8 +65,6 @@ export default function EditProfileScreen() {
   }, []);
 
   async function pickImage() {
-    // The system photo picker needs no permission — it runs out of process
-    // and returns only the chosen image. See app/permissions.tsx.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -79,14 +82,8 @@ export default function EditProfileScreen() {
       const filename = uri.split('/').pop() ?? 'photo.jpg';
       const ext = /\.(\w+)$/.exec(filename)?.[1]?.toLowerCase() ?? 'jpeg';
       const type = ext === 'png' ? 'image/png' : 'image/jpeg';
-
       const form = new FormData();
-      form.append('profile_picture', {
-        uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
-        name: filename,
-        type,
-      } as any);
-
+      form.append('profile_picture', { uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri, name: filename, type } as any);
       const { data } = await api.patch<Profile>('/api/users/profile/', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -102,16 +99,10 @@ export default function EditProfileScreen() {
     if (!username.trim() || saving) return;
     setSaving(true);
     try {
-      await api.patch<Profile>('/api/users/profile/', {
-        username: username.trim(),
-        bio: bio.trim(),
-      });
+      await api.patch<Profile>('/api/users/profile/', { username: username.trim(), bio: bio.trim() });
       router.back();
     } catch (e: any) {
-      const msg =
-        e?.response?.data?.username?.[0] ??
-        e?.response?.data?.detail ??
-        'Could not save changes.';
+      const msg = e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.';
       Alert.alert('Error', msg);
     } finally {
       setSaving(false);
@@ -126,46 +117,36 @@ export default function EditProfileScreen() {
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={26} color="#00b4a6" />
+          <Ionicons name="chevron-back" size={26} color={colors.teal} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit Profile</Text>
         <TouchableOpacity onPress={save} disabled={saving || !username.trim()} hitSlop={12} style={styles.saveBtn}>
-          {saving ? (
-            <ActivityIndicator color="#00b4a6" size="small" />
-          ) : (
-            <Text style={[styles.saveText, !username.trim() && { opacity: 0.4 }]}>Save</Text>
-          )}
+          {saving
+            ? <ActivityIndicator color={colors.teal} size="small" />
+            : <Text style={[styles.saveText, !username.trim() && { opacity: 0.4 }]}>Save</Text>
+          }
         </TouchableOpacity>
       </View>
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#00b4a6" size="large" />
+          <ActivityIndicator color={colors.teal} size="large" />
         </View>
       ) : (
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <ScrollView
             contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
             {/* ── Avatar ── */}
-            <TouchableOpacity
-              style={styles.avatarWrap}
-              onPress={pickImage}
-              activeOpacity={0.85}
-              disabled={uploading}
-            >
+            <TouchableOpacity style={styles.avatarWrap} onPress={pickImage} activeOpacity={0.85} disabled={uploading}>
               <View style={[styles.avatarRing, { borderColor: bgColor + '55' }]}>
                 <View style={[styles.avatar, { backgroundColor: bgColor }]}>
-                  {profile?.profile_picture ? (
-                    <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
-                  ) : (
-                    <Text style={styles.avatarInitial}>{initial}</Text>
-                  )}
+                  {profile?.profile_picture
+                    ? <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
+                    : <Text style={styles.avatarInitial}>{initial}</Text>
+                  }
                   {uploading && (
                     <View style={styles.avatarUploadOverlay}>
                       <ActivityIndicator color="#fff" size="small" />
@@ -186,7 +167,8 @@ export default function EditProfileScreen() {
               value={username}
               onChangeText={setUsername}
               placeholder="Username"
-              placeholderTextColor="#333"
+              placeholderTextColor={colors.t3}
+              selectionColor={colors.teal}
               autoCapitalize="none"
               autoCorrect={false}
               maxLength={30}
@@ -198,7 +180,8 @@ export default function EditProfileScreen() {
               value={bio}
               onChangeText={setBio}
               placeholder="Tell people about yourself…"
-              placeholderTextColor="#333"
+              placeholderTextColor={colors.t3}
+              selectionColor={colors.teal}
               multiline
               maxLength={200}
               textAlignVertical="top"
@@ -212,29 +195,37 @@ export default function EditProfileScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // ── Header ──
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#141414',
-    backgroundColor: '#0a0a0a',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
   },
   backBtn: { padding: 4 },
-  headerTitle: { color: '#ffffff', fontSize: 17, fontWeight: '700' },
+  headerTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
+  },
   saveBtn: { padding: 4, minWidth: 42, alignItems: 'flex-end' },
-  saveText: { color: '#00b4a6', fontSize: 15, fontWeight: '600' },
+  saveText: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.teal,
+  },
 
   scroll: { paddingHorizontal: 20, paddingTop: 28 },
 
-  // ── Avatar ──
   avatarWrap: { alignSelf: 'center' },
   avatarRing: {
     width: 92,
@@ -267,34 +258,48 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: '#00b4a6',
+    backgroundColor: colors.teal,
     borderWidth: 2,
-    borderColor: '#0a0a0a',
+    borderColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarHint: { color: '#444', fontSize: 12, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
+  avatarHint: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.t3,
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 8,
+  },
 
-  // ── Fields ──
   fieldLabel: {
-    color: '#444',
-    fontSize: 10,
+    fontFamily: fonts.body,
     fontWeight: '700',
+    fontSize: 10,
     letterSpacing: 1.1,
     textTransform: 'uppercase',
+    color: colors.t3,
     marginTop: 16,
     marginBottom: 6,
   },
   fieldInput: {
-    backgroundColor: '#111111',
-    borderRadius: 12,
+    fontFamily: fonts.body,
+    backgroundColor: colors.surface,
+    borderRadius: radius.m,
     borderWidth: 1,
-    borderColor: '#1e1e1e',
+    borderColor: colors.border,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    color: '#fff',
+    color: colors.t1,
     fontSize: 15,
   },
   fieldTextarea: { minHeight: 100, paddingTop: 12 },
-  charCount: { color: '#2e2e2e', fontSize: 11, alignSelf: 'flex-end', marginTop: 6 },
+  charCount: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: colors.t3,
+    alignSelf: 'flex-end',
+    marginTop: 6,
+  },
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -15,7 +15,9 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { SwiftCard } from '@/components/swifts/SwiftCard';
 import { navArcClearance } from '@/components/Speedometer';
-import { colors, fonts } from '@/constants/theme';
+import { fonts } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { getSwifts, setSwiftLiked, type Swift } from '@/services/swifts';
 
 // Geometry of the action rail, needed before render to work out how far the
@@ -29,7 +31,50 @@ const VIEWABILITY = { itemVisiblePercentThreshold: 80 } as const;
 
 type FeedState = 'loading' | 'ready' | 'error';
 
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: colors.bg,
+  },
+  emptyTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 17,
+    color: colors.t1,
+  },
+  emptyBody: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t3,
+  },
+  retry: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.teal,
+    marginTop: 4,
+  },
+  composeBtn: {
+    position: 'absolute',
+    right: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+});
+
 export function SwiftsFeed() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { bottom: safeBottom } = useSafeAreaInsets();
 
@@ -176,44 +221,3 @@ export function SwiftsFeed() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000000' },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: colors.bg,
-  },
-  emptyTitle: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 17,
-    color: colors.t1,
-  },
-  emptyBody: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    color: colors.t3,
-  },
-  retry: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.teal,
-    marginTop: 4,
-  },
-  composeBtn: {
-    position: 'absolute',
-    right: 14,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.25)',
-  },
-});

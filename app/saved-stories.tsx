@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StoryViewer } from '@/components/StoryViewer';
 import { Avatar } from '@/components/ui/Avatar';
 import { IconBack, IconCheck, IconPin, IconTrash } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { api } from '@/services/api';
 import {
   clearArchive,
@@ -56,6 +58,8 @@ function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPre
   onPress: () => void;
   onLongPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const caption = story.content ?? story.text;
   return (
     <Pressable
@@ -104,6 +108,8 @@ function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPre
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 function EmptyState({ title, message }: { title: string; message: string }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.emptyWrap}>
       <Text style={styles.emptyTitle}>{title}</Text>
@@ -114,6 +120,8 @@ function EmptyState({ title, message }: { title: string; message: string }) {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SavedStoriesScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
   const archive = useStoryArchive();
 
@@ -431,7 +439,7 @@ export default function SavedStoriesScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   pressed: { opacity: 0.6 },
 

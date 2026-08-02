@@ -40,7 +40,9 @@ import {
 import { NotifRow, RequestRow } from '@/components/alerts/AlertRow';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { clubsApi, type Club } from '@/services/clubs';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import type { Presence } from '@/services/presence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -83,6 +85,8 @@ function fmtTime(iso?: string): string {
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 function EmptyState({ message }: { message: string }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyText}>{message}</Text>
@@ -110,6 +114,8 @@ interface UserCardProps {
  * the card is still a chat you tap to open.
  */
 function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: UserCardProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const ringColor = type === 'connected' ? colors.orange : colors.blue;
   const hasMessage = !!user.last_message;
   const unread = user.unread_count ?? 0;
@@ -189,6 +195,8 @@ function ClubCard({
   onJoin?: () => void;
   joining?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Pressable style={styles.clubCard} onPress={onPress}>
       {club.emblem ? (
@@ -262,6 +270,8 @@ function SearchField({
   value: string;
   onChange: (next: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.searchWrap}>
       <IconSearch size={16} color={colors.t3} />
@@ -291,6 +301,8 @@ function SearchField({
 }
 
 function SearchPersonRow({ user, onPress }: { user: ChatUser; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const isFriend = user.chatType === 'friend';
   return (
     <Card onPress={onPress}>
@@ -323,6 +335,8 @@ function SearchPersonRow({ user, onPress }: { user: ChatUser; onPress: () => voi
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ChatScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
@@ -824,7 +838,7 @@ export default function ChatScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
 
   // Header

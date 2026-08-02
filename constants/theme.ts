@@ -1,4 +1,12 @@
-export const colors = {
+export type ColorPalette = {
+  bg: string; surface: string; surface2: string; border: string;
+  t1: string; t2: string; t3: string;
+  teal: string; tealTint: string; tealLine: string;
+  purple: string; blue: string; orange: string; red: string; green: string;
+  coral: string; coralSoft: string; violet: string;
+}
+
+export const colors: ColorPalette = {
   bg: '#0A0A0B',
   surface: '#141417',
   surface2: '#1C1C21',
@@ -17,6 +25,32 @@ export const colors = {
   // everywhere else, and reusing it for "this person is online" would make two
   // unrelated states look identical. Never the only cue — see PresenceDot.
   green: '#30D158',
+  // Aliases so dark and light palettes share the same type.
+  coral: '#1FC7B6',
+  coralSoft: '#0E2421',
+  violet: '#8B5CF6',
+}
+
+export const lightColors: ColorPalette = {
+  bg: '#faf9f5',
+  surface: '#ffffff',
+  surface2: '#FCEEE8',
+  border: '#E8E4DA',
+  t1: '#2D2A22',
+  t2: '#6B6455',
+  t3: '#8C8475',
+  // Coral fills the primary-accent slot that teal holds in dark mode.
+  teal: '#E8714A',
+  tealTint: '#FCEEE8',
+  tealLine: '#F0C4AE',
+  purple: '#8B6FD4',
+  blue: '#4D8DFF',
+  orange: '#F97316',
+  red: '#E5484D',
+  green: '#3DAE6E',
+  coral: '#E8714A',
+  coralSoft: '#FCEEE8',
+  violet: '#8B6FD4',
 }
 
 // Legacy light/dark palette kept for the Expo template components

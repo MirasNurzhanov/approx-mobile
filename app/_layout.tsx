@@ -23,10 +23,16 @@ import { AuraLoader } from '@/components/AuraLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/context/AuthContext';
 import { ScrollNavProvider } from '@/context/ScrollNavContext';
+import { AppThemeProvider, useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
 import '@/services/backgroundLocation';
+
+function AppStatusBar() {
+  const { themeMode } = useTheme();
+  return <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />;
+}
 
 function AppShell() {
   const { isLoading, isAuthenticated } = useAuth();
@@ -107,16 +113,18 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <ScrollNavProvider>
-          <AuthProvider>
-            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-              <AppShell />
-              <StatusBar style="light" />
-            </ThemeProvider>
-          </AuthProvider>
-        </ScrollNavProvider>
-      </ErrorBoundary>
+      <AppThemeProvider>
+        <ErrorBoundary>
+          <ScrollNavProvider>
+            <AuthProvider>
+              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                <AppShell />
+                <AppStatusBar />
+              </ThemeProvider>
+            </AuthProvider>
+          </ScrollNavProvider>
+        </ErrorBoundary>
+      </AppThemeProvider>
     </GestureHandlerRootView>
   );
 }

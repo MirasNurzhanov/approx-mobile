@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,7 +17,9 @@ import { Avatar } from '@/components/ui/Avatar';
 import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
 import { IconBack } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // Privacy & safety → Review connections.
 //
@@ -35,6 +37,8 @@ interface Person {
 }
 
 export default function ConnectionsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
   const [people, setPeople] = useState<Person[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -163,7 +167,7 @@ export default function ConnectionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
   header: {

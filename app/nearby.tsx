@@ -21,7 +21,9 @@ import {
   relationshipLabel,
   type Relationship,
 } from '@/components/ui/RelationshipBadge';
-import { colors, fonts, type as typography } from '@/constants/theme';
+import { fonts, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // The non-visual equivalent of the map.
 //
@@ -131,6 +133,8 @@ function summarise(user: NearbyUser): string {
 }
 
 export default function NearbyListScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
   const [users, setUsers] = useState<NearbyUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -299,7 +303,7 @@ export default function NearbyListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 

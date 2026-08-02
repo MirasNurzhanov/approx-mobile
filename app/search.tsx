@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -16,7 +16,9 @@ import { api } from '@/services/api';
 import { Avatar } from '@/components/ui/Avatar';
 import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'connected' | 'friend';
@@ -40,7 +42,7 @@ function sharedCount(user: SearchUser): number {
   return 0;
 }
 
-function ringColor(rel: Relationship): string {
+function ringColor(colors: ColorPalette, rel: Relationship): string {
   if (rel === 'friend') return colors.blue;
   if (rel === 'connected') return colors.orange;
   return colors.t3;
@@ -58,6 +60,8 @@ function ActionBtn({
   onSendHi: () => void;
   onMessage: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (rel !== 'stranger') {
     return (
       <Pressable
@@ -103,6 +107,8 @@ function UserCard({
   onMessage: () => void;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const rel = user.relationship ?? 'stranger';
   const count = sharedCount(user);
 
@@ -113,7 +119,7 @@ function UserCard({
           uri={user.profile_picture}
           name={user.username}
           size="md"
-          ringColor={ringColor(rel)}
+          ringColor={ringColor(colors, rel)}
           presence={user.presence}
         />
 
@@ -139,6 +145,8 @@ function UserCard({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SearchScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
 
@@ -292,7 +300,7 @@ export default function SearchScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
   // Search bar

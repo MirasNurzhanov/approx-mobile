@@ -1,20 +1,31 @@
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { router } from 'expo-router';
 
 import { useAuth } from '@/context/AuthContext';
-import { ParticleBackground } from '@/components/ParticleBackground';
+import { lightColors as L } from '@/constants/theme';
+import { fonts } from '@/constants/theme';
 
 export default function LoginScreen() {
   const { login, isAuthenticated, isLoading } = useAuth();
-  const [email, setEmail] = useState('');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  const [focused, setFocused]   = useState<'email' | 'password' | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      router.replace('/(tabs)/map');
-    }
+    if (!isLoading && isAuthenticated) router.replace('/(tabs)/map');
   }, [isAuthenticated, isLoading]);
 
   async function handleLogin() {
@@ -30,91 +41,163 @@ export default function LoginScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <ParticleBackground />
-      <Text style={styles.logo}>AURA</Text>
-      <Text style={styles.tagline}>Find your people nearby</Text>
+    <SafeAreaView style={s.root}>
+      {/* Decorative blobs */}
+      <View style={s.blobTL} />
+      <View style={s.blobBR} />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#555"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor="#555"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-      <TouchableOpacity
-        style={[styles.button, submitting && styles.buttonDisabled]}
-        onPress={handleLogin}
-        disabled={submitting}
-        activeOpacity={0.8}
+      <KeyboardAvoidingView
+        style={s.inner}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.buttonText}>{submitting ? 'Signing in…' : 'Sign in'}</Text>
-      </TouchableOpacity>
+        {/* Header */}
+        <View style={s.header}>
+          <Text style={s.wordmark}>AURA</Text>
+          <Text style={s.tagline}>Find your people nearby</Text>
+        </View>
 
-      <View style={styles.registerRow}>
-        <Text style={styles.registerPrompt}>Don't have an account?{'  '}</Text>
-        <TouchableOpacity onPress={() => router.push('/register')}>
-          <Text style={styles.registerLink}>Register</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+        {/* Form */}
+        <View style={s.form}>
+          <TextInput
+            style={[s.input, focused === 'email' && s.inputFocused]}
+            placeholder="Email"
+            placeholderTextColor={L.t3}
+            selectionColor={L.teal}
+            value={email}
+            onChangeText={setEmail}
+            onFocus={() => setFocused('email')}
+            onBlur={() => setFocused(null)}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <TextInput
+            style={[s.input, focused === 'password' && s.inputFocused]}
+            placeholder="Password"
+            placeholderTextColor={L.t3}
+            selectionColor={L.teal}
+            value={password}
+            onChangeText={setPassword}
+            onFocus={() => setFocused('password')}
+            onBlur={() => setFocused(null)}
+            secureTextEntry
+          />
+
+          <Pressable
+            style={({ pressed }) => [s.btn, (pressed || submitting) && s.btnDimmed]}
+            onPress={handleLogin}
+            disabled={submitting}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in"
+          >
+            {submitting
+              ? <ActivityIndicator color={L.bg} size="small" />
+              : <Text style={s.btnLabel}>Sign in</Text>
+            }
+          </Pressable>
+        </View>
+
+        {/* Footer link */}
+        <View style={s.footer}>
+          <Text style={s.footerText}>Don't have an account? </Text>
+          <Pressable onPress={() => router.push('/register')} hitSlop={8}>
+            <Text style={s.footerLink}>Register</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
+const BLOB = 300;
+
+const s = StyleSheet.create({
+  root: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 28,
+    backgroundColor: L.bg,
   },
-  logo: {
-    fontSize: 52,
-    color: '#00b4a6',
-    fontWeight: '800',
-    letterSpacing: 10,
-    marginBottom: 8,
+
+  // Decorative blobs — sit behind everything via render order
+  blobTL: {
+    position: 'absolute',
+    top: -BLOB * 0.35,
+    left: -BLOB * 0.28,
+    width: BLOB,
+    height: BLOB,
+    borderRadius: BLOB / 2,
+    backgroundColor: L.surface2,   // #FCEEE8 — coral tint
+  },
+  blobBR: {
+    position: 'absolute',
+    bottom: -BLOB * 0.35,
+    right: -BLOB * 0.28,
+    width: BLOB,
+    height: BLOB,
+    borderRadius: BLOB / 2,
+    backgroundColor: '#E8E4F5',    // violet tint — not in palette
+  },
+
+  inner: {
+    flex: 1,
+    paddingHorizontal: 28,
+    justifyContent: 'center',
+    gap: 32,
+  },
+
+  header: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  wordmark: {
+    fontFamily: fonts.display,
+    fontWeight: '700',
+    fontSize: 36,
+    letterSpacing: 8,
+    color: L.teal,
   },
   tagline: {
-    color: '#555',
-    fontSize: 14,
-    marginBottom: 48,
-    letterSpacing: 1,
-  },
-  input: {
-    width: '100%',
-    backgroundColor: '#111',
-    color: '#fff',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#1e1e1e',
+    fontFamily: fonts.body,
     fontSize: 15,
+    color: L.t2,
   },
-  button: {
-    width: '100%',
-    backgroundColor: '#00b4a6',
-    padding: 16,
+
+  form: { gap: 14 },
+
+  input: {
+    backgroundColor: L.surface,
+    borderWidth: 1,
+    borderColor: L.border,
     borderRadius: 14,
-    alignItems: 'center',
-    marginTop: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 0,
+    height: 52,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: L.t1,
   },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '700', fontSize: 16, letterSpacing: 0.5 },
-  registerRow: { flexDirection: 'row', marginTop: 28, alignItems: 'center' },
-  registerPrompt: { color: '#555', fontSize: 14 },
-  registerLink: { color: '#00b4a6', fontSize: 14, fontWeight: '600' },
+  inputFocused: { borderColor: L.teal },
+
+  btn: {
+    backgroundColor: L.teal,
+    borderRadius: 14,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  btnDimmed: { opacity: 0.65 },
+  btnLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 17,
+    color: L.bg,
+  },
+
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  footerText: { fontFamily: fonts.body, fontSize: 14, color: L.t2 },
+  footerLink: { fontFamily: fonts.body, fontSize: 14, fontWeight: '600', color: L.teal },
 });

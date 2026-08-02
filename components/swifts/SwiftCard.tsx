@@ -16,7 +16,8 @@ import { Scrim } from '@/components/ui/Scrim';
 import { Avatar } from '@/components/ui/Avatar';
 import { useDoubleTap } from '@/hooks/useDoubleTap';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
-import { colors, fonts } from '@/constants/theme';
+import { fonts } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import type { Swift } from '@/services/swifts';
 
 /** How often the player reports playback position. Default is 0, which emits
@@ -51,6 +52,7 @@ export function SwiftCard({
   onShare,
   onMore,
 }: SwiftCardProps) {
+  const { colors } = useTheme();
   const reduceMotion = useReduceMotion();
   const [pausedByUser, setPausedByUser] = useState(false);
   const heartScale = useSharedValue(0);
@@ -223,7 +225,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontFamily: fonts.body,
     fontSize: 12,
-    color: colors.t1,
+    color: '#FFFFFF',
     opacity: 0.9,
   },
 });

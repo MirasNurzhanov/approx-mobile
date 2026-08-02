@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -29,7 +29,9 @@ import { clubsApi } from '@/services/clubs';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 const WS_BASE = 'wss://project-x-production-3261.up.railway.app';
 
@@ -141,6 +143,8 @@ const DEFAULT_REGION: Region = { latitude: 43.238, longitude: 76.889, latitudeDe
 
 // ─── DateTimePicker ───────────────────────────────────────────────────────────
 function DateTimePicker({ value, onChange }: { value: Date; onChange: (d: Date) => void }) {
+  const { colors } = useTheme();
+  const dtStyles = useMemo(() => makeDtStyles(colors), [colors]);
   function adj(field: 'day' | 'hour' | 'minute', delta: number) {
     const d = new Date(value);
     if (field === 'day') d.setDate(d.getDate() + delta);
@@ -185,7 +189,7 @@ function DateTimePicker({ value, onChange }: { value: Date; onChange: (d: Date) 
   );
 }
 
-const dtStyles = StyleSheet.create({
+const makeDtStyles = (colors: ColorPalette) => StyleSheet.create({
   wrap: {
     backgroundColor: colors.surface2,
     borderRadius: radius.m,
@@ -251,6 +255,8 @@ function ProposalCard({
   onDelete: (id: number) => void;
   actioningId: number | null;
 }) {
+  const { colors } = useTheme();
+  const cardStyles = useMemo(() => makeCardStyles(colors), [colors]);
   const statusColor = STATUS_COLORS[proposal.status] ?? STATUS_COLORS.pending;
   const isActioning = actioningId === proposal.id;
   const canDelete = viewerIsOwner || viewerIsProposer;
@@ -333,7 +339,7 @@ function ProposalCard({
   );
 }
 
-const cardStyles = StyleSheet.create({
+const makeCardStyles = (colors: ColorPalette) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -397,6 +403,8 @@ const cardStyles = StyleSheet.create({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ClubChatScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { id, name, emblem, memberCount } = useLocalSearchParams<{
     id: string;
     name?: string;
@@ -1023,7 +1031,7 @@ export default function ClubChatScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
   // Header

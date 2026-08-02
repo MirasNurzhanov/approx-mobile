@@ -1,6 +1,6 @@
 import Svg, { Circle, G, Path, Rect } from 'react-native-svg';
 
-import { colors } from '@/constants/theme';
+import { lightColors as colors } from '@/constants/theme';
 import { IconGlobe, type IconComponent, type IconProps } from './icons';
 
 // Platform glyphs for profile links, drawn locally.

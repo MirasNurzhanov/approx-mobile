@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,7 +26,9 @@ import {
   MAX_LINKS,
   type ProfileLink,
 } from '@/services/links';
-import { colors, fonts, radius, type as typography } from '@/constants/theme';
+import { fonts, radius, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // Add, remove and reorder profile links.
 //
@@ -35,6 +37,8 @@ import { colors, fonts, radius, type as typography } from '@/constants/theme';
 // whereas a pair of buttons has a real accessible name and a 44pt target.
 
 export default function EditLinksScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
 
   const [links, setLinks] = useState<ProfileLink[] | null>(null);
@@ -290,7 +294,7 @@ export default function EditLinksScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 20, paddingTop: 8, gap: 8 },
   loading: { marginTop: 40 },

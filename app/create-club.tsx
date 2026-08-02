@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,7 +21,9 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { api } from '@/services/api';
 import { clubsApi } from '@/services/clubs';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 interface Interest {
   id: number;
@@ -30,6 +32,8 @@ interface Interest {
 }
 
 export default function CreateClubScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
 
@@ -272,7 +276,7 @@ export default function CreateClubScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
   header: {

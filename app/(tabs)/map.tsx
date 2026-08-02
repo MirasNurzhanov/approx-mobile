@@ -53,7 +53,9 @@ import {
     type IconComponent,
 } from '@/components/ui/icons';
 import { ZonePlayer } from '@/components/ZonePlayer';
-import { colors, fonts, radius, type } from '@/constants/theme';
+import { fonts, radius, type } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -156,9 +158,8 @@ interface ClubMeetup {
 // Ring colour carries the relationship, and nothing else does: blue is a
 // friend, orange is a connection, teal is a matched stranger. One colour per
 // state, used on the marker, in the sheet and on the zone.
-const COLOR_FRIEND    = colors.blue;
-const COLOR_CONNECTED = colors.orange;
-const COLOR_STRANGER  = colors.teal;
+// COLOR_FRIEND / COLOR_CONNECTED / COLOR_STRANGER are computed inside MapScreen
+// using the dynamic theme — see below.
 
 /** Matches APPROX_GRID_M on the server. */
 const APPROX_RADIUS_M = 500;
@@ -591,6 +592,8 @@ function DotMarker({ coordinate, color, presence, zIndex, sharedInterests, onPre
   sharedInterests?: string[];
   onPress?: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Re-arm tracking briefly when the color changes (friend data arrives after
   // the first nearby fetch), then freeze the rasterized marker again.
   // Presence is in the same bucket: it changes the rasterized bitmap, so it has
@@ -704,6 +707,8 @@ function AvatarMarker({
   captionTag,
   onPress,
 }: AvatarMarkerProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Markers rasterize their children: keep tracking until the remote image is
   // drawn, and re-arm briefly when the ring color changes (friend data arrives
   // after the first nearby fetch).
@@ -803,6 +808,8 @@ function SelfMarker({ coordinate, uri, username }: {
   uri?: string;
   username: string;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [imageReady, setImageReady] = useState(!uri);
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
@@ -844,6 +851,8 @@ function ClusterMarker({ coordinate, count, onPress }: {
   count: number;
   onPress?: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Same reason as DotMarker: freeze the raster, but not before it has drawn.
   const [settling, setSettling] = useState(true);
   useEffect(() => {
@@ -872,6 +881,8 @@ function ClusterMarker({ coordinate, count, onPress }: {
 }
 
 function StoryBubble({ story, count }: { story: Story; count: number }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const avatarBg = avatarBgColor(story.author.username);
 
   const reactions = story.reactions ?? {};
@@ -952,6 +963,8 @@ function LocateButton({
   bottom: number;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const following = state === 'following';
 
   // The icon carries the state as a shape — a filled centre when tracking, a
@@ -995,6 +1008,8 @@ function TopBar({
   onSearch: () => void;
   onList: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top } = useSafeAreaInsets();
   return (
     <View style={[styles.topBar, { paddingTop: top + 6 }]}>
@@ -1068,6 +1083,8 @@ interface CreateStoryModalProps {
 }
 
 function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { bottom } = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -1176,7 +1193,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
               disabled={!text.trim() || posting}
             >
               {posting ? (
-                <ActivityIndicator color="#0a0a0a" size="small" />
+                <ActivityIndicator color={colors.bg} size="small" />
               ) : (
                 <Text style={styles.postBtnText}>Post Story</Text>
               )}
@@ -1190,6 +1207,8 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
 
 // ─── Meetup Marker ────────────────────────────────────────────────────────────
 function MeetupMarker({ meetup, onPress }: { meetup: ClubMeetup; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Marker
       coordinate={{ latitude: meetup.latitude, longitude: meetup.longitude }}
@@ -1222,6 +1241,8 @@ function MeetupSheet({
   sheetY: SharedValue<number>;
   onDismiss: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
 
@@ -1302,6 +1323,8 @@ interface SheetProps {
 function UserSheet({
   user, sheetY, onDismiss, onFriendChange, viewerCoords, zoneRegion,
 }: SheetProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({
@@ -1555,6 +1578,11 @@ function UserSheet({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MapScreen() {
+  const { colors, themeMode } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const COLOR_FRIEND    = colors.blue;
+  const COLOR_CONNECTED = colors.orange;
+  const COLOR_STRANGER  = colors.teal;
   useEffect(() => { console.log('[Map] step 1: component mounted'); }, []);
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
@@ -2322,7 +2350,7 @@ export default function MapScreen() {
           }}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
-          customMapStyle={DARK_MAP_STYLE}
+          customMapStyle={themeMode === 'dark' ? DARK_MAP_STYLE : []}
           initialRegion={region}
           showsUserLocation={false}
           showsMyLocationButton={false}
@@ -2659,7 +2687,7 @@ export default function MapScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   map: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: 16 },
@@ -2826,7 +2854,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     justifyContent: 'center',
     borderRadius: radius.s,
-    backgroundColor: 'rgba(10,10,11,0.82)',
+    backgroundColor: colors.bg + 'D2',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
   },

@@ -1,5 +1,8 @@
+import { useMemo } from 'react'
 import { View, Pressable, StyleSheet, type ViewStyle, type PressableProps } from 'react-native'
-import { colors, radius } from '@/constants/theme'
+import { radius } from '@/constants/theme'
+import { useTheme } from '@/context/ThemeContext'
+import type { ColorPalette } from '@/constants/theme'
 
 interface CardProps {
   children: React.ReactNode
@@ -9,24 +12,7 @@ interface CardProps {
   variant?: 'default' | 'elevated'
 }
 
-export function Card({ children, style, onPress, variant = 'default' }: CardProps) {
-  const containerStyle = [styles.card, variant === 'elevated' && styles.elevated, style]
-
-  if (onPress) {
-    return (
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [...containerStyle, pressed && styles.pressed]}
-      >
-        {children}
-      </Pressable>
-    )
-  }
-
-  return <View style={containerStyle}>{children}</View>
-}
-
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.l,
@@ -44,3 +30,22 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.8 },
 })
+
+export function Card({ children, style, onPress, variant = 'default' }: CardProps) {
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const containerStyle = [styles.card, variant === 'elevated' && styles.elevated, style]
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [...containerStyle, pressed && styles.pressed]}
+      >
+        {children}
+      </Pressable>
+    )
+  }
+
+  return <View style={containerStyle}>{children}</View>
+}

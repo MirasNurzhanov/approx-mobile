@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
@@ -21,6 +21,8 @@ import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { refreshAlertsCount, useAlertsCount } from '@/services/alerts';
 import { api } from '@/services/api';
 import { MAX_SCALE_FIXED, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── Animated SVG primitives ──────────────────────────────────────────────────
 const AnimatedLine   = Animated.createAnimatedComponent(Line);
@@ -191,6 +193,8 @@ export function Speedometer() {
   const pathname          = usePathname();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { collapsed }     = useScrollNav();
+  const { colors }        = useTheme();
+  const styles            = useMemo(() => makeStyles(colors), [colors]);
 
   const [activeIdx, setActiveIdx] = useState(() => matchSection(pathname));
   const [chatBadge, setChatBadge] = useState(0);
@@ -321,33 +325,33 @@ export function Speedometer() {
           {/* SVG — no touch events */}
           <View pointerEvents="none">
             <Svg width={SVG_W} height={SVG_H} style={{ backgroundColor: 'transparent' }}>
-              <Path d={BG_PATH} fill="#0a0a0a" />
+              <Path d={BG_PATH} fill={colors.bg} />
 
-              <Path d={GLOW_ARC} fill="none" stroke="#00b4a6" strokeWidth={18} strokeLinecap="round" opacity={0.06} />
-              <Path d={GLOW_ARC} fill="none" stroke="#00b4a6" strokeWidth={10} strokeLinecap="round" opacity={0.12} />
-              <Path d={GLOW_ARC} fill="none" stroke="#00b4a6" strokeWidth={5}  strokeLinecap="round" opacity={0.30} />
-              <Path d={GLOW_ARC} fill="none" stroke="#00b4a6" strokeWidth={1.5} strokeLinecap="round" opacity={0.90} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={18} strokeLinecap="round" opacity={0.06} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={10} strokeLinecap="round" opacity={0.12} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={5}  strokeLinecap="round" opacity={0.30} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={1.5} strokeLinecap="round" opacity={0.90} />
 
               {SECTIONS.map((s, i) => (
                 <Path
                   key={i}
                   d={sectorPath(s.start, s.end)}
-                  fill={i === activeIdx ? '#00b4a6' : '#141414'}
-                  stroke="#0a0a0a"
+                  fill={i === activeIdx ? colors.teal : colors.surface}
+                  stroke={colors.bg}
                   strokeWidth={2}
                 />
               ))}
 
-              <Circle cx={CX} cy={CY} r={R_IN * 0.22} fill="#0a0a0a" />
+              <Circle cx={CX} cy={CY} r={R_IN * 0.22} fill={colors.bg} />
               <AnimatedLine
                 x1={CX} y1={CY}
                 animatedProps={lineProps}
-                stroke="#ffffff"
+                stroke={colors.t1}
                 strokeWidth={2.5}
                 strokeLinecap="round"
               />
-              <AnimatedCircle animatedProps={dotProps} r={4} fill="#ffffff" />
-              <Circle cx={CX} cy={CY} r={R_IN * 0.09} fill="#00b4a6" />
+              <AnimatedCircle animatedProps={dotProps} r={4} fill={colors.t1} />
+              <Circle cx={CX} cy={CY} r={R_IN * 0.09} fill={colors.teal} />
             </Svg>
           </View>
 
@@ -373,14 +377,14 @@ export function Speedometer() {
                   section={s}
                   active={isActive}
                   size={18}
-                  color={isActive ? '#0a0a0a' : '#555'}
+                  color={isActive ? colors.bg : colors.t3}
                 />
                 <Text
                   numberOfLines={1}
                   // The arc geometry is fixed, so the label is capped rather
                   // than allowed to scale until it clips.
                   maxFontSizeMultiplier={MAX_SCALE_FIXED}
-                  style={[styles.label, { color: isActive ? '#0a0a0a' : '#444' }]}
+                  style={[styles.label, { color: isActive ? colors.bg : colors.t3 }]}
                 >
                   {s.label}
                 </Text>
@@ -428,7 +432,7 @@ export function Speedometer() {
                       section={s}
                       active={isActive}
                       size={22}
-                      color={isActive ? '#00b4a6' : '#444'}
+                      color={isActive ? colors.teal : colors.t3}
                     />
                     {badge > 0 && (
                       <View style={styles.badgeSlim} importantForAccessibility="no-hide-descendants">
@@ -442,7 +446,7 @@ export function Speedometer() {
               );
             })}
           </View>
-          <View style={{ height: safeBottom, backgroundColor: '#0a0a0a' }} />
+          <View style={{ height: safeBottom, backgroundColor: colors.bg }} />
         </Animated.View>
       </View>
 
@@ -451,7 +455,7 @@ export function Speedometer() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   container: {
     position: 'absolute',
     bottom: 0,
@@ -477,9 +481,9 @@ const styles = StyleSheet.create({
     right: 0,
   },
   slimBar: {
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.bg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderTopColor: colors.border,
   },
   slimRow: {
     height: SLIM_H,
@@ -520,7 +524,7 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#ef4444',
+    backgroundColor: colors.red,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 2,
@@ -533,7 +537,7 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#ef4444',
+    backgroundColor: colors.red,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 2,

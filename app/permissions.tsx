@@ -1,12 +1,14 @@
 import { router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Card } from '@/components/ui/Card';
 import { IconBack, IconChevron } from '@/components/ui/icons';
-import { colors, fonts, radius, type as typography } from '@/constants/theme';
+import { fonts, radius, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import {
   ALL_PERMISSIONS,
   bindForegroundRefresh,
@@ -36,13 +38,13 @@ const STATE_TEXT: Record<PermissionState, string> = {
   unsupported: 'Unavailable on this device',
 };
 
-const STATE_COLOR: Record<PermissionState, string> = {
+const makeStateColor = (colors: ColorPalette): Record<PermissionState, string> => ({
   granted: colors.teal,
   denied: colors.orange,
   blocked: colors.red,
   undetermined: colors.t2,
   unsupported: colors.t3,
-};
+});
 
 /** Colour alone must not carry the status — pair it with a glyph. */
 const STATE_GLYPH: Record<PermissionState, string> = {
@@ -62,6 +64,9 @@ function PermissionRow({
   onAsk: (key: PermissionKey) => void;
   last: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const STATE_COLOR = useMemo(() => makeStateColor(colors), [colors]);
   const copy = PERMISSION_COPY[info.key];
   const askable = info.state === 'undetermined' || info.state === 'denied';
   const actionLabel = askable ? 'Allow' : 'Open Settings';
@@ -109,6 +114,8 @@ function PermissionRow({
 }
 
 export default function PermissionsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
   const store = usePermissionStore();
   const { settings } = usePrivacySettings();
@@ -215,7 +222,7 @@ export default function PermissionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 20, paddingTop: 8 },
 

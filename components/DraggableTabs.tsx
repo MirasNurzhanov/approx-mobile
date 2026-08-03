@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -7,7 +7,9 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
-import { colors, fonts } from '@/constants/theme';
+import { fonts } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 export type DraggableTabKey = 'alerts' | 'chats' | 'clubs';
 
@@ -31,7 +33,40 @@ interface Props {
   onOrderChange: (next: DraggableTabKey[]) => void;
 }
 
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    gap: GAP,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 12,
+  },
+  slot: { flex: 1 },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
+  },
+  pillActive: { backgroundColor: colors.teal },
+  label: { fontFamily: fonts.body, fontSize: 13, fontWeight: '500', color: colors.t3 },
+  labelActive: { color: colors.bg, fontWeight: '700' },
+  badge: { borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
+  badgeActive: { backgroundColor: 'rgba(10,12,14,0.25)' },
+  badgeAlerts: { backgroundColor: colors.red },
+  badgeDefault: { backgroundColor: colors.surface2 },
+  badgeText: { fontFamily: fonts.body, color: colors.t3, fontSize: 10, fontWeight: '700' },
+  badgeTextActive: { color: colors.bg },
+  badgeTextAlerts: { color: '#fff' },
+});
+
 export function DraggableTabs({ tabs, activeTab, order, onTabPress, onOrderChange }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const orderRef = useRef(order);
   orderRef.current = order;
   const onOrderChangeRef = useRef(onOrderChange);
@@ -247,38 +282,3 @@ export function DraggableTabs({ tabs, activeTab, order, onTabPress, onOrderChang
   );
 }
 
-const styles = StyleSheet.create({
-  // Flush with the search field above it — same 16pt gutters, and the three
-  // pills divide the row between them so the strip ends where the field ends
-  // instead of floating centred inside it.
-  row: {
-    flexDirection: 'row',
-    gap: GAP,
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 12,
-  },
-  /** Equal thirds. It also makes the drag maths exact: every slot is the same
-   *  width, so a pill swapped with its neighbour travels precisely one slot. */
-  slot: { flex: 1 },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: colors.surface,
-  },
-  pillActive: { backgroundColor: colors.teal },
-  label: { fontFamily: fonts.body, fontSize: 13, fontWeight: '500', color: colors.t3 },
-  labelActive: { color: colors.bg, fontWeight: '700' },
-  badge: { borderRadius: 10, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
-  badgeActive: { backgroundColor: 'rgba(10,12,14,0.25)' },
-  badgeAlerts: { backgroundColor: colors.red },
-  badgeDefault: { backgroundColor: colors.surface2 },
-  badgeText: { fontFamily: fonts.body, color: colors.t3, fontSize: 10, fontWeight: '700' },
-  badgeTextActive: { color: colors.bg },
-  badgeTextAlerts: { color: '#fff' },
-});

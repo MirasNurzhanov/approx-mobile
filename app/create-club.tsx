@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,7 +21,9 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { api } from '@/services/api';
 import { clubsApi } from '@/services/clubs';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 interface Interest {
   id: number;
@@ -30,6 +32,8 @@ interface Interest {
 }
 
 export default function CreateClubScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
 
@@ -42,6 +46,7 @@ export default function CreateClubScreen() {
   const [loadingInterests, setLoadingInterests] = useState(false);
   const [interestQuery, setInterestQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   // The catalog is hundreds of interests long. Same filter as the two interest
   // screens, so searching means the same thing everywhere it appears.
@@ -101,10 +106,15 @@ export default function CreateClubScreen() {
         } as any);
       }
       const res = await clubsApi.create(form);
-      router.replace({ pathname: '/clubs/[id]', params: { id: res.data.id } } as any);
+      setSuccess(true);
+      setTimeout(() => {
+        router.replace({
+          pathname: '/clubs/[id]',
+          params: { id: res.data.id, fromCreate: '1' },
+        } as any);
+      }, 1200);
     } catch (e: any) {
       Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create club. Try again.');
-    } finally {
       setSubmitting(false);
     }
   }
@@ -180,17 +190,23 @@ export default function CreateClubScreen() {
             <Ionicons name="chevron-down" size={16} color={colors.t3} />
           </Pressable>
 
-          {/* Submit */}
-          <Pressable
-            style={[styles.createBtn, submitting && styles.createBtnOff]}
-            onPress={handleCreate}
-            disabled={submitting}
-          >
-            {submitting
-              ? <ActivityIndicator color={colors.bg} size="small" />
-              : <Text style={styles.createBtnText}>Create Club</Text>
-            }
-          </Pressable>
+          {/* Submit / success */}
+          {success ? (
+            <View style={styles.successBanner}>
+              <Text style={styles.successText}>Club created! 🎉</Text>
+            </View>
+          ) : (
+            <Pressable
+              style={[styles.createBtn, submitting && styles.createBtnOff]}
+              onPress={handleCreate}
+              disabled={submitting}
+            >
+              {submitting
+                ? <ActivityIndicator color={colors.bg} size="small" />
+                : <Text style={styles.createBtnText}>Create Club</Text>
+              }
+            </Pressable>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -260,7 +276,7 @@ export default function CreateClubScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
   header: {
@@ -348,6 +364,17 @@ const styles = StyleSheet.create({
   },
   createBtnOff: { opacity: 0.6 },
   createBtnText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.bg },
+
+  successBanner: {
+    marginTop: 36,
+    backgroundColor: colors.tealTint,
+    borderWidth: 1,
+    borderColor: colors.tealLine,
+    borderRadius: radius.l,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  successText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.teal },
 
   // Modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,9 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { IconBack } from '@/components/ui/icons';
-import { colors, fonts } from '@/constants/theme';
+import { fonts } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import {
   refreshBlocked,
   unblockUser,
@@ -28,6 +30,8 @@ import {
 // so unblocking here updates there instantly (and vice versa).
 
 export default function BlockedUsersScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
   const { list } = useBlockedUsers();
   const [refreshing, setRefreshing] = useState(false);
@@ -120,7 +124,7 @@ export default function BlockedUsersScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   pressed: { opacity: 0.6 },
 

@@ -1,10 +1,13 @@
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { IconBack } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // SwiftComposer — placeholder. Deliberately inert: there is no upload pipeline
 // yet, and a capture button that records into nowhere is worse than one that
@@ -18,41 +21,8 @@ import { colors, fonts, radius } from '@/constants/theme';
 //   3. Upload: multipart POST to the Swifts endpoint, with progress, plus a
 //      transcode/CDN target for videoUrl and thumbnailUrl.
 //   4. On success, prepend the new Swift to the feed cache in services/swifts.ts.
-export default function SwiftComposerScreen() {
-  const router = useRouter();
-  const { top } = useSafeAreaInsets();
 
-  return (
-    <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={styles.backBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <Text style={styles.headerTitle}>New Swift</Text>
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <View style={styles.body}>
-        <View style={styles.iconTile}>
-          <Ionicons name="videocam-outline" size={28} color={colors.t3} />
-        </View>
-        <Text style={styles.title}>Composer coming soon</Text>
-        <Text style={styles.body2}>
-          Recording, trimming and upload aren&apos;t wired up yet. The feed itself is
-          live — this is where creating one will start.
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
 
   header: {
@@ -105,3 +75,39 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+export default function SwiftComposerScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const router = useRouter();
+  const { top } = useSafeAreaInsets();
+
+  return (
+    <View style={styles.root}>
+      <View style={[styles.header, { paddingTop: top + 6 }]}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
+          <IconBack size={22} color={colors.t1} />
+        </Pressable>
+        <Text style={styles.headerTitle}>New Swift</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <View style={styles.body}>
+        <View style={styles.iconTile}>
+          <Ionicons name="videocam-outline" size={28} color={colors.t3} />
+        </View>
+        <Text style={styles.title}>Composer coming soon</Text>
+        <Text style={styles.body2}>
+          Recording, trimming and upload aren&apos;t wired up yet. The feed itself is
+          live — this is where creating one will start.
+        </Text>
+      </View>
+    </View>
+  );
+}

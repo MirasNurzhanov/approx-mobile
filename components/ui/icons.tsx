@@ -1,7 +1,8 @@
 import { StyleSheet, Text } from 'react-native'
-import Svg, { Circle, G, Path, Rect } from 'react-native-svg'
+import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg'
 
-import { colors } from '@/constants/theme'
+import { lightColors as colors } from '@/constants/theme'
+import { useTheme } from '@/context/ThemeContext'
 
 // Design icon library: 24px grid, 1.5px stroke, squared terminals, single color.
 // Paths are lifted verbatim from the redesign SVG sprite.
@@ -100,6 +101,17 @@ export function IconPin({ size = 24, color = colors.t2 }: IconProps) {
       <G stroke={color} {...stroke}>
         <Path d="M12 21.5S5.5 15.8 5.5 11a6.5 6.5 0 0113 0c0 4.8-6.5 10.5-6.5 10.5z" />
         <Circle cx={12} cy={11} r={2.2} />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconCalendar({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={3.5} y={4.5} width={17} height={16} rx={1.5} />
+        <Path d="M3.5 9.5h17M8.5 4.5V2.5M15.5 4.5V2.5" />
       </G>
     </Svg>
   )
@@ -908,6 +920,34 @@ export function IconUpload({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
+export function IconSun({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={4.25} />
+        <Line x1={12} y1={2.5} x2={12} y2={4.5} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+        <Line x1={12} y1={19.5} x2={12} y2={21.5} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+        <Line x1={2.5} y1={12} x2={4.5} y2={12} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+        <Line x1={19.5} y1={12} x2={21.5} y2={12} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+        <Line x1={5.6} y1={5.6} x2={7} y2={7} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+        <Line x1={17} y1={17} x2={18.4} y2={18.4} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+        <Line x1={5.6} y1={18.4} x2={7} y2={17} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+        <Line x1={17} y1={7} x2={18.4} y2={5.6} stroke={color} strokeWidth={1.5} strokeLinecap="square" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconMoon({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M21 12.8a9 9 0 01-9.8 9A9 9 0 0111.2 3 7 7 0 0021 12.8z" />
+      </G>
+    </Svg>
+  )
+}
+
 // Backend serves emoji for interests; this maps interest names to the designed
 // icon set instead (redesign rule 3 — no emoji anywhere). Grouped by icon and
 // covering the full seed catalog (scripts/interests_seed.json) so nothing
@@ -1490,9 +1530,10 @@ export function iconForInterest(name: string): IconComponent {
  * no emoji, and without this they would render as a blank chip.
  */
 export function InterestChipIcon({ name, icon }: { name: string; icon?: string }) {
+  const { colors: c } = useTheme()
   if (icon) return <Text style={interestChipStyles.emoji}>{icon}</Text>
   const Icon = iconForInterest(name)
-  return <Icon size={16} color={colors.t2} />
+  return <Icon size={16} color={c.t2} />
 }
 
 const interestChipStyles = StyleSheet.create({

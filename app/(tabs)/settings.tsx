@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -48,14 +48,18 @@ import {
   IconLock,
   IconLogout,
   IconMail,
+  IconMoon,
   IconMusic,
   IconPin,
   IconShield,
+  IconSun,
   IconTrash,
   type IconComponent,
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SelfZone {
@@ -105,6 +109,8 @@ function SettingsRow({
   onPress?: () => void;
   last?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const inner = (
     <View style={[styles.settingsRow, !last && styles.settingsRowBorder]}>
       {Icon && <Icon size={20} color={colors.t2} />}
@@ -135,6 +141,7 @@ function PrefSwitch({
   onValueChange: (v: boolean) => void;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
   return (
     <Switch
       value={value}
@@ -159,6 +166,8 @@ function describeZone(zone: SelfZone): string {
 }
 
 export default function SettingsScreen() {
+  const { colors, themeMode, toggleTheme } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { logout, confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
@@ -459,6 +468,11 @@ export default function SettingsScreen() {
               }
             />
             <SettingsRow
+              icon={IconMoon}
+              label="Dark mode"
+              right={<PrefSwitch value={themeMode === 'dark'} onValueChange={toggleTheme} />}
+            />
+            <SettingsRow
               icon={IconShield}
               label="Privacy & safety"
               onPress={() => router.push('/privacy')}
@@ -536,7 +550,7 @@ export default function SettingsScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 20 },
 

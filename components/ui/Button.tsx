@@ -1,5 +1,8 @@
+import { useMemo } from 'react'
 import { Pressable, Text, ActivityIndicator, StyleSheet, type PressableProps } from 'react-native'
-import { colors, radius, fonts } from '@/constants/theme'
+import { radius, fonts } from '@/constants/theme'
+import type { ColorPalette } from '@/constants/theme'
+import { useTheme } from '@/context/ThemeContext'
 import type { IconComponent } from './icons'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerTint'
@@ -14,53 +17,15 @@ interface ButtonProps extends Omit<PressableProps, 'style'> {
   icon?: IconComponent
 }
 
-const LABEL_COLOR: Record<Variant, string> = {
+const makeLabelColors = (colors: ColorPalette): Record<Variant, string> => ({
   primary: colors.bg,
   secondary: colors.t1,
   ghost: colors.t1,
   danger: '#fff',
   dangerTint: colors.red,
-}
+})
 
-export function Button({
-  label,
-  variant = 'primary',
-  size = 'md',
-  loading = false,
-  fullWidth = false,
-  icon: Icon,
-  disabled,
-  ...rest
-}: ButtonProps) {
-  const isDisabled = disabled || loading
-
-  return (
-    <Pressable
-      {...rest}
-      disabled={isDisabled}
-      style={({ pressed }) => [
-        styles.base,
-        styles[variant],
-        styles[size],
-        fullWidth && styles.fullWidth,
-        (pressed || isDisabled) && styles.dimmed,
-      ]}
-    >
-      {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? colors.bg : colors.teal} size="small" />
-      ) : (
-        <>
-          {Icon ? <Icon size={18} color={LABEL_COLOR[variant]} /> : null}
-          <Text style={[styles.label, styles[`label_${variant}`], styles[`label_${size}`]]}>
-            {label}
-          </Text>
-        </>
-      )}
-    </Pressable>
-  )
-}
-
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   base: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -100,3 +65,44 @@ const styles = StyleSheet.create({
   label_md: { fontSize: 15 },
   label_lg: { fontSize: 17 },
 })
+
+export function Button({
+  label,
+  variant = 'primary',
+  size = 'md',
+  loading = false,
+  fullWidth = false,
+  icon: Icon,
+  disabled,
+  ...rest
+}: ButtonProps) {
+  const { colors } = useTheme()
+  const styles = useMemo(() => makeStyles(colors), [colors])
+  const labelColors = useMemo(() => makeLabelColors(colors), [colors])
+  const isDisabled = disabled || loading
+
+  return (
+    <Pressable
+      {...rest}
+      disabled={isDisabled}
+      style={({ pressed }) => [
+        styles.base,
+        styles[variant],
+        styles[size],
+        fullWidth && styles.fullWidth,
+        (pressed || isDisabled) && styles.dimmed,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={variant === 'primary' ? colors.bg : colors.teal} size="small" />
+      ) : (
+        <>
+          {Icon ? <Icon size={18} color={labelColors[variant]} /> : null}
+          <Text style={[styles.label, styles[`label_${variant}`], styles[`label_${size}`]]}>
+            {label}
+          </Text>
+        </>
+      )}
+    </Pressable>
+  )
+}

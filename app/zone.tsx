@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +18,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { ZonePlayer } from '@/components/ZonePlayer';
 import { IconClose, IconInfo, IconLock, IconUpload } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import {
   refreshPrivacy,
   updatePrivacy,
@@ -78,6 +80,8 @@ const CARD_W = (SCREEN_W - 40 - 10) / 2; // 20px side padding each side, 10px ga
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
@@ -427,7 +431,7 @@ export default function ZoneScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
 

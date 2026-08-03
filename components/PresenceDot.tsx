@@ -1,6 +1,9 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors, fonts, type as typography } from '@/constants/theme';
+import { fonts, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { presenceLabel, presenceText, type Presence } from '@/services/presence';
 
 interface Props {
@@ -31,7 +34,24 @@ interface Props {
  *    the two are distinguishable without colour vision. Both carry a spelled
  *    out screen-reader label, since shape is no help there either.
  */
+
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  dot: {
+    // Sized by the caller; only the invariants live here.
+  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  caption: {
+    fontFamily: fonts.body,
+    fontSize: typography.caption,
+    color: colors.t3,
+  },
+  captionOnline: { color: colors.t2 },
+});
+
 export function PresenceDot({ presence, size = 10, haloColor, withText = false }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
   // Absent, not "offline".
   if (!presence) return null;
 
@@ -80,16 +100,3 @@ export function PresenceDot({ presence, size = 10, haloColor, withText = false }
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  dot: {
-    // Sized by the caller; only the invariants live here.
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  caption: {
-    fontFamily: fonts.body,
-    fontSize: typography.caption,
-    color: colors.t3,
-  },
-  captionOnline: { color: colors.t2 },
-});

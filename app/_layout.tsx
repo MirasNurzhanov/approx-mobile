@@ -23,10 +23,16 @@ import { AuraLoader } from '@/components/AuraLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/context/AuthContext';
 import { ScrollNavProvider } from '@/context/ScrollNavContext';
+import { AppThemeProvider, useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
 import '@/services/backgroundLocation';
+
+function AppStatusBar() {
+  const { themeMode } = useTheme();
+  return <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />;
+}
 
 function AppShell() {
   const { isLoading, isAuthenticated } = useAuth();
@@ -76,8 +82,10 @@ function AppShell() {
       <Stack.Screen name="register"        options={{ headerShown: false }} />
       <Stack.Screen name="interests-setup" options={{ headerShown: false }} />
       <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="clubs/[id]"     options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="create-club"    options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="clubs/[id]"      options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="create-club"     options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="market"          options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="modal"           options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
   );
@@ -105,16 +113,18 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <ScrollNavProvider>
-          <AuthProvider>
-            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-              <AppShell />
-              <StatusBar style="light" />
-            </ThemeProvider>
-          </AuthProvider>
-        </ScrollNavProvider>
-      </ErrorBoundary>
+      <AppThemeProvider>
+        <ErrorBoundary>
+          <ScrollNavProvider>
+            <AuthProvider>
+              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                <AppShell />
+                <AppStatusBar />
+              </ThemeProvider>
+            </AuthProvider>
+          </ScrollNavProvider>
+        </ErrorBoundary>
+      </AppThemeProvider>
     </GestureHandlerRootView>
   );
 }

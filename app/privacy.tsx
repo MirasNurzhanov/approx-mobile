@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,7 +25,9 @@ import {
   IconPeople,
   type IconComponent,
 } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import {
   AUDIENCES,
   AUDIENCE_LABEL,
@@ -76,6 +78,8 @@ const AUDIENCE_FIELDS: {
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 function SectionLabel({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
@@ -88,6 +92,8 @@ function AudiencePicker({
   onChange: (next: Audience) => void;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.segment}>
       {AUDIENCES.map((option) => {
@@ -130,6 +136,8 @@ function ToggleRow({
   disabled?: boolean;
   last?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={[styles.row, !last && styles.rowBorder]}>
       {Icon && <Icon size={20} color={colors.t2} />}
@@ -151,6 +159,8 @@ function ToggleRow({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function PrivacyScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top, bottom } = useSafeAreaInsets();
   const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);
@@ -355,7 +365,7 @@ export default function PrivacyScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 20, paddingTop: 8 },

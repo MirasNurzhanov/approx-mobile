@@ -1,8 +1,11 @@
+import { useMemo } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { hostOf, type ProfileLink } from '@/services/links';
 import { iconForPlatform, platformName } from '@/components/ui/platformIcons';
-import { colors, fonts, radius, type as typography } from '@/constants/theme';
+import { fonts, radius, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // Rendering rules, all deliberate:
 //
@@ -24,7 +27,7 @@ function confirmAndOpen(link: ProfileLink) {
         text: 'Open',
         onPress: () => {
           Linking.openURL(link.url).catch(() =>
-            Alert.alert('Couldn’t open link', `Nothing on this device can open ${host}.`),
+            Alert.alert("Couldn't open link", `Nothing on this device can open ${host}.`),
           );
         },
       },
@@ -32,40 +35,7 @@ function confirmAndOpen(link: ProfileLink) {
   );
 }
 
-export function ProfileLinkRow({ link }: { link: ProfileLink }) {
-  const Icon = iconForPlatform(link.platform);
-  const host = hostOf(link.url);
-  return (
-    <Pressable
-      onPress={() => confirmAndOpen(link)}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-      accessibilityRole="link"
-      // The platform name carries the meaning the icon carries visually, and
-      // the host is announced because it is what the user is committing to.
-      accessibilityLabel={`${platformName(link.platform)}, ${link.label}`}
-      accessibilityHint={`Opens ${host} outside Aura`}
-    >
-      <Icon size={18} color={colors.teal} />
-      <Text style={styles.label} numberOfLines={1}>{link.label}</Text>
-      <Text style={styles.host} numberOfLines={1} importantForAccessibility="no">
-        {host}
-      </Text>
-    </Pressable>
-  );
-}
-
-export function ProfileLinks({ links }: { links: ProfileLink[] }) {
-  if (!links.length) return null;
-  return (
-    <View style={styles.wrap}>
-      {links.map((link) => (
-        <ProfileLinkRow key={link.id} link={link} />
-      ))}
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   wrap: { gap: 8 },
   row: {
     flexDirection: 'row',
@@ -94,3 +64,38 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.7 },
 });
+
+export function ProfileLinkRow({ link }: { link: ProfileLink }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const Icon = iconForPlatform(link.platform);
+  const host = hostOf(link.url);
+  return (
+    <Pressable
+      onPress={() => confirmAndOpen(link)}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      accessibilityRole="link"
+      accessibilityLabel={`${platformName(link.platform)}, ${link.label}`}
+      accessibilityHint={`Opens ${host} outside Aura`}
+    >
+      <Icon size={18} color={colors.teal} />
+      <Text style={styles.label} numberOfLines={1}>{link.label}</Text>
+      <Text style={styles.host} numberOfLines={1} importantForAccessibility="no">
+        {host}
+      </Text>
+    </Pressable>
+  );
+}
+
+export function ProfileLinks({ links }: { links: ProfileLink[] }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  if (!links.length) return null;
+  return (
+    <View style={styles.wrap}>
+      {links.map((link) => (
+        <ProfileLinkRow key={link.id} link={link} />
+      ))}
+    </View>
+  );
+}

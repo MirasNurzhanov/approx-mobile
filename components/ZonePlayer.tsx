@@ -1,6 +1,6 @@
 import { useIsFocused } from '@react-navigation/native';
 import { Audio, type AVPlaybackStatus } from 'expo-av';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -12,7 +12,9 @@ import {
 } from 'react-native';
 
 import { IconMusic, IconPause, IconPlay, IconRestart } from '@/components/ui/icons';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { fmtTime } from '@/services/zoneAudio';
 
 /**
@@ -45,6 +47,87 @@ interface ZonePlayerProps {
   style?: ViewStyle;
 }
 
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  card: {
+    backgroundColor: colors.surface2,
+    borderRadius: radius.l,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    gap: 12,
+  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+
+  art: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  artActive: { backgroundColor: colors.tealTint, borderColor: colors.tealLine },
+
+  meta: { flex: 1, gap: 3 },
+  title: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.t1,
+  },
+  subtitle: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.t2,
+  },
+
+  restartBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  playBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.teal,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playBtnBlocked: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+
+  track: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+  },
+  trackFill: { height: '100%', borderRadius: 2, backgroundColor: colors.teal },
+
+  captionRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  caption: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: colors.t3,
+  },
+  captionError: { color: colors.orange },
+  footnote: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: colors.t3,
+  },
+
+  pressed: { opacity: 0.7 },
+});
+
 export function ZonePlayer({
   url,
   title,
@@ -54,6 +137,8 @@ export function ZonePlayer({
   accessibilityName,
   style,
 }: ZonePlayerProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [state, setState] = useState<PlayState>('idle');
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState<number | null>(null);
@@ -281,84 +366,3 @@ export function ZonePlayer({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface2,
-    borderRadius: radius.l,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-    gap: 12,
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-
-  art: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  artActive: { backgroundColor: colors.tealTint, borderColor: colors.tealLine },
-
-  meta: { flex: 1, gap: 3 },
-  title: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 15,
-    color: colors.t1,
-  },
-  subtitle: {
-    fontFamily: fonts.body,
-    fontSize: 12.5,
-    color: colors.t2,
-  },
-
-  restartBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  playBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: colors.teal,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playBtnBlocked: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-
-  track: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.surface,
-    overflow: 'hidden',
-  },
-  trackFill: { height: '100%', borderRadius: 2, backgroundColor: colors.teal },
-
-  captionRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  caption: {
-    flex: 1,
-    fontFamily: fonts.body,
-    fontSize: 11.5,
-    color: colors.t3,
-  },
-  captionError: { color: colors.orange },
-  footnote: {
-    fontFamily: fonts.body,
-    fontSize: 11.5,
-    color: colors.t3,
-  },
-
-  pressed: { opacity: 0.7 },
-});

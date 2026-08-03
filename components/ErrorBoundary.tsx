@@ -1,18 +1,26 @@
-import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-interface Props {
+import { fonts } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
+
+// ── Inner class catches errors; outer function provides theme ─────────────────
+
+interface ClassProps {
   children: React.ReactNode;
+  colors: ColorPalette;
+  onReset: () => void;
 }
 
-interface State {
+interface ClassState {
   error: Error | null;
 }
 
-export class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { error: null };
+class ErrorBoundaryClass extends React.Component<ClassProps, ClassState> {
+  state: ClassState = { error: null };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): ClassState {
     return { error };
   }
 
@@ -20,44 +28,68 @@ export class ErrorBoundary extends React.Component<Props, State> {
     console.error('[ErrorBoundary]', error.message, info.componentStack);
   }
 
-  reset = () => this.setState({ error: null });
-
   render() {
     const { error } = this.state;
-
     if (!error) return this.props.children;
 
+    const { colors, onReset } = this.props;
+    const s = makeStyles(colors);
+
     return (
-      <View style={styles.root}>
-        <Text style={styles.title}>Something went wrong</Text>
-        <Text style={styles.message}>{error.message}</Text>
-        <TouchableOpacity style={styles.button} onPress={this.reset}>
-          <Text style={styles.buttonText}>Try again</Text>
-        </TouchableOpacity>
+      <View style={s.root}>
+        <Text style={s.title}>Something went wrong</Text>
+        <Text style={s.message}>{error.message}</Text>
+        <Pressable
+          style={({ pressed }) => [s.button, pressed && s.pressed]}
+          onPress={onReset}
+          accessibilityRole="button"
+          accessibilityLabel="Try again"
+        >
+          <Text style={s.buttonText}>Try again</Text>
+        </Pressable>
       </View>
     );
   }
 }
 
-const styles = StyleSheet.create({
+// ── Public functional wrapper ─────────────────────────────────────────────────
+
+export function ErrorBoundary({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+  const [key, setKey] = useState(0);
+
+  return (
+    <ErrorBoundaryClass
+      key={key}
+      colors={colors}
+      onReset={() => setKey((k) => k + 1)}
+    >
+      {children}
+    </ErrorBoundaryClass>
+  );
+}
+
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
     gap: 20,
   },
   title: {
-    color: '#ffffff',
-    fontSize: 22,
+    fontFamily: fonts.display,
     fontWeight: '700',
-    letterSpacing: 1,
+    fontSize: 22,
+    color: colors.t1,
+    letterSpacing: 0.5,
     textAlign: 'center',
   },
   message: {
-    color: '#888',
+    fontFamily: fonts.body,
     fontSize: 13,
+    color: colors.t2,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -66,12 +98,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 32,
     borderRadius: 24,
-    backgroundColor: '#00b4a6',
+    backgroundColor: colors.teal,
   },
+  pressed: { opacity: 0.7 },
   buttonText: {
-    color: '#ffffff',
-    fontSize: 14,
+    fontFamily: fonts.body,
     fontWeight: '700',
-    letterSpacing: 1,
+    fontSize: 14,
+    color: colors.bg,
+    letterSpacing: 0.5,
   },
 });

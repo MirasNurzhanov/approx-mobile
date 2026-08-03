@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -16,11 +16,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Ionicons } from '@expo/vector-icons';
+
 import { api } from '@/services/api';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
 import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
+import { AuraMark } from '@/components/ui/AuraMark';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -36,9 +39,12 @@ import {
   IconSound,
   iconForInterest,
   type IconComponent,
+  type IconProps,
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Profile {
@@ -48,6 +54,7 @@ interface Profile {
   links?: ProfileLink[];
   date_joined?: string;
   interests?: { icon: string; name: string }[];
+  aura_points?: number;
   profile_picture?: string;
 }
 
@@ -62,6 +69,8 @@ function ActionRow({ icon: Icon, label, onPress }: {
   label: string;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Pressable
       style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
@@ -74,6 +83,11 @@ function ActionRow({ icon: Icon, label, onPress }: {
   );
 }
 
+function IconMarket({ size = 24 }: IconProps): React.JSX.Element {
+  const { colors } = useTheme();
+  return <Ionicons name="storefront-outline" size={size} color={colors.teal} />;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmtJoined(iso: string): string {
   const d = new Date(iso);
@@ -83,6 +97,8 @@ function fmtJoined(iso: string): string {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
@@ -222,6 +238,16 @@ export default function ProfileScreen() {
             )}
 
             <View style={styles.pillRow}>
+              {profile?.aura_points != null && (
+                <Pressable
+                  style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+                  onPress={() => router.push('/market')}
+                >
+                  <AuraMark size={13} color={colors.purple} />
+                  <Text style={styles.pillAura}>{profile.aura_points.toLocaleString()}</Text>
+                  <IconChevron size={11} color={colors.purple} />
+                </Pressable>
+              )}
               {profile?.date_joined ? (
                 <View style={styles.pill}>
                   <Text style={styles.pillText}>Since {fmtJoined(profile.date_joined)}</Text>
@@ -274,6 +300,7 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>MORE</Text>
           <View style={styles.rowGroup}>
+            <ActionRow icon={IconMarket} label="Market"         onPress={() => router.push('/market')} />
             <ActionRow icon={IconSound}  label="My zone"        onPress={() => router.push('/zone')} />
             <ActionRow icon={IconHeart}  label="Edit interests" onPress={() => router.push('/interests')} />
             <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/saved-stories')} />
@@ -353,7 +380,7 @@ export default function ProfileScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 20 },
@@ -409,6 +436,12 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
+  },
+  pillAura: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 13,
+    color: colors.purple,
   },
   pillText: {
     fontFamily: fonts.body,

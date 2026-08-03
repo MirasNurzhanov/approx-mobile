@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,7 +17,9 @@ import MapView, { Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 import { api } from '@/services/api';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { Card } from '@/components/ui/Card';
-import { colors, fonts, radius as themeRadius, type } from '@/constants/theme';
+import { fonts, radius as themeRadius, type } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import {
   formatRadius,
   getRegion,
@@ -76,6 +78,8 @@ function ModeTabs({ mode, onChange, disabled }: {
   onChange: (mode: ZoneMode) => void;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.tabs} accessibilityRole="tablist">
       {(['radius', 'region'] as const).map((key) => {
@@ -107,6 +111,8 @@ function ModeTabs({ mode, onChange, disabled }: {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneAreaScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
@@ -471,7 +477,7 @@ export default function ZoneAreaScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center' },
 

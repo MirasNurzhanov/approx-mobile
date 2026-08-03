@@ -1,7 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -13,8 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Button } from '@/components/ui/Button';
-import { colors, fonts, radius } from '@/constants/theme';
+import { fonts, radius } from '@/constants/theme';
 
 const { width } = Dimensions.get('window');
 
@@ -23,31 +21,36 @@ type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 const SLIDES: { id: string; icon: IoniconsName; title: string; body: string }[] = [
   {
     id: '1',
-    icon: 'map-outline',
-    title: 'Discover Nearby',
-    body: 'Find people with shared interests right around you — no algorithms, just proximity.',
+    icon: 'people-outline',
+    title: 'Find your people',
+    body: 'Discover people nearby who share your interests and get in touch with them right away',
   },
   {
     id: '2',
-    icon: 'musical-notes-outline',
-    title: "Enter Someone's Zone",
-    body: 'Walk near someone and hear their music. Let your vibe speak before you say a word.',
+    icon: 'map-outline',
+    title: 'Connect instantly',
+    body: "See who's around you on the map, tap their profile, and send a Hi to start a conversation",
   },
   {
     id: '3',
-    icon: 'people-outline',
-    title: 'Make Real Connections',
-    body: 'Go from stranger to friend in real life. Every connection starts with being in the same place.',
+    icon: 'people-circle-outline',
+    title: 'Build your circle',
+    body: 'Join clubs, organise meetups, and grow real friendships around the things you love',
   },
 ];
 
-async function finish() {
-  await AsyncStorage.setItem('onboarding_seen', 'true');
-  router.replace('/welcome');
-}
+const LIGHT = {
+  bg:       '#faf9f5',
+  surface2: '#FCEEE8',
+  t1:       '#2D2A22',
+  t2:       '#6B6455',
+  teal:     '#E8714A',
+  border:   '#E8E4DA',
+} as const;
 
 export default function OnboardingScreen() {
-  const { top, bottom } = useSafeAreaInsets();
+  const styles = useMemo(() => makeStyles(LIGHT), []);
+  const { bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const flatRef = useRef<FlatList>(null);
 
@@ -60,7 +63,7 @@ export default function OnboardingScreen() {
     if (index < SLIDES.length - 1) {
       flatRef.current?.scrollToIndex({ index: index + 1, animated: true });
     } else {
-      finish();
+      router.replace('/welcome');
     }
   }
 
@@ -68,16 +71,6 @@ export default function OnboardingScreen() {
 
   return (
     <View style={styles.root}>
-      {!isLast && (
-        <Pressable
-          onPress={finish}
-          style={[styles.skipBtn, { top: top + 12 }]}
-          hitSlop={12}
-        >
-          <Text style={styles.skipText}>Skip</Text>
-        </Pressable>
-      )}
-
       <FlatList
         ref={flatRef}
         data={SLIDES}
@@ -90,10 +83,8 @@ export default function OnboardingScreen() {
         getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
         renderItem={({ item }) => (
           <View style={styles.slide}>
-            <View style={styles.iconRing}>
-              <View style={styles.iconInner}>
-                <Ionicons name={item.icon} size={52} color={colors.teal} />
-              </View>
+            <View style={styles.iconWrap}>
+              <Ionicons name={item.icon} size={80} color={LIGHT.teal} />
             </View>
             <Text style={styles.title}>{item.title}</Text>
             <Text style={styles.body}>{item.body}</Text>
@@ -108,35 +99,23 @@ export default function OnboardingScreen() {
       </View>
 
       <View style={[styles.footer, { paddingBottom: bottom + 16 }]}>
-        <Button
-          label={isLast ? 'Get Started' : 'Next'}
-          variant="primary"
-          size="lg"
-          fullWidth
+        <Pressable
           onPress={goNext}
-        />
+          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={isLast ? 'Get Started' : 'Next'}
+        >
+          <Text style={styles.btnLabel}>{isLast ? 'Get Started' : 'Next'}</Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: typeof LIGHT) => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.bg,
-  },
-
-  skipBtn: {
-    position: 'absolute',
-    right: 24,
-    zIndex: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  skipText: {
-    fontFamily: fonts.body,
-    fontSize: 15,
-    color: colors.t3,
+    backgroundColor: c.bg,
   },
 
   slide: {
@@ -146,41 +125,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 40,
   },
-  iconRing: {
-    width: 136,
-    height: 136,
-    borderRadius: 68,
-    borderWidth: 1.5,
-    borderColor: colors.tealLine,
+
+  iconWrap: {
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: c.surface2,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 44,
   },
-  iconInner: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: colors.tealTint,
-    borderWidth: 1,
-    borderColor: colors.tealLine,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+
   title: {
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 28,
-    color: colors.t1,
+    color: c.t1,
     textAlign: 'center',
     marginBottom: 16,
     letterSpacing: 0.2,
   },
+
   body: {
     fontFamily: fonts.body,
-    fontSize: 15,
-    color: colors.t2,
+    fontSize: 16,
+    color: c.t2,
     textAlign: 'center',
     lineHeight: 24,
+    maxWidth: 300,
   },
 
   dots: {
@@ -194,16 +166,31 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: colors.surface2,
+    backgroundColor: c.border,
   },
   dotActive: {
     width: 24,
-    height: 6,
     borderRadius: 3,
-    backgroundColor: colors.teal,
+    backgroundColor: c.teal,
   },
 
   footer: {
     paddingHorizontal: 24,
+  },
+
+  btn: {
+    backgroundColor: c.teal,
+    borderRadius: radius.m,
+    paddingVertical: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  btnPressed: { opacity: 0.75 },
+  btnLabel: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 17,
+    color: c.bg,
   },
 });

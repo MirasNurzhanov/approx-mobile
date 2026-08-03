@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -9,7 +9,9 @@ import {
   type PermissionInfo,
   type PermissionKey,
 } from '@/services/permissions';
-import { colors, fonts, radius, type as typography } from '@/constants/theme';
+import { fonts, radius, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // Priming: explain in-app, then let the OS ask.
 //
@@ -30,7 +32,66 @@ type Pending = {
   blocked: boolean;
 };
 
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    padding: 28,
+  },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.l,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 24,
+    gap: 12,
+  },
+  title: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: typography.title,
+    color: colors.t1,
+  },
+  body: {
+    fontFamily: fonts.body,
+    fontSize: typography.body,
+    lineHeight: typography.body * 1.45,
+    color: colors.t2,
+    marginBottom: 6,
+  },
+  primary: {
+    backgroundColor: colors.teal,
+    borderRadius: radius.m,
+    paddingVertical: 14,
+    alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  primaryText: {
+    fontFamily: fonts.body,
+    fontWeight: '700',
+    fontSize: typography.body,
+    color: colors.bg,
+  },
+  secondary: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  secondaryText: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: typography.body,
+    color: colors.t2,
+  },
+  pressed: { opacity: 0.7 },
+});
+
 export function usePermissionPrimer() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [pending, setPending] = useState<Pending | null>(null);
   const pendingRef = useRef<Pending | null>(null);
   pendingRef.current = pending;
@@ -121,60 +182,3 @@ export function usePermissionPrimer() {
 
   return { ensure, primer };
 }
-
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    padding: 28,
-  },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.l,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 24,
-    gap: 12,
-  },
-  title: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: typography.title,
-    color: colors.t1,
-  },
-  body: {
-    fontFamily: fonts.body,
-    fontSize: typography.body,
-    lineHeight: typography.body * 1.45,
-    color: colors.t2,
-    marginBottom: 6,
-  },
-  primary: {
-    backgroundColor: colors.teal,
-    borderRadius: radius.m,
-    paddingVertical: 14,
-    alignItems: 'center',
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  primaryText: {
-    fontFamily: fonts.body,
-    fontWeight: '700',
-    fontSize: typography.body,
-    color: colors.bg,
-  },
-  secondary: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  secondaryText: {
-    fontFamily: fonts.body,
-    fontWeight: '600',
-    fontSize: typography.body,
-    color: colors.t2,
-  },
-  pressed: { opacity: 0.7 },
-});

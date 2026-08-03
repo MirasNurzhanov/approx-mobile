@@ -8,6 +8,7 @@ import {
     Alert,
     Image,
     KeyboardAvoidingView,
+    Linking,
     Modal,
     Platform,
     Pressable,
@@ -34,6 +35,7 @@ import { REACTIONS, StoryViewer } from '@/components/StoryViewer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import {
+    IconCalendar,
     IconCamera,
     IconClose,
     IconHi,
@@ -51,7 +53,9 @@ import {
     type IconComponent,
 } from '@/components/ui/icons';
 import { ZonePlayer } from '@/components/ZonePlayer';
-import { colors, fonts, radius, type } from '@/constants/theme';
+import { fonts, radius, type } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -65,7 +69,7 @@ import {
   usePermissionStore,
   type PermissionState,
 } from '@/services/permissions';
-import { registerNearbyRefresh } from '@/services/nearbyRefresh';
+import { registerNearbyRefresh, registerMeetupRemove } from '@/services/nearbyRefresh';
 import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
 import { MotionTrail } from '@/components/MotionTrail';
 import { PresenceDot } from '@/components/PresenceDot';
@@ -134,13 +138,28 @@ interface SelfZone {
   zone_region_id: number | null;
 }
 
+interface ClubMeetup {
+  id: number;
+  club: number;
+  club_name: string;
+  club_emblem?: string;
+  created_by: { id: number; username: string; profile_picture?: string };
+  title: string;
+  description?: string;
+  location_name?: string;
+  latitude: number;
+  longitude: number;
+  event_datetime: string;
+  status: string;
+  expires_at: string;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Ring colour carries the relationship, and nothing else does: blue is a
 // friend, orange is a connection, teal is a matched stranger. One colour per
 // state, used on the marker, in the sheet and on the zone.
-const COLOR_FRIEND    = colors.blue;
-const COLOR_CONNECTED = colors.orange;
-const COLOR_STRANGER  = colors.teal;
+// COLOR_FRIEND / COLOR_CONNECTED / COLOR_STRANGER are computed inside MapScreen
+// using the dynamic theme — see below.
 
 /** Matches APPROX_GRID_M on the server. */
 const APPROX_RADIUS_M = 500;
@@ -175,7 +194,8 @@ const Z_FRIEND = 5;
 /** Above the people it stands in for: while a pile is collapsed, the badge is
  *  the only thing there is to hit. */
 const Z_CLUSTER = 6;
-const Z_STORY = 7;
+const Z_STORY   = 7;
+const Z_MEETUP  = 8;
 
 const REL_LABEL: Record<Relationship, string> = {
   stranger:  'Nearby',
@@ -244,6 +264,23 @@ function avatarBgColor(username: string): string {
 function fmtDistance(m?: number): string | null {
   if (m == null) return null;
   return m < 1000 ? `${Math.round(m)} m away` : `${(m / 1000).toFixed(1)} km away`;
+}
+
+function fmtDateTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString([], {
+      weekday: 'short', month: 'short', day: 'numeric',
+      year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+}
+
+function fmtTimeLeft(expiresAt: string): string {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return 'Expired';
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return h > 0 ? `${h}h ${m}m remaining` : `${m}m remaining`;
 }
 
 // ─── Overlapping markers ──────────────────────────────────────────────────────
@@ -555,6 +592,8 @@ function DotMarker({ coordinate, color, presence, zIndex, sharedInterests, onPre
   sharedInterests?: string[];
   onPress?: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Re-arm tracking briefly when the color changes (friend data arrives after
   // the first nearby fetch), then freeze the rasterized marker again.
   // Presence is in the same bucket: it changes the rasterized bitmap, so it has
@@ -668,6 +707,8 @@ function AvatarMarker({
   captionTag,
   onPress,
 }: AvatarMarkerProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Markers rasterize their children: keep tracking until the remote image is
   // drawn, and re-arm briefly when the ring color changes (friend data arrives
   // after the first nearby fetch).
@@ -767,6 +808,8 @@ function SelfMarker({ coordinate, uri, username }: {
   uri?: string;
   username: string;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [imageReady, setImageReady] = useState(!uri);
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
@@ -808,6 +851,8 @@ function ClusterMarker({ coordinate, count, onPress }: {
   count: number;
   onPress?: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Same reason as DotMarker: freeze the raster, but not before it has drawn.
   const [settling, setSettling] = useState(true);
   useEffect(() => {
@@ -836,6 +881,8 @@ function ClusterMarker({ coordinate, count, onPress }: {
 }
 
 function StoryBubble({ story, count }: { story: Story; count: number }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const avatarBg = avatarBgColor(story.author.username);
 
   const reactions = story.reactions ?? {};
@@ -916,6 +963,8 @@ function LocateButton({
   bottom: number;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const following = state === 'following';
 
   // The icon carries the state as a shape — a filled centre when tracking, a
@@ -959,6 +1008,8 @@ function TopBar({
   onSearch: () => void;
   onList: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { top } = useSafeAreaInsets();
   return (
     <View style={[styles.topBar, { paddingTop: top + 6 }]}>
@@ -1032,6 +1083,8 @@ interface CreateStoryModalProps {
 }
 
 function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { bottom } = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -1140,7 +1193,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
               disabled={!text.trim() || posting}
             >
               {posting ? (
-                <ActivityIndicator color="#0a0a0a" size="small" />
+                <ActivityIndicator color={colors.bg} size="small" />
               ) : (
                 <Text style={styles.postBtnText}>Post Story</Text>
               )}
@@ -1149,6 +1202,108 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
         </View>
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+// ─── Meetup Marker ────────────────────────────────────────────────────────────
+function MeetupMarker({ meetup, onPress }: { meetup: ClubMeetup; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <Marker
+      coordinate={{ latitude: meetup.latitude, longitude: meetup.longitude }}
+      anchor={{ x: 0.5, y: 1 }}
+      tracksViewChanges={false}
+      zIndex={Z_MEETUP}
+      onPress={onPress}
+    >
+      <View style={styles.meetupMarkerWrap}>
+        <View style={styles.meetupMarkerBubble}>
+          {meetup.club_emblem ? (
+            <Image source={{ uri: meetup.club_emblem }} style={styles.meetupMarkerImg} />
+          ) : (
+            <IconCalendar size={18} color="#fff" />
+          )}
+        </View>
+        <View style={styles.meetupMarkerTail} />
+      </View>
+    </Marker>
+  );
+}
+
+// ─── Meetup Sheet ─────────────────────────────────────────────────────────────
+function MeetupSheet({
+  meetup,
+  sheetY,
+  onDismiss,
+}: {
+  meetup: ClubMeetup;
+  sheetY: SharedValue<number>;
+  onDismiss: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const { bottom } = useSafeAreaInsets();
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
+
+  function openDirections() {
+    const label = encodeURIComponent(meetup.title);
+    const url = Platform.OS === 'ios'
+      ? `maps://0,0?q=${label}@${meetup.latitude},${meetup.longitude}`
+      : `geo:${meetup.latitude},${meetup.longitude}?q=${meetup.latitude},${meetup.longitude}(${label})`;
+    Linking.openURL(url).catch(() => {
+      Linking.openURL(`https://maps.google.com/maps?q=${meetup.latitude},${meetup.longitude}`);
+    });
+  }
+
+  return (
+    <>
+      <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
+      <Animated.View style={[styles.sheet, { paddingBottom: bottom + 16 }, animStyle]}>
+        <View style={styles.sheetHandle} />
+
+        {/* Head: club emblem + title + expiry */}
+        <View style={styles.sheetHead}>
+          {meetup.club_emblem ? (
+            <Image source={{ uri: meetup.club_emblem }} style={styles.meetupSheetEmblem} />
+          ) : (
+            <View style={styles.meetupSheetEmblemFallback}>
+              <IconCalendar size={22} color="#fff" />
+            </View>
+          )}
+          <View style={styles.sheetHeadBody}>
+            <Text style={styles.sheetName} numberOfLines={2}>{meetup.title}</Text>
+            <Text style={styles.sheetMeta} numberOfLines={1}>{meetup.club_name}</Text>
+          </View>
+          <View style={styles.meetupExpiryPill}>
+            <Text style={styles.meetupExpiryText}>{fmtTimeLeft(meetup.expires_at)}</Text>
+          </View>
+        </View>
+
+        {/* Details */}
+        <View style={styles.meetupDetailBlock}>
+          <View style={styles.meetupDetailRow}>
+            <IconCalendar size={14} color={colors.t3} />
+            <Text style={styles.meetupDetailText}>{fmtDateTime(meetup.event_datetime)}</Text>
+          </View>
+          {meetup.location_name ? (
+            <View style={styles.meetupDetailRow}>
+              <IconPin size={14} color={colors.t3} />
+              <Text style={styles.meetupDetailText} numberOfLines={1}>{meetup.location_name}</Text>
+            </View>
+          ) : null}
+          <View style={styles.meetupDetailRow}>
+            <IconPeople size={14} color={colors.t3} />
+            <Text style={styles.meetupDetailText}>Proposed by @{meetup.created_by.username}</Text>
+          </View>
+          {meetup.description ? (
+            <Text style={styles.meetupDescription}>{meetup.description}</Text>
+          ) : null}
+        </View>
+
+        <Button label="Get Directions" variant="primary" size="md" fullWidth onPress={openDirections} />
+      </Animated.View>
+    </>
   );
 }
 
@@ -1168,6 +1323,8 @@ interface SheetProps {
 function UserSheet({
   user, sheetY, onDismiss, onFriendChange, viewerCoords, zoneRegion,
 }: SheetProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({
@@ -1421,6 +1578,11 @@ function UserSheet({
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MapScreen() {
+  const { colors, themeMode } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const COLOR_FRIEND    = colors.blue;
+  const COLOR_CONNECTED = colors.orange;
+  const COLOR_STRANGER  = colors.teal;
   useEffect(() => { console.log('[Map] step 1: component mounted'); }, []);
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
@@ -1439,6 +1601,8 @@ export default function MapScreen() {
   const [stories, setStories]           = useState<Story[]>([]);
   const [storyViewer, setStoryViewer]   = useState<{ stories: Story[] } | null>(null);
   const [createStoryCoord, setCreateStoryCoord] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [clubMeetups, setClubMeetups]   = useState<ClubMeetup[]>([]);
+  const [selectedMeetup, setSelectedMeetup] = useState<ClubMeetup | null>(null);
 
   const [following, setFollowing]     = useState(false);
   const [locating, setLocating]       = useState(false);
@@ -1680,9 +1844,18 @@ export default function MapScreen() {
     } catch {}
   }, []);
 
+  const fetchClubMeetups = useCallback(async () => {
+    try {
+      const r = await api.get<ClubMeetup[]>('/api/clubs/events/nearby/');
+      const now = Date.now();
+      setClubMeetups(r.data.filter((e) => new Date(e.expires_at).getTime() > now));
+    } catch {}
+  }, []);
+
   function openStoryViewer(authorStories: Story[]) {
     sheetY.value = SHEET_H;
     setSelectedUser(null);
+    setSelectedMeetup(null);
     setStoryViewer({ stories: authorStories });
   }
 
@@ -1875,7 +2048,8 @@ export default function MapScreen() {
       setNearby(users);
     }
     await fetchFriends();
-  }, [fetchFriends, loadSelf]);
+    await fetchClubMeetups();
+  }, [fetchFriends, loadSelf, fetchClubMeetups]);
 
   useEffect(() => {
     if (!coords) return;
@@ -1890,10 +2064,22 @@ export default function MapScreen() {
   }, [tick]);
 
   useEffect(() => {
+    registerMeetupRemove((id) => {
+      setClubMeetups((prev) => prev.filter((m) => m.id !== id));
+    });
+  }, []);
+
+  useEffect(() => {
     fetchStories();
     const id = setInterval(fetchStories, STORY_POLL_MS);
     return () => clearInterval(id);
   }, [fetchStories]);
+
+  useEffect(() => {
+    fetchClubMeetups();
+    const id = setInterval(fetchClubMeetups, STORY_POLL_MS);
+    return () => clearInterval(id);
+  }, [fetchClubMeetups]);
 
 
   // Keep the open sheet in sync with the latest nearby fetch
@@ -1913,6 +2099,7 @@ export default function MapScreen() {
   }, [stories]);
 
   function openSheet(user: NearbyUser) {
+    setSelectedMeetup(null);
     setSelectedUser(user);
     sheetY.value = withSpring(0, SPRING_CFG);
   }
@@ -1920,6 +2107,19 @@ export default function MapScreen() {
   function closeSheet() {
     sheetY.value = withSpring(SHEET_H, SPRING_CFG, (done) => {
       if (done) runOnJS(setSelectedUser)(null);
+    });
+  }
+
+  function openMeetupSheet(meetup: ClubMeetup) {
+    setStoryViewer(null);
+    setSelectedUser(null);
+    setSelectedMeetup(meetup);
+    sheetY.value = withSpring(0, SPRING_CFG);
+  }
+
+  function closeMeetupSheet() {
+    sheetY.value = withSpring(SHEET_H, SPRING_CFG, (done) => {
+      if (done) runOnJS(setSelectedMeetup)(null);
     });
   }
 
@@ -2150,7 +2350,7 @@ export default function MapScreen() {
           }}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
-          customMapStyle={DARK_MAP_STYLE}
+          customMapStyle={themeMode === 'dark' ? DARK_MAP_STYLE : []}
           initialRegion={region}
           showsUserLocation={false}
           showsMyLocationButton={false}
@@ -2374,6 +2574,18 @@ export default function MapScreen() {
               </Marker>
             );
           })}
+
+          {/* Approved club meetup pins — one per event, above story bubbles. */}
+          {clubMeetups.map((meetup) => (
+            <MeetupMarker
+              key={`meetup-${meetup.id}`}
+              meetup={meetup}
+              onPress={() => {
+                console.log('[Meetup] marker tapped:', meetup.id);
+                openMeetupSheet(meetup);
+              }}
+            />
+          ))}
         </MapView>
       )}
 
@@ -2398,6 +2610,15 @@ export default function MapScreen() {
               ? regionOutlines.get(selectedUser.zone_region_id) ?? null
               : null
           }
+        />
+      )}
+
+      {/* Club meetup detail sheet */}
+      {selectedMeetup && (
+        <MeetupSheet
+          meetup={selectedMeetup}
+          sheetY={sheetY}
+          onDismiss={closeMeetupSheet}
         />
       )}
 
@@ -2458,7 +2679,7 @@ export default function MapScreen() {
           Hidden while a sheet or full-screen overlay owns the screen: the user
           sheet reaches 400pt up with a backdrop over everything below it, so a
           button left there is both covered and unreachable. */}
-      {mapVisible && !selectedUser && !storyViewer && createStoryCoord === null && (
+      {mapVisible && !selectedUser && !selectedMeetup && !storyViewer && createStoryCoord === null && (
         <LocateButton state={locateState} bottom={locateBottom} onPress={handleLocatePress} />
       )}
     </View>
@@ -2466,7 +2687,7 @@ export default function MapScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   map: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', gap: 16 },
@@ -2633,7 +2854,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     justifyContent: 'center',
     borderRadius: radius.s,
-    backgroundColor: 'rgba(10,10,11,0.82)',
+    backgroundColor: colors.bg + 'D2',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
   },
@@ -3132,4 +3353,72 @@ const styles = StyleSheet.create({
     zIndex: 200,
   },
   hiToastText: { fontFamily: fonts.body, color: colors.t1, fontSize: 13, fontWeight: '500' },
+
+  // ── Meetup marker: purple bubble pin with emblem or calendar icon ──
+  meetupMarkerWrap: { alignItems: 'center' },
+  meetupMarkerBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.purple,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(139,92,246,0.4)',
+  },
+  meetupMarkerImg: { width: 32, height: 32, borderRadius: 8 },
+  meetupMarkerTail: {
+    width: 12,
+    height: 12,
+    backgroundColor: colors.purple,
+    transform: [{ rotate: '45deg' }],
+    marginTop: -7,
+    borderBottomRightRadius: 3,
+  },
+
+  // ── Meetup sheet ──
+  meetupSheetEmblem: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  meetupSheetEmblemFallback: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.purple,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meetupExpiryPill: {
+    backgroundColor: 'rgba(139,92,246,0.15)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(139,92,246,0.3)',
+  },
+  meetupExpiryText: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.purple,
+  },
+  meetupDetailBlock: { gap: 10, marginBottom: 20 },
+  meetupDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  meetupDetailText: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+  },
+  meetupDescription: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+    lineHeight: 19,
+    marginTop: 4,
+  },
 });

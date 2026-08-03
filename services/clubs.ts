@@ -1,6 +1,6 @@
 import { api } from './api';
 
-export type ClubRole = 'president' | 'vice' | 'member';
+export type ClubRole = 'owner' | 'member';
 
 export interface ClubInterest {
   id: number;
@@ -15,26 +15,30 @@ export interface Club {
   emblem?: string;
   interest?: ClubInterest;
   member_count: number;
-  role?: ClubRole;
+  creator?: number | { id: number; username: string };
+  my_role?: ClubRole;   // SerializerMethodField — the viewer's own role
   is_member?: boolean;
 }
 
 export interface ClubMember {
-  id: number;
-  username: string;
-  profile_picture?: string;
+  user: {
+    id: number;
+    username: string;
+    profile_picture?: string;
+  };
   role: ClubRole;
 }
 
 export const clubsApi = {
-  list:     ()                          => api.get<Club[]>('/api/clubs/'),
-  discover: ()                          => api.get<Club[]>('/api/clubs/discover/'),
-  get:      (id: number)                => api.get<Club>(`/api/clubs/${id}/`),
-  members:  (id: number)                => api.get<ClubMember[]>(`/api/clubs/${id}/members/`),
-  create:   (data: FormData)            => api.post<Club>('/api/clubs/', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  join:     (id: number)                => api.post(`/api/clubs/${id}/join/`),
-  leave:    (id: number)                => api.delete(`/api/clubs/${id}/leave/`),
-  kick:     (clubId: number, userId: number) => api.post(`/api/clubs/${clubId}/kick/${userId}/`),
-  promote:  (clubId: number, userId: number) => api.post(`/api/clubs/${clubId}/promote/${userId}/`),
-  transfer: (clubId: number, userId: number) => api.post(`/api/clubs/${clubId}/transfer/${userId}/`),
+  list:         ()                               => api.get<Club[]>('/api/clubs/'),
+  myList:       ()                               => api.get<Club[]>('/api/clubs/?joined=true'),
+  get:          (id: number)                     => api.get<Club>(`/api/clubs/${id}/`),
+  members:      (id: number)                     => api.get<ClubMember[]>(`/api/clubs/${id}/members/`),
+  create:       (data: FormData)                 => api.post<Club>('/api/clubs/', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  join:         (id: number)                     => api.post(`/api/clubs/${id}/join/`),
+  leave:        (id: number)                     => api.post(`/api/clubs/${id}/leave/`),
+  kick:         (clubId: number, userId: number) => api.delete(`/api/clubs/${clubId}/kick/${userId}/`),
+  promoteOwner: (clubId: number, userId: number) => api.patch(`/api/clubs/${clubId}/promote-owner/${userId}/`),
+  deleteClub:   (clubId: number)                 => api.delete(`/api/clubs/${clubId}/`),
+  invite:       (clubId: number, userId: number) => api.post(`/api/clubs/${clubId}/invite/${userId}/`),
 };

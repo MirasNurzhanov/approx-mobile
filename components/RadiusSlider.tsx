@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -8,7 +8,9 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 
-import { colors, fonts, type } from '@/constants/theme';
+import { fonts, type as typography } from '@/constants/theme';
+import type { ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // A slider built on gesture-handler rather than @react-native-community/slider.
 //
@@ -58,9 +60,41 @@ interface Props {
   disabled?: boolean;
 }
 
+const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  root: { width: '100%' },
+  // Taller than the track it draws: the visible bar is 6pt, which is far below
+  // the 44pt minimum touch target, so the hit area is padded out around it.
+  trackArea: { height: 44, justifyContent: 'center' },
+  disabled: { opacity: 0.4 },
+  track: {
+    height: TRACK_H,
+    borderRadius: TRACK_H / 2,
+    backgroundColor: colors.surface2,
+  },
+  fill: {
+    position: 'absolute',
+    height: TRACK_H,
+    borderRadius: TRACK_H / 2,
+    backgroundColor: colors.teal,
+  },
+  thumb: {
+    position: 'absolute',
+    width: THUMB,
+    height: THUMB,
+    borderRadius: THUMB / 2,
+    backgroundColor: colors.t1,
+    borderWidth: 3,
+    borderColor: colors.teal,
+  },
+  scale: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
+  scaleText: { fontFamily: fonts.body, fontSize: typography.micro, color: colors.t3 },
+});
+
 export function RadiusSlider({
   value, min, max, onChange, onCommit, format, disabled,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [width, setWidth] = useState(0);
   const position = useSharedValue(valueToPosition(value, min, max));
   const scale = useSharedValue(1);
@@ -176,33 +210,3 @@ export function RadiusSlider({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { width: '100%' },
-  // Taller than the track it draws: the visible bar is 6pt, which is far below
-  // the 44pt minimum touch target, so the hit area is padded out around it.
-  trackArea: { height: 44, justifyContent: 'center' },
-  disabled: { opacity: 0.4 },
-  track: {
-    height: TRACK_H,
-    borderRadius: TRACK_H / 2,
-    backgroundColor: colors.surface2,
-  },
-  fill: {
-    position: 'absolute',
-    height: TRACK_H,
-    borderRadius: TRACK_H / 2,
-    backgroundColor: colors.teal,
-  },
-  thumb: {
-    position: 'absolute',
-    width: THUMB,
-    height: THUMB,
-    borderRadius: THUMB / 2,
-    backgroundColor: colors.t1,
-    borderWidth: 3,
-    borderColor: colors.teal,
-  },
-  scale: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
-  scaleText: { fontFamily: fonts.body, fontSize: type.micro, color: colors.t3 },
-});

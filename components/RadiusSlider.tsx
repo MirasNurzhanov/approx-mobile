@@ -57,6 +57,10 @@ interface Props {
   /** Fired once when the thumb is released — the cue to save. */
   onCommit: (value: number) => void;
   format: (value: number) => string;
+  /** What this dial sizes, for assistive tech. There are two of them now — a
+   *  zone's reach and how far its music carries — and "Zone radius" spoken
+   *  twice would make them indistinguishable. */
+  label?: string;
   disabled?: boolean;
 }
 
@@ -91,7 +95,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 });
 
 export function RadiusSlider({
-  value, min, max, onChange, onCommit, format, disabled,
+  value, min, max, onChange, onCommit, format, label = 'Zone radius', disabled,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -133,6 +137,15 @@ export function RadiusSlider({
   // to the screen, and the track does not start at the screen edge.
   const pan = Gesture.Pan()
     .enabled(!disabled)
+    // This control lives inside a vertical ScrollView, and without an
+    // activation threshold the scroll wins every ambiguous touch — badly so on
+    // Android, where the native scroll container claims the gesture early and
+    // the thumb simply refuses to move. Six pixels of horizontal travel says
+    // "this is a drag, not a scroll" before the scroll can take it.
+    .activeOffsetX([-6, 6])
+    // A finger tracing a 6pt track drifts off it constantly. Losing the drag
+    // because you strayed above the bar is not a rule anyone would guess.
+    .shouldCancelWhenOutside(false)
     .onBegin(() => {
       dragging.value = true;
       scale.value = withSpring(1.15, SPRING);
@@ -178,7 +191,7 @@ export function RadiusSlider({
       // are what make it operable at all.
       accessible
       accessibilityRole="adjustable"
-      accessibilityLabel="Zone radius"
+      accessibilityLabel={label}
       accessibilityValue={{ min, max, now: value, text: format(value) }}
       accessibilityState={{ disabled: !!disabled }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}

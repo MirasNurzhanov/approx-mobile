@@ -67,7 +67,7 @@ export default function InterestsSetupScreen() {
     } finally {
       setSaving(false);
     }
-    router.replace('/(tabs)/map');
+    router.replace('/onboarding-profession');
   }
 
   const canContinue = selected.size > 0;

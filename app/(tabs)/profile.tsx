@@ -1,11 +1,9 @@
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -27,7 +25,6 @@ import { AuraMark } from '@/components/ui/AuraMark';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
 import {
   IconCamera,
   IconChevron,
@@ -45,6 +42,7 @@ import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { PROFESSIONS, COUNTRIES, flagEmoji } from '@/constants/onboardingData';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Profile {
@@ -56,6 +54,9 @@ interface Profile {
   interests?: { icon: string; name: string }[];
   aura_points?: number;
   profile_picture?: string;
+  profession?: string | null;
+  nationality?: string | null;
+  date_of_birth?: string | null;
 }
 
 interface FriendList {
@@ -111,10 +112,6 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const [editVisible, setEditVisible] = useState(false);
-  const [editUsername, setEditUsername] = useState('');
-  const [editBio, setEditBio] = useState('');
-  const [saving, setSaving] = useState(false);
 
   async function fetchAll() {
     const [profileRes, friendsRes] = await Promise.allSettled([
@@ -130,7 +127,17 @@ export default function ProfileScreen() {
     }
   }
 
-  useEffect(() => { fetchAll().finally(() => setLoading(false)); }, []);
+  const hasMounted = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasMounted.current) {
+        hasMounted.current = true;
+        fetchAll().finally(() => setLoading(false));
+      } else {
+        fetchAll();
+      }
+    }, [])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -172,29 +179,6 @@ export default function ProfileScreen() {
     }
   }
 
-  function openEdit() {
-    if (!profile) return;
-    setEditUsername(profile.username);
-    setEditBio(profile.bio ?? '');
-    setEditVisible(true);
-  }
-
-  async function saveEdit() {
-    if (!editUsername.trim()) return;
-    setSaving(true);
-    try {
-      const { data } = await api.patch<Profile>('/api/users/profile/', {
-        username: editUsername.trim(),
-        bio: editBio.trim(),
-      });
-      setProfile(data);
-      setEditVisible(false);
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.');
-    } finally {
-      setSaving(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -206,6 +190,18 @@ export default function ProfileScreen() {
   }
 
   const interests = profile?.interests ?? [];
+
+  const _ageRaw = profile?.date_of_birth
+    ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    : null;
+  const age = _ageRaw !== null && !Number.isNaN(_ageRaw) ? _ageRaw : null;
+
+  const professionInfo = profile?.profession
+    ? PROFESSIONS.find(p => p.key === profile.profession) ?? null
+    : null;
+  const nationalityInfo = profile?.nationality
+    ? COUNTRIES.find(c => c.code === profile.nationality) ?? null
+    : null;
 
   return (
     <View style={styles.root}>
@@ -229,31 +225,38 @@ export default function ProfileScreen() {
             </View>
           </Pressable>
 
-          <View style={styles.heroInfo}>
-            <Text style={styles.username}>{profile?.username ?? '—'}</Text>
-            {profile?.bio ? (
-              <Text style={styles.bio}>{profile.bio}</Text>
-            ) : (
-              <Text style={styles.bioEmpty}>No bio yet</Text>
-            )}
+          <Text style={styles.username}>{profile?.username ?? '—'}</Text>
 
-            <View style={styles.pillRow}>
-              {profile?.aura_points != null && (
-                <Pressable
-                  style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
-                  onPress={() => router.push('/market')}
-                >
-                  <AuraMark size={13} color={colors.purple} />
-                  <Text style={styles.pillAura}>{profile.aura_points.toLocaleString()}</Text>
-                  <IconChevron size={11} color={colors.purple} />
-                </Pressable>
-              )}
-              {profile?.date_joined ? (
-                <View style={styles.pill}>
-                  <Text style={styles.pillText}>Since {fmtJoined(profile.date_joined)}</Text>
-                </View>
-              ) : null}
-            </View>
+          {(nationalityInfo || professionInfo || age !== null) && (
+            <Text style={styles.metaLine}>
+              {[
+                nationalityInfo ? `${flagEmoji(nationalityInfo.code)} ${nationalityInfo.name}` : null,
+                professionInfo  ? `${professionInfo.emoji} ${professionInfo.label}`             : null,
+                age !== null    ? String(age)                                                   : null,
+              ].filter(Boolean).join(' · ')}
+            </Text>
+          )}
+
+          {profile?.bio ? (
+            <Text style={styles.bio}>{profile.bio}</Text>
+          ) : null}
+
+          <View style={styles.pillRow}>
+            {profile?.aura_points != null && (
+              <Pressable
+                style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+                onPress={() => router.push('/market')}
+              >
+                <AuraMark size={13} color={colors.purple} />
+                <Text style={styles.pillAura}>{profile.aura_points.toLocaleString()}</Text>
+                <IconChevron size={11} color={colors.purple} />
+              </Pressable>
+            )}
+            {profile?.date_joined ? (
+              <View style={styles.pill}>
+                <Text style={styles.pillText}>Since {fmtJoined(profile.date_joined)}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -310,7 +313,7 @@ export default function ProfileScreen() {
 
         {/* Buttons */}
         <View style={styles.btnGroup}>
-          <Button label="Edit profile" icon={IconPencil} variant="ghost" size="lg" fullWidth onPress={openEdit} />
+          <Button label="Edit profile" icon={IconPencil} variant="ghost" size="lg" fullWidth onPress={() => router.push('/edit-profile')} />
           <Button
             label="Sign out"
             icon={IconLogout}
@@ -323,57 +326,6 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* Edit modal */}
-      <Modal
-        visible={editVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setEditVisible(false)}
-      >
-        <KeyboardAvoidingView
-          style={styles.modalRoot}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={styles.modalHeader}>
-            <Pressable onPress={() => setEditVisible(false)} hitSlop={14}>
-              <Text style={styles.modalCancel}>Cancel</Text>
-            </Pressable>
-            <Text style={styles.modalTitle}>Edit Profile</Text>
-            <Pressable onPress={saveEdit} disabled={saving} hitSlop={14}>
-              {saving
-                ? <ActivityIndicator color={colors.teal} size="small" />
-                : <Text style={styles.modalSave}>Save</Text>
-              }
-            </Pressable>
-          </View>
-
-          <ScrollView
-            style={styles.modalScroll}
-            contentContainerStyle={styles.modalContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Input
-              label="Username"
-              placeholder="yourhandle"
-              value={editUsername}
-              onChangeText={setEditUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              maxLength={30}
-            />
-            <Input
-              label="Bio"
-              placeholder="Tell people about yourself…"
-              value={editBio}
-              onChangeText={setEditBio}
-              multiline
-              maxLength={200}
-              hint={`${editBio.length} / 200`}
-            />
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
-
       <Speedometer />
     </View>
   );
@@ -385,10 +337,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: 20 },
 
-  // Hero
-  hero: { flexDirection: 'row', alignItems: 'center', gap: 18, marginBottom: 24 },
-  heroInfo: { flex: 1, gap: 5 },
-  avatarWrap: {},
+  // Hero — centered column
+  hero: { alignItems: 'center', gap: 6, marginBottom: 24 },
+  avatarWrap: { marginBottom: 6 },
   avatarOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -410,24 +361,32 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     justifyContent: 'center',
   },
   username: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 22,
+    fontFamily: 'SpaceGrotesk-SemiBold',
+    fontSize: 24,
     color: colors.t1,
+    textAlign: 'center',
+  },
+  metaLine: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t2,
+    textAlign: 'center',
   },
   bio: {
     fontFamily: fonts.body,
     fontSize: 14,
     color: colors.t2,
     lineHeight: 20,
+    textAlign: 'center',
   },
-  bioEmpty: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    color: colors.t3,
-    fontStyle: 'italic',
+
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 2,
   },
-  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -529,36 +488,4 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
   // Bottom buttons
   btnGroup: { gap: 10, marginTop: 4 },
-
-  // Edit modal
-  modalRoot: { flex: 1, backgroundColor: colors.bg },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  modalTitle: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 16,
-    color: colors.t1,
-  },
-  modalCancel: {
-    fontFamily: fonts.body,
-    fontSize: 15,
-    color: colors.t3,
-  },
-  modalSave: {
-    fontFamily: fonts.body,
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.teal,
-  },
-  modalScroll: { flex: 1 },
-  modalContent: { padding: 20, gap: 16 },
 });

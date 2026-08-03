@@ -85,7 +85,9 @@ function AppShell() {
       <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding"      options={{ headerShown: false }} />
       <Stack.Screen name="register"        options={{ headerShown: false }} />
-      <Stack.Screen name="interests-setup" options={{ headerShown: false }} />
+      <Stack.Screen name="interests-setup"         options={{ headerShown: false }} />
+      <Stack.Screen name="onboarding-profession"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="onboarding-nationality"  options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />

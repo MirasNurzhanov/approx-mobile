@@ -32,6 +32,7 @@ export interface ClubMember {
 export const clubsApi = {
   list:         ()                               => api.get<Club[]>('/api/clubs/'),
   myList:       ()                               => api.get<Club[]>('/api/clubs/?joined=true'),
+  userClubs:    (userId: number)                 => api.get<Club[]>(`/api/clubs/?user=${userId}`),
   get:          (id: number)                     => api.get<Club>(`/api/clubs/${id}/`),
   members:      (id: number)                     => api.get<ClubMember[]>(`/api/clubs/${id}/members/`),
   create:       (data: FormData)                 => api.post<Club>('/api/clubs/', data, { headers: { 'Content-Type': 'multipart/form-data' } }),

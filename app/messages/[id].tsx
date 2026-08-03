@@ -291,18 +291,24 @@ export default function MessagesScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.t1} />
         </Pressable>
 
-        <Avatar
-          uri={otherUserPicture}
-          name={username ?? 'C'}
-          size="sm"
-          ringColor={colors.t3}
-          presence={presence}
-        />
+        <Pressable
+          style={({ pressed }) => [styles.headerProfile, pressed && { opacity: 0.7 }]}
+          onPress={() => router.push({ pathname: '/profile/[id]', params: { id, username: username ?? '' } })}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${username ?? 'user'}'s profile`}
+        >
+          <Avatar
+            uri={otherUserPicture}
+            name={username ?? 'C'}
+            size="sm"
+            ringColor={colors.t3}
+            presence={presence}
+          />
 
-        <View style={styles.headerInfo}>
-          <View style={styles.headerNameRow}>
-            <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
-          </View>
+          <View style={styles.headerInfo}>
+            <View style={styles.headerNameRow}>
+              <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
+            </View>
           {/* Two different facts, previously conflated: this line is the other
               person's presence, and the one below is our own socket. The old
               green dot was driven by `wsReady` — it lit up when *we* connected,
@@ -313,7 +319,8 @@ export default function MessagesScreen() {
           {!wsReady && (
             <Text style={styles.statusText}>Reconnecting…</Text>
           )}
-        </View>
+          </View>
+        </Pressable>
       </View>
 
       {/* Messages */}
@@ -441,6 +448,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     backgroundColor: colors.bg,
   },
   backBtn: { padding: 4 },
+  headerProfile: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerInfo: { flex: 1, gap: 2 },
   headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerName: {

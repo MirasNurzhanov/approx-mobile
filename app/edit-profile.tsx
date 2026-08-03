@@ -1,11 +1,14 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
+  FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -21,6 +24,7 @@ import { api } from '@/services/api';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { PROFESSIONS, COUNTRIES, flagEmoji } from '@/constants/onboardingData';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Profile {
@@ -28,6 +32,8 @@ interface Profile {
   username: string;
   bio?: string;
   profile_picture?: string;
+  profession?: string | null;
+  nationality?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -39,6 +45,11 @@ function avatarColor(username: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
+const SCREEN_W  = Dimensions.get('window').width;
+const CARD_PAD  = 16;
+const CARD_GAP  = 12;
+const CARD_W    = (SCREEN_W - CARD_PAD * 2 - CARD_GAP) / 2;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -49,9 +60,22 @@ export default function EditProfileScreen() {
   const [profile,   setProfile]   = useState<Profile | null>(null);
   const [username,  setUsername]  = useState('');
   const [bio,       setBio]       = useState('');
+  const [profession,  setProfession]  = useState<string | null>(null);
+  const [nationality, setNationality] = useState<string | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  // Picker modal state
+  const [showProfPicker, setShowProfPicker] = useState(false);
+  const [showNatPicker,  setShowNatPicker]  = useState(false);
+  const [draftProf, setDraftProf] = useState<string | null>(null);
+  const [draftNat,  setDraftNat]  = useState<string | null>(null);
+  const [natQuery,  setNatQuery]  = useState('');
+
+  // Track server-loaded values to decide what to PATCH and whether nationality is locked
+  const origProfession  = useRef<string | null>(null);
+  const origNationality = useRef<string | null>(null);
 
   useEffect(() => {
     api.get<Profile>('/api/users/profile/')
@@ -59,6 +83,12 @@ export default function EditProfileScreen() {
         setProfile(r.data);
         setUsername(r.data.username);
         setBio(r.data.bio ?? '');
+        const prof = r.data.profession ?? null;
+        const nat  = r.data.nationality ?? null;
+        setProfession(prof);
+        setNationality(nat);
+        origProfession.current  = prof;
+        origNationality.current = nat;
       })
       .catch((e) => console.log('[EditProfile] fetch error:', e?.response?.status))
       .finally(() => setLoading(false));
@@ -99,7 +129,26 @@ export default function EditProfileScreen() {
     if (!username.trim() || saving) return;
     setSaving(true);
     try {
-      await api.patch<Profile>('/api/users/profile/', { username: username.trim(), bio: bio.trim() });
+      const payload: Record<string, any> = {
+        username: username.trim(),
+        bio: bio.trim(),
+      };
+      if (profession !== origProfession.current) {
+        payload.profession = profession;
+      }
+      // Nationality can only be set once: only include when original was null and user chose one
+      if (origNationality.current === null && nationality !== null) {
+        payload.nationality = nationality;
+      }
+      const { data } = await api.patch<Profile>('/api/users/profile/', payload);
+      const savedProf = data.profession ?? null;
+      const savedNat  = data.nationality ?? null;
+      setUsername(data.username);
+      setBio(data.bio ?? '');
+      setProfession(savedProf);
+      setNationality(savedNat);
+      origProfession.current  = savedProf;
+      origNationality.current = savedNat;
       router.back();
     } catch (e: any) {
       const msg = e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.';
@@ -109,11 +158,20 @@ export default function EditProfileScreen() {
     }
   }
 
+  // ── Derived display values ─────────────────────────────────────────────────
+  const professionLabel    = profession ? PROFESSIONS.find(p => p.key === profession)?.label ?? profession : null;
+  const nationalityCountry = nationality ? COUNTRIES.find(c => c.code === nationality) : null;
+  const nationalityLocked  = origNationality.current !== null;
+  const filteredCountries  = natQuery.trim()
+    ? COUNTRIES.filter(c => c.name.toLowerCase().includes(natQuery.trim().toLowerCase()))
+    : COUNTRIES;
+
   const initial = (username || profile?.username || '?').charAt(0).toUpperCase();
   const bgColor = avatarColor(username || profile?.username || '?');
 
   return (
     <View style={styles.root}>
+
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
@@ -160,7 +218,7 @@ export default function EditProfileScreen() {
             </TouchableOpacity>
             <Text style={styles.avatarHint}>Tap to change photo</Text>
 
-            {/* ── Fields ── */}
+            {/* ── Username ── */}
             <Text style={styles.fieldLabel}>Username</Text>
             <TextInput
               style={styles.fieldInput}
@@ -174,6 +232,7 @@ export default function EditProfileScreen() {
               maxLength={30}
             />
 
+            {/* ── Bio ── */}
             <Text style={styles.fieldLabel}>Bio</Text>
             <TextInput
               style={[styles.fieldInput, styles.fieldTextarea]}
@@ -187,9 +246,178 @@ export default function EditProfileScreen() {
               textAlignVertical="top"
             />
             <Text style={styles.charCount}>{bio.length} / 200</Text>
+
+            {/* ── Profession ── */}
+            <Text style={styles.fieldLabel}>Profession</Text>
+            <TouchableOpacity
+              style={[styles.fieldInput, styles.fieldRow]}
+              onPress={() => { setDraftProf(profession); setShowProfPicker(true); }}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={professionLabel ?? 'Not set — tap to choose'}
+            >
+              <Text style={[styles.fieldRowValue, !profession && styles.fieldRowPlaceholder]}>
+                {professionLabel ?? 'Not set'}
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.t3} />
+            </TouchableOpacity>
+
+            {/* ── Nationality ── */}
+            <Text style={styles.fieldLabel}>Nationality</Text>
+            {nationalityLocked ? (
+              <View style={[styles.fieldInput, styles.fieldRow, styles.fieldRowLocked]}>
+                <Text style={styles.fieldRowValue}>
+                  {nationalityCountry
+                    ? `${flagEmoji(nationalityCountry.code)}  ${nationalityCountry.name}`
+                    : nationality}
+                </Text>
+                <View style={styles.lockedGroup}>
+                  <Ionicons name="lock-closed-outline" size={13} color={colors.t3} />
+                  <Text style={styles.lockedNote}>Cannot be changed</Text>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.fieldInput, styles.fieldRow]}
+                onPress={() => { setDraftNat(nationality); setNatQuery(''); setShowNatPicker(true); }}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={nationalityCountry ? nationalityCountry.name : 'Not set — tap to choose'}
+              >
+                <Text style={[styles.fieldRowValue, !nationality && styles.fieldRowPlaceholder]}>
+                  {nationalityCountry
+                    ? `${flagEmoji(nationalityCountry.code)}  ${nationalityCountry.name}`
+                    : 'Not set'}
+                </Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.t3} />
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       )}
+
+      {/* ── Profession Picker Modal ── */}
+      <Modal
+        visible={showProfPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowProfPicker(false)}
+      >
+        <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowProfPicker(false)} hitSlop={10}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Profession</Text>
+            <TouchableOpacity
+              onPress={() => { setProfession(draftProf); setShowProfPicker(false); }}
+              hitSlop={10}
+            >
+              <Text style={styles.modalDone}>Done</Text>
+            </TouchableOpacity>
+          </View>
+
+          <FlatList
+            data={PROFESSIONS}
+            keyExtractor={(item) => item.key}
+            numColumns={2}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.profGrid}
+            columnWrapperStyle={{ gap: CARD_GAP }}
+            ItemSeparatorComponent={() => <View style={{ height: CARD_GAP }} />}
+            renderItem={({ item }) => {
+              const sel = draftProf === item.key;
+              return (
+                <TouchableOpacity
+                  onPress={() => setDraftProf(sel ? null : item.key)}
+                  style={[styles.profCard, { width: CARD_W }, sel && styles.profCardSel]}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: sel }}
+                  accessibilityLabel={item.label}
+                >
+                  <Text style={styles.profEmoji}>{item.emoji}</Text>
+                  <Text style={[styles.profCardLabel, sel && styles.profCardLabelSel]} numberOfLines={2}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      </Modal>
+
+      {/* ── Nationality Picker Modal ── */}
+      <Modal
+        visible={showNatPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowNatPicker(false)}
+      >
+        <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => { setShowNatPicker(false); setNatQuery(''); }} hitSlop={10}>
+              <Text style={styles.modalCancel}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Nationality</Text>
+            <TouchableOpacity
+              onPress={() => { setNationality(draftNat); setShowNatPicker(false); setNatQuery(''); }}
+              hitSlop={10}
+            >
+              <Text style={styles.modalDone}>Done</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={18} color={colors.t3} />
+            <TextInput
+              style={styles.searchInput}
+              value={natQuery}
+              onChangeText={setNatQuery}
+              placeholder="Search countries..."
+              placeholderTextColor={colors.t3}
+              selectionColor={colors.teal}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {natQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setNatQuery('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color={colors.t3} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <FlatList
+            data={filteredCountries}
+            keyExtractor={(item) => item.code}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: 32 }}
+            renderItem={({ item }) => {
+              const sel = draftNat === item.code;
+              return (
+                <TouchableOpacity
+                  onPress={() => setDraftNat(sel ? null : item.code)}
+                  style={[styles.natRow, sel && styles.natRowSel]}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: sel }}
+                  accessibilityLabel={item.name}
+                >
+                  <Text style={styles.natFlag}>{flagEmoji(item.code)}</Text>
+                  <Text style={[styles.natName, sel && styles.natNameSel]}>{item.name}</Text>
+                  {sel && <Ionicons name="checkmark" size={18} color={colors.teal} />}
+                </TouchableOpacity>
+              );
+            }}
+            ItemSeparatorComponent={() => <View style={styles.natSep} />}
+          />
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -301,5 +529,148 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.t3,
     alignSelf: 'flex-end',
     marginTop: 6,
+  },
+
+  // Tappable field row (profession / editable nationality)
+  fieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  fieldRowValue: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+  },
+  fieldRowPlaceholder: { color: colors.t3 },
+
+  // Locked nationality row
+  fieldRowLocked: { opacity: 0.9 },
+  lockedGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 0,
+  },
+  lockedNote: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.t3,
+  },
+
+  // ── Picker modals ──────────────────────────────────────────────────────────
+  modalRoot: { flex: 1 },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  modalTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '600',
+    fontSize: 16,
+    color: colors.t1,
+  },
+  modalCancel: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t2,
+  },
+  modalDone: {
+    fontFamily: fonts.body,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.teal,
+  },
+
+  // Profession grid
+  profGrid: { padding: CARD_PAD },
+  profCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.m,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 100,
+  },
+  profCardSel: {
+    backgroundColor: colors.coralSoft,
+    borderColor: colors.coral,
+  },
+  profEmoji: { fontSize: 28 },
+  profCardLabel: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.t2,
+    textAlign: 'center',
+  },
+  profCardLabelSel: {
+    color: colors.coral,
+    fontWeight: '600',
+  },
+
+  // Search bar (nationality modal)
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 11,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.t1,
+  },
+
+  // Country list rows
+  natRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    gap: 14,
+  },
+  natRowSel: { backgroundColor: colors.coralSoft },
+  natFlag: { fontSize: 24 },
+  natName: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.t1,
+  },
+  natNameSel: {
+    color: colors.coral,
+    fontWeight: '600',
+  },
+  natSep: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginLeft: 58,
   },
 });

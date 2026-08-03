@@ -45,10 +45,10 @@ import {
     IconLocateFixed,
     IconLocateOff,
     IconLock,
+    IconMusic,
     IconPeople,
     IconPin,
     IconSearch,
-    IconShield,
     iconForInterest,
     type IconComponent,
 } from '@/components/ui/icons';
@@ -119,6 +119,23 @@ interface NearbyUser {
    *  10s. Resolved through services/zoneArea, which caches per region. */
   zone_region_id?: number | null;
   zone_audio_url?: string;
+  /** How close you have to be to *hear* them, which is no longer how big their
+   *  zone is. Sent only to viewers allowed to hear the track at all, so its
+   *  absence means "no audio for you" rather than "no music zone". */
+  music_zone_radius?: number;
+  /** True when they gave the music a zone of its own — the only case where a
+   *  second circle is worth drawing over the first. */
+  music_zone_separate?: boolean;
+  /** Present for Apple Music tracks, which have a real name and cover art.
+   *  Everything else is still named by services/zoneAudio from its URL. */
+  zone_track_title?: string;
+  zone_track_artist?: string;
+  zone_track_artwork?: string;
+  /** The slice of the track its owner set to repeat. Absent means the whole
+   *  thing. Honoured here, not just on the owner's screen — the trim is part
+   *  of what the zone plays. */
+  zone_track_start_ms?: number;
+  zone_track_end_ms?: number | null;
   /** 'approximate' means the position is snapped to a ~500m cell, so it should
    * be drawn as an area rather than a point that looks exact. */
   location_precision?: 'precise' | 'approximate';
@@ -136,6 +153,11 @@ interface SelfZone {
   zone_radius: number;
   zone_mode: ZoneMode;
   zone_region_id: number | null;
+  /** Earshot, drawn as its own ring inside the zone when the two differ. The
+   *  owner is the one person who cannot hear their own zone from the map, so
+   *  seeing where the sound stops is the only feedback they get. */
+  music_zone_separate: boolean;
+  music_zone_radius: number;
 }
 
 interface ClubMeetup {
@@ -999,12 +1021,12 @@ function LocateButton({
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
 function TopBar({
   nearby,
-  onPrivacy,
+  onZoneMusic,
   onSearch,
   onList,
 }: {
   nearby: number;
-  onPrivacy: () => void;
+  onZoneMusic: () => void;
   onSearch: () => void;
   onList: () => void;
 }) {
@@ -1055,15 +1077,19 @@ function TopBar({
         <IconSearch size={20} color={colors.t2} />
       </TouchableOpacity>
 
+      {/* A shield used to sit here, labelled "privacy and safety", and it
+          opened Zone Music. The icon promised one screen and the tap gave
+          another; the note is what is actually behind it. */}
       <TouchableOpacity
-        onPress={onPrivacy}
+        onPress={onZoneMusic}
         activeOpacity={0.7}
         style={styles.iconBtn}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel="Privacy and safety settings"
+        accessibilityLabel="Zone music"
+        accessibilityHint="Choose what plays in your zone and how far it carries"
       >
-        <IconShield size={20} color={colors.t2} />
+        <IconMusic size={20} color={colors.t2} />
       </TouchableOpacity>
     </View>
   );
@@ -1389,15 +1415,21 @@ function UserSheet({
   // A region zone is a shape, not a distance: someone 3km away can be well
   // inside a city while someone 300m away across the boundary is outside, so
   // the radius comparison would be wrong in both directions.
-  const isRegionZone = user.zone_mode === 'region' && !!zoneRegion;
-  // What the zone is *called* in the copy below — "800 m" or "Almaty".
-  const zoneLabel = isRegionZone ? zoneRegion!.name : fmtRadius(zoneRadius);
+  //
+  // …unless they gave the music its own zone, which is always a circle. Then
+  // that circle is the answer whatever shape the zone around it happens to be.
+  const musicRadius = user.music_zone_radius && user.music_zone_radius > 0
+    ? user.music_zone_radius
+    : zoneRadius;
+  const isRegionZone = user.zone_mode === 'region' && !!zoneRegion && !user.music_zone_separate;
+  // What earshot is *called* in the copy below — "200 m" or "Almaty".
+  const zoneLabel = isRegionZone ? zoneRegion!.name : fmtRadius(musicRadius);
   // Unknown position is not "out of range" — a card that refuses to play with
   // no reason it can name is worse than one that plays a track you can hear.
   const insideZone = isRegionZone
     ? (!viewerCoords ||
        regionContains(zoneRegion!, viewerCoords.latitude, viewerCoords.longitude))
-    : (distanceM == null || distanceM < zoneRadius);
+    : (distanceM == null || distanceM < musicRadius);
 
   // Preset names arrive from the API; until they do, the fallback list stands
   // in and an upload is named after its file either way.
@@ -1479,16 +1511,25 @@ function UserSheet({
               // cannot leave the previous one loaded.
               key={zoneUrl}
               url={zoneUrl}
-              title={trackTitle(zoneUrl, presets)}
+              // An Apple track knows its own name and artist; a preset and an
+              // upload are still named from the URL, which for Apple's CDN
+              // would be a hash.
+              title={user.zone_track_title || trackTitle(zoneUrl, presets)}
+              artwork={user.zone_track_artwork}
+              startMs={user.zone_track_start_ms ?? 0}
+              endMs={user.zone_track_end_ms ?? null}
               subtitle={
-                insideZone
-                  ? `@${user.username} · inside their ${zoneLabel} zone`
-                  : `@${user.username} · ${zoneLabel} zone`
+                [
+                  user.zone_track_artist || `@${user.username}`,
+                  insideZone ? `inside their ${zoneLabel} zone` : `${zoneLabel} zone`,
+                ].join(' · ')
               }
               blockedReason={
                 insideZone
                   ? null
-                  : `Out of range — step inside their ${zoneLabel} zone to listen`
+                  : isRegionZone
+                    ? `Out of range — step inside ${zoneLabel} to listen`
+                    : `Out of range — step within ${zoneLabel} of them to listen`
               }
               accessibilityName={`${user.username}'s zone track`}
             />
@@ -1759,9 +1800,22 @@ export default function MapScreen() {
     ) {
       areas.push({ ...displayCoords, radius: selfZone.zone_radius });
     }
+    // Earshot is the tighter of the two circles and the one that is actually
+    // audible, so it constrains the fan wherever it exists — including for a
+    // region-mode zone, whose shape is skipped above but whose music zone is
+    // still a plain circle someone is either inside or not.
+    if (
+      displayCoords && selfZone?.zone_active && selfZone.music_zone_separate &&
+      selfZone.music_zone_radius > 0
+    ) {
+      areas.push({ ...displayCoords, radius: selfZone.music_zone_radius });
+    }
     for (const u of visibleNearby) {
-      if (!u.zone_active || u.zone_mode === 'region') continue;
-      if (!(u.zone_radius ?? 0) || u.latitude == null || u.longitude == null) continue;
+      if (!u.zone_active || u.latitude == null || u.longitude == null) continue;
+      if (u.music_zone_separate && (u.music_zone_radius ?? 0) > 0) {
+        areas.push({ latitude: u.latitude, longitude: u.longitude, radius: u.music_zone_radius! });
+      }
+      if (u.zone_mode === 'region' || !(u.zone_radius ?? 0)) continue;
       areas.push({ latitude: u.latitude, longitude: u.longitude, radius: u.zone_radius! });
     }
     return areas;
@@ -1939,6 +1993,11 @@ export default function MapScreen() {
           // cache leaves the stored mode saying 'region' with nothing to draw.
           zone_mode: (d.effective_zone_mode ?? d.zone_mode) === 'region' ? 'region' : 'radius',
           zone_region_id: d.zone_region ?? null,
+          music_zone_separate: Boolean(d.music_zone_separate),
+          // `music_radius_m` is the server resolving the "separate or
+          // inherited" question, so the map never has to answer it twice.
+          music_zone_radius:
+            Number(d.music_radius_m) > 0 ? Number(d.music_radius_m) : Number(d.zone_radius) || 500,
         };
         console.log('[Zone] self zone:', JSON.stringify(normalized));
         setSelfZone(normalized);
@@ -2415,6 +2474,30 @@ export default function MapScreen() {
               );
             })}
 
+          {/* Earshot, where it is not the zone. Drawn only for people who gave
+              their music a zone of its own *and* whose track this viewer is
+              allowed to hear — a second ring is worth the ink when it means
+              "the music stops here", and is noise when it traces the circle
+              already underneath it.
+              Unfilled and a shade brighter, so it reads as an edge drawn across
+              the zone rather than a second region stacked on it. Not dashed:
+              `lineDashPattern` on a Circle is Apple-Maps-only and this map is
+              PROVIDER_GOOGLE, so the dashes would silently never appear. */}
+          {visibleNearby
+            .filter((u) =>
+              u.zone_active && u.music_zone_separate && (u.music_zone_radius ?? 0) > 0 &&
+              u.zone_audio_url && u.latitude != null && u.longitude != null)
+            .map((u) => (
+              <Circle
+                key={`music-zone-${u.id}`}
+                center={{ latitude: u.latitude, longitude: u.longitude }}
+                radius={u.music_zone_radius!}
+                fillColor="transparent"
+                strokeColor="rgba(31,199,182,0.8)"
+                strokeWidth={2}
+              />
+            ))}
+
           {/* Own zone */}
           {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
             ? regionOutlines.get(selfZone.zone_region_id)?.rings.map((ring, i) => (
@@ -2433,6 +2516,19 @@ export default function MapScreen() {
                 fillColor="rgba(139,92,246,0.07)"
                 strokeColor="rgba(139,92,246,0.35)"
                 strokeWidth={1.5}
+              />
+            )}
+
+          {/* Your own earshot. The one thing you cannot check by listening:
+              everyone else can hear where your music stops, and you can't. */}
+          {selfZone?.zone_active && selfZone.music_zone_separate
+            && selfZone.music_zone_radius > 0 && displayCoords && (
+              <Circle
+                center={displayCoords}
+                radius={selfZone.music_zone_radius}
+                fillColor="transparent"
+                strokeColor="rgba(139,92,246,0.85)"
+                strokeWidth={2}
               />
             )}
 
@@ -2592,7 +2688,7 @@ export default function MapScreen() {
       {/* Top bar */}
       <TopBar
         nearby={visibleNearby.length}
-        onPrivacy={() => router.push('/zone')}
+        onZoneMusic={() => router.push('/zone')}
         onSearch={() => router.push('/search')}
         onList={() => router.push('/nearby')}
       />

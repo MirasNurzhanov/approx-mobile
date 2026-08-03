@@ -14,6 +14,7 @@ type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 const ACTIVITY_ICON: Record<string, IoniconsName> = {
   story_reaction: 'heart',
   story_reply: 'chatbubble',
+  zone_music: 'musical-notes',
 };
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({

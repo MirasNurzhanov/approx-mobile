@@ -789,12 +789,10 @@ export default function ChatScreen() {
             <RefreshControl refreshing={loadingClubs} onRefresh={fetchClubs} tintColor={colors.teal} colors={[colors.teal]} />
           }
         >
-          {myClubs.length === 0 && (
-            <Pressable style={styles.createClubBtn} onPress={() => router.push('/create-club' as any)}>
-              <Ionicons name="add-circle-outline" size={18} color={colors.teal} />
-              <Text style={styles.createClubBtnText}>Create a Club</Text>
-            </Pressable>
-          )}
+          <Pressable style={styles.createClubBtn} onPress={() => router.push('/create-club' as any)}>
+            <Ionicons name="add-circle-outline" size={18} color="#ffffff" />
+            <Text style={styles.createClubBtnText}>Create Club</Text>
+          </Pressable>
 
           {loadingClubs ? (
             <ActivityIndicator color={colors.teal} style={{ marginTop: 40 }} />
@@ -1014,10 +1012,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   createClubBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.tealLine,
+    backgroundColor: '#E8714A',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 13,
@@ -1027,7 +1024,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 15,
     fontWeight: '600',
-    color: colors.teal,
+    color: '#ffffff',
   },
 
   clubsSectionLabel: {

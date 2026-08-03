@@ -16,11 +16,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
 import { blockUser } from '@/services/blocked';
+import { type ClubRole } from '@/services/clubs';
+import { Ionicons } from '@expo/vector-icons';
 import { IconBack, IconMore } from '@/components/ui/icons';
 import { RelationshipBadge } from '@/components/ui/RelationshipBadge';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import { PresenceDot } from '@/components/PresenceDot';
 import { fonts, radius } from '@/constants/theme';
+import { PROFESSIONS, COUNTRIES, flagEmoji } from '@/constants/onboardingData';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import type { ProfileLink } from '@/services/links';
@@ -43,6 +46,10 @@ interface UserProfile {
   stats?: { friends: number; connections: number };
   links?: ProfileLink[];
   presence?: Presence;
+  date_of_birth?: string | null;
+  nationality?: string | null;
+  profession?: string | null;
+  clubs?: { id: number; name: string; emblem?: string; role: ClubRole }[];
 }
 
 function isLocked(profile: UserProfile): boolean {
@@ -126,6 +133,7 @@ export default function UserProfileScreen() {
       setRelationship(rel);
     }).finally(() => setLoading(false));
   }, [id]);
+
 
   async function sendHi() {
     setActionLoading('hi');
@@ -221,6 +229,18 @@ export default function UserProfileScreen() {
   const interests = profile.interests ?? [];
   const locked   = isLocked(profile);
 
+  const _ageRaw = profile.date_of_birth
+    ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    : null;
+  const age      = _ageRaw !== null && !Number.isNaN(_ageRaw) ? _ageRaw : null;
+  const natInfo  = profile.nationality ? COUNTRIES.find(c => c.code === profile.nationality) ?? null : null;
+  const profInfo = profile.profession  ? PROFESSIONS.find(p => p.key === profile.profession) ?? null  : null;
+  const metaLine = [
+    natInfo  ? `${flagEmoji(natInfo.code)} ${natInfo.name}` : null,
+    profInfo ? `${profInfo.emoji} ${profInfo.label}`        : null,
+    age !== null ? String(age)                              : null,
+  ].filter(Boolean).join(' · ') || null;
+
   return (
     <View style={styles.root}>
       {/* ── Header ── */}
@@ -244,16 +264,26 @@ export default function UserProfileScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Avatar ── */}
         <View style={styles.hero}>
-          <View style={[styles.avatarRing, { borderColor: relColor + '60' }]}>
-            <View style={[styles.avatar, { backgroundColor: bg }]}>
-              {profile.profile_picture
-                ? <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
-                : <Text style={styles.avatarInitial}>{initial}</Text>
-              }
+          {(rel === 'friend' || rel === 'connected') ? (
+            <View style={[styles.avatarRing, { borderColor: relColor + '60' }]}>
+              <View style={[styles.avatar, { backgroundColor: bg }]}>
+                {profile.profile_picture
+                  ? <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
+                  : <Text style={styles.avatarInitial}>{initial}</Text>
+                }
+              </View>
             </View>
-          </View>
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Ionicons name="person-outline" size={38} color={colors.t3} />
+            </View>
+          )}
 
           <Text style={styles.username}>{profile.username}</Text>
+
+          {metaLine ? (
+            <Text style={styles.userMetaLine}>{metaLine}</Text>
+          ) : null}
 
           {profile.presence && (
             <View style={styles.presenceRow}>
@@ -304,6 +334,40 @@ export default function UserProfileScreen() {
             <ProfileLinks links={profile.links!} />
           </View>
         )}
+
+        {/* ── Clubs ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Clubs</Text>
+          {console.log('[Profile] clubs data:', JSON.stringify(profile.clubs)) as any}
+          {!profile.clubs || profile.clubs.length === 0 ? (
+            <Text style={styles.clubsEmpty}>Not a member of any clubs yet</Text>
+          ) : (
+            profile.clubs.map(club => (
+              <TouchableOpacity
+                key={club.id}
+                style={styles.clubRow}
+                onPress={() => router.push({ pathname: '/clubs/[id]', params: { id: club.id } })}
+                activeOpacity={0.7}
+              >
+                {club.emblem ? (
+                  <Image source={{ uri: club.emblem }} style={styles.clubEmblem} />
+                ) : (
+                  <View style={styles.clubEmblemFallback}>
+                    <Ionicons name="people-outline" size={18} color={colors.t3} />
+                  </View>
+                )}
+                <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
+                {club.role && (
+                  <View style={styles.clubRoleBadge}>
+                    <Text style={styles.clubRoleText}>
+                      {club.role === 'owner' ? '👑 Owner' : 'Member'}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
 
         {/* ── Actions ── */}
         <View style={styles.section}>
@@ -377,9 +441,21 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   avatarInitial: { color: '#fff', fontSize: 34, fontWeight: '700' },
   avatarImage:   { width: 86, height: 86, borderRadius: 43 },
+  avatarPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
 
-  username:   { fontFamily: fonts.display, fontWeight: '700', fontSize: 22, color: colors.t1, marginBottom: 8 },
-  presenceRow: { marginBottom: 10 },
+  username:     { fontFamily: fonts.display, fontWeight: '700', fontSize: 22, color: colors.t1, marginBottom: 6 },
+  userMetaLine: { fontFamily: fonts.body, fontSize: 13, color: colors.t2, textAlign: 'center', marginBottom: 8 },
+  presenceRow:  { marginBottom: 10 },
   bio:        { fontFamily: fonts.body, fontSize: 14, color: colors.t2, lineHeight: 20, textAlign: 'center', maxWidth: 280, marginBottom: 12 },
   bioEmpty:   { fontFamily: fonts.body, fontSize: 13, color: colors.t3, marginBottom: 12 },
   joinDate:   { fontFamily: fonts.body, fontSize: 12, color: colors.t3 },
@@ -404,6 +480,37 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderColor: colors.tealLine,
   },
   chipText: { fontFamily: fonts.body, fontWeight: '500', fontSize: 13, color: colors.teal },
+
+  clubsEmpty: { fontFamily: fonts.body, fontSize: 13, color: colors.t3, textAlign: 'center', paddingVertical: 8 },
+  clubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  clubEmblem: { width: 36, height: 36, borderRadius: 8 },
+  clubEmblemFallback: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubName: { flex: 1, fontFamily: fonts.body, fontSize: 14, color: colors.t1 },
+  clubRoleBadge: {
+    backgroundColor: colors.tealTint,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.tealLine,
+  },
+  clubRoleText: { fontFamily: fonts.body, fontSize: 11, fontWeight: '600', color: colors.teal },
 
   btnRow: { flexDirection: 'row', gap: 12 },
   btnPrimary: {

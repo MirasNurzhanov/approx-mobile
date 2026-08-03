@@ -1405,6 +1405,7 @@ function UserSheet({
   const zoneLine = isFriend && user.zone_active ? 'in their sound zone' : null;
   const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
 
+
   // ── Their zone track ──
   // The server only sends zone_audio_url to viewers allowed to hear it, so a
   // URL here is already permission to play — but permission is not a reason to
@@ -3150,7 +3151,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontSize: 13,
     color: colors.t2,
   },
-
   /** A stranger's "avatar": the map marker at card scale. Nothing is being
    *  withheld behind a placeholder silhouette — this is all there is. */
   strangerAvatar: {

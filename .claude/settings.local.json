@@ -44,7 +44,8 @@
       "Bash(sed -n '44,115p' /Users/mirasnurzhanov/Desktop/aura-mobile/app/register.tsx)",
       "Bash(sed -n '190,240p' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)",
       "Bash(sed -n '338,400p' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)",
-      "Bash(awk 'NR>400' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)"
+      "Bash(awk 'NR>400' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)",
+      "Bash(xargs ls -la)"
     ]
   }
 }

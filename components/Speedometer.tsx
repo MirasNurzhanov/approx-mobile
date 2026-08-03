@@ -337,7 +337,7 @@ export function Speedometer() {
                   key={i}
                   d={sectorPath(s.start, s.end)}
                   fill={i === activeIdx ? colors.teal : colors.surface}
-                  stroke={colors.bg}
+                  stroke="#000000"
                   strokeWidth={2}
                 />
               ))}

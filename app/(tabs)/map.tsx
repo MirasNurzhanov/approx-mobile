@@ -249,6 +249,10 @@ const DARK_MAP_STYLE = [
   { featureType: 'administrative', elementType: 'geometry',         stylers: [{ color: '#1A1A20' }] },
   { featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{ color: '#5E5E68' }] },
 ];
+const LIGHT_MAP_STYLE = [
+  { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.business', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+];
 /** How far the sheet travels to get off screen — not its height, which sizes
  *  to content. Raised from 400 when the zone player moved into the card: a
  *  friend broadcasting a track makes the tallest card the sheet holds, and a
@@ -2410,7 +2414,7 @@ export default function MapScreen() {
           }}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
-          customMapStyle={themeMode === 'dark' ? DARK_MAP_STYLE : []}
+          customMapStyle={themeMode === 'dark' ? DARK_MAP_STYLE : LIGHT_MAP_STYLE}
           initialRegion={region}
           showsUserLocation={false}
           showsMyLocationButton={false}

@@ -108,3 +108,65 @@ export const type = {
 /** Cap for text inside fixed-geometry containers that cannot reflow. Text
  * still scales up to this multiple of the base size, then stops. */
 export const MAX_SCALE_FIXED = 1.4
+
+/**
+ * A palette colour at partial opacity.
+ *
+ * Exists because map overlays need `rgba()` strings and the palette is hex, so
+ * every translucent ring on the map used to be a hand-written literal — which
+ * meant it was pinned to whichever theme the author happened to be looking at.
+ * The dark teal `rgba(31,199,182,…)` written that way for other people's music
+ * zones stayed teal in light mode, where the palette's own `teal` is a strong
+ * orange, and a faint teal ring on a near-white basemap is invisible.
+ *
+ * Take the colour from `colors.*` and the opacity from here, and a ring cannot
+ * fall out of step with its theme again.
+ */
+/**
+ * Ring colours for other people's music zones, one per person.
+ *
+ * With every zone drawn in the same colour, two friends broadcasting near each
+ * other are two identical circles and a pair of identical labels — you can see
+ * that somebody's music reaches here, but not whose. A stable colour per person
+ * makes a ring identifiable at a glance, and ties it to the chip that names it.
+ *
+ * Not `AVATAR_COLORS`: those are backgrounds for a letter tile, deliberately
+ * pale so dark text sits on them. Painted as a 1.5 px line over a near-white
+ * basemap they would be the invisible-teal bug again. Every colour here is held
+ * to mid luminance — roughly 0.45–0.62 — which is the band that survives both a
+ * white map and a near-black one, and they are spread around the hue circle so
+ * neighbours are told apart by hue rather than by shade.
+ *
+ * Purple is deliberately absent: it means "yours" everywhere else on the map.
+ */
+export const ZONE_RING_COLORS = [
+  '#E8714A', // orange
+  '#4D8DFF', // blue
+  '#E0567F', // rose
+  '#12A594', // teal
+  '#C9932E', // amber
+  '#5EA83C', // green
+]
+
+/**
+ * The ring colour for a given person. Stable across sessions and devices,
+ * because it is derived from the name rather than from load order — a friend
+ * whose ring was blue an hour ago is still blue.
+ */
+export function zoneRingColor(username: string): string {
+  let hash = 0
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + (hash << 5) - hash
+  }
+  return ZONE_RING_COLORS[Math.abs(hash) % ZONE_RING_COLORS.length]
+}
+
+export function withAlpha(hex: string, alpha: number): string {
+  const value = hex.replace('#', '');
+  const full = value.length === 3
+    ? value.split('').map((c) => c + c).join('')
+    : value;
+  const int = parseInt(full, 16);
+  if (Number.isNaN(int) || full.length !== 6) return hex;
+  return `rgba(${(int >> 16) & 255},${(int >> 8) & 255},${int & 255},${alpha})`;
+}

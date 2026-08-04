@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -96,6 +96,10 @@ function fmtJoined(iso: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
+// ─── Module-level cache ───────────────────────────────────────────────────────
+// Persists across tab switches so the screen feels instant on re-focus.
+let _cache: { profile: Profile | null; friendCount: number; connectionCount: number } | null = null;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const { colors } = useTheme();
@@ -105,10 +109,10 @@ export default function ProfileScreen() {
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [friendCount, setFriendCount] = useState(0);
-  const [connectionCount, setConnectionCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(_cache?.profile ?? null);
+  const [friendCount, setFriendCount] = useState(_cache?.friendCount ?? 0);
+  const [connectionCount, setConnectionCount] = useState(_cache?.connectionCount ?? 0);
+  const [loading, setLoading] = useState(_cache === null);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -118,24 +122,24 @@ export default function ProfileScreen() {
       api.get<Profile>('/api/users/profile/'),
       api.get<FriendList>('/api/friends/list/'),
     ]);
-    if (profileRes.status === 'fulfilled') setProfile(profileRes.value.data);
+    const p = profileRes.status === 'fulfilled' ? profileRes.value.data : profile;
+    let fc = friendCount;
+    let cc = connectionCount;
+    if (profileRes.status === 'fulfilled') setProfile(p);
     if (friendsRes.status === 'fulfilled') {
       const data = friendsRes.value.data;
       const friendIds = new Set(data.friends.map((f) => f.id));
-      setFriendCount(data.friends.length);
-      setConnectionCount(data.connections.filter((c) => !friendIds.has(c.id)).length);
+      fc = data.friends.length;
+      cc = data.connections.filter((c) => !friendIds.has(c.id)).length;
+      setFriendCount(fc);
+      setConnectionCount(cc);
     }
+    _cache = { profile: p, friendCount: fc, connectionCount: cc };
   }
 
-  const hasMounted = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      if (!hasMounted.current) {
-        hasMounted.current = true;
-        fetchAll().finally(() => setLoading(false));
-      } else {
-        fetchAll();
-      }
+      fetchAll().finally(() => setLoading(false));
     }, [])
   );
 

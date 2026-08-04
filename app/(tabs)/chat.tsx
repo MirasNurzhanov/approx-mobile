@@ -351,6 +351,11 @@ function SearchPersonRow({ user, onPress }: { user: ChatUser; onPress: () => voi
   );
 }
 
+// ─── Module-level cache ───────────────────────────────────────────────────────
+// Persists across tab switches so the screen paints instantly on re-focus and
+// the spinner only ever shows on the first visit of a session.
+let _cache: { friendList: FriendList; alerts: AlertsData } | null = null;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ChatScreen() {
   const { colors } = useTheme();
@@ -362,10 +367,10 @@ export default function ChatScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('alerts');
   const [tabOrder, setTabOrder] = useState<DraggableTabKey[]>(['alerts', 'chats', 'clubs']);
   const [query, setQuery] = useState('');
-  const [friendList, setFriendList] = useState<FriendList>({ connections: [], friends: [] });
-  const [alerts, setAlerts] = useState<AlertsData>(EMPTY_ALERTS);
+  const [friendList, setFriendList] = useState<FriendList>(_cache?.friendList ?? { connections: [], friends: [] });
+  const [alerts, setAlerts] = useState<AlertsData>(_cache?.alerts ?? EMPTY_ALERTS);
   useBlockedUsers();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(_cache === null);
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
   const [markingRead, setMarkingRead] = useState(false);
@@ -413,14 +418,21 @@ export default function ChatScreen() {
       loadAlerts(),
       refreshBlocked(),
     ]);
+    let list = _cache?.friendList ?? { connections: [], friends: [] };
+    let alertsData = _cache?.alerts ?? EMPTY_ALERTS;
     if (listRes.status === 'fulfilled') {
       const data = listRes.value.data;
-      setFriendList({
+      list = {
         connections: data.connections ?? [],
         friends:     data.friends     ?? [],
-      });
+      };
+      setFriendList(list);
     }
-    if (alertsRes.status === 'fulfilled') setAlerts(alertsRes.value);
+    if (alertsRes.status === 'fulfilled') {
+      alertsData = alertsRes.value;
+      setAlerts(alertsData);
+    }
+    _cache = { friendList: list, alerts: alertsData };
     // The nav arc reads the same count from the shared store; nudge it so the
     // wedge badge cannot lag behind the tab badge right next to it.
     refreshAlertsCount();
@@ -435,7 +447,7 @@ export default function ChatScreen() {
   useFocusEffect(useCallback(() => {
     fetchAll();
     fetchUnreadBreakdown();
-    pollRef.current = setInterval(fetchAll, 5_000);
+    pollRef.current = setInterval(fetchAll, 15_000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchAll, fetchUnreadBreakdown]));
 
@@ -723,6 +735,8 @@ export default function ChatScreen() {
         <FlatList
           data={searchRows}
           keyExtractor={(item) => item.key}
+          windowSize={5}
+          initialNumToRender={8}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           renderItem={({ item }) => {
@@ -759,6 +773,8 @@ export default function ChatScreen() {
         <FlatList
           data={alertRows}
           keyExtractor={(item) => item.key}
+          windowSize={5}
+          initialNumToRender={8}
           renderItem={({ item }) => {
             if (item.kind === 'label') {
               return <Text style={styles.alertsSectionLabel}>{item.label}</Text>;
@@ -812,6 +828,8 @@ export default function ChatScreen() {
         <FlatList
           data={chatUsers}
           keyExtractor={(item) => String(item.id)}
+          windowSize={5}
+          initialNumToRender={8}
           renderItem={({ item }) => (
             <UserCard
               user={item}

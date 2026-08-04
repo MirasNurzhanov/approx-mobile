@@ -62,6 +62,8 @@ export default function OnboardingProfessionScreen() {
         data={PROFESSIONS}
         keyExtractor={(item) => item.key}
         numColumns={2}
+        windowSize={5}
+        initialNumToRender={8}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={s.grid}
         columnWrapperStyle={s.row}

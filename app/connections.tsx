@@ -124,6 +124,8 @@ export default function ConnectionsScreen() {
         <FlatList
           data={people}
           keyExtractor={(item) => String(item.id)}
+          windowSize={5}
+          initialNumToRender={8}
           contentContainerStyle={[styles.list, { paddingBottom: bottom + 32 }]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />

@@ -322,6 +322,8 @@ export default function EditProfileScreen() {
             data={PROFESSIONS}
             keyExtractor={(item) => item.key}
             numColumns={2}
+            windowSize={5}
+            initialNumToRender={8}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.profGrid}
             columnWrapperStyle={{ gap: CARD_GAP }}
@@ -393,6 +395,8 @@ export default function EditProfileScreen() {
           <FlatList
             data={filteredCountries}
             keyExtractor={(item) => item.code}
+            windowSize={5}
+            initialNumToRender={8}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: 32 }}

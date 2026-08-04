@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    AppState,
     Image,
     KeyboardAvoidingView,
     Linking,
@@ -71,6 +72,7 @@ import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
+import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { atSharingPrecision, reportLocation, type Coordinates } from '@/services/location';
@@ -190,6 +192,12 @@ interface ClubMeetup {
   expires_at: string;
 }
 
+interface MapNearbyResponse {
+  users: NearbyUser[];
+  stories: Story[];
+  meetups: ClubMeetup[];
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Ring colour carries the relationship, and nothing else does: blue is a
 // friend, orange is a connection, teal is a matched stranger. One colour per
@@ -248,7 +256,6 @@ const REL_LABEL: Record<Relationship, string> = {
 };
 
 const POLL_MS            = 10_000;
-const STORY_POLL_MS      = 10_000;
 /** How still the camera must be before the marker layout reacts to a new zoom. */
 const ZOOM_SETTLE_MS     = 220;
 
@@ -630,22 +637,8 @@ function SelfMarker({ coordinate, uri, username }: {
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
 
-  // A marker freezes its bitmap the instant tracking stops, so it must never
-  // stop before the view underneath has been drawn once. With no profile
-  // picture to wait on, `imageReady` is true from the very first render — the
-  // raster froze on an unmeasured view and the halo came back blank, which
-  // looks exactly like the marker having vanished. The 400ms settle is the
-  // same one DotMarker and ClusterMarker already use, and it re-arms whenever
-  // the marker is rebuilt rather than only on mount.
-  const [settling, setSettling] = useState(true);
-  useEffect(() => {
-    setSettling(true);
-    const t = setTimeout(() => setSettling(false), 400);
-    return () => clearTimeout(t);
-  }, [uri, username]);
-
   return (
-    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={settling || !imageReady}>
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={!imageReady}>
       <View style={styles.selfHalo}>
         <View style={styles.selfCore}>
           {uri && !imageFailed ? (
@@ -769,7 +762,7 @@ function ClusterMarker({ coordinate, count, onPress }: {
   );
 }
 
-function StoryBubble({ story, count }: { story: Story; count: number }) {
+function StoryBubble({ story, count, onAvatarLoad }: { story: Story; count: number; onAvatarLoad?: () => void }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const avatarBg = avatarBgColor(story.author.username);
@@ -792,7 +785,11 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
         <View style={styles.storyAvatarStack}>
           <View style={styles.storyAvatarWrap}>
             {story.author.profile_picture ? (
-              <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
+              <Image
+                source={{ uri: story.author.profile_picture }}
+                style={styles.storyCardAvatarImg}
+                onLoad={onAvatarLoad}
+              />
             ) : (
               <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
                 <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
@@ -814,6 +811,39 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
         </View>
       )}
     </View>
+  );
+}
+
+function StoryMarker({ stories, onPress }: { stories: Story[]; onPress: () => void }) {
+  const first = stories[0];
+  // With `tracksViewChanges` permanently false the marker is snapshotted on
+  // first render — before the avatar arrives — and stays blank forever. Track
+  // until the image load fires (or a fallback timeout for letter avatars and
+  // failed loads), and re-track for a beat whenever the bubble's content
+  // changes so new stories and reaction counts actually repaint.
+  const [tracks, setTracks] = useState(true);
+  const signature = `${first.id}:${stories.length}:${first.author.profile_picture ?? ''}:${JSON.stringify(first.reactions ?? {})}`;
+
+  useEffect(() => {
+    setTracks(true);
+    const fallback = setTimeout(() => setTracks(false), 3000);
+    return () => clearTimeout(fallback);
+  }, [signature]);
+
+  // One frame after load isn't enough on Android — give the draw a moment
+  // before freezing the snapshot.
+  const settle = useCallback(() => { setTimeout(() => setTracks(false), 300); }, []);
+
+  return (
+    <Marker
+      coordinate={{ latitude: first.latitude, longitude: first.longitude }}
+      anchor={{ x: 0.5, y: 1 }}
+      tracksViewChanges={tracks}
+      zIndex={Z_STORY}
+      onPress={onPress}
+    >
+      <StoryBubble story={first} count={stories.length} onAvatarLoad={settle} />
+    </Marker>
   );
 }
 
@@ -1517,6 +1547,11 @@ export default function MapScreen() {
   const [clubMeetups, setClubMeetups]   = useState<ClubMeetup[]>([]);
   const [selectedMeetup, setSelectedMeetup] = useState<ClubMeetup | null>(null);
 
+  // Refs that hold the last non-null selection — lets us keep the sheet
+  // components mounted between taps instead of unmounting on every dismiss.
+  const lastUserRef   = useRef<NearbyUser | null>(null);
+  const lastMeetupRef = useRef<ClubMeetup | null>(null);
+
   const [following, setFollowing]     = useState(false);
   const [locating, setLocating]       = useState(false);
 
@@ -1547,10 +1582,6 @@ export default function MapScreen() {
   /** Latest platform speed estimate, in m/s; null when it has none. A ref, not
    * state — it changes on every fix and only the next poll reads it. */
   const speedRef           = useRef<number | null>(null);
-  /** Radius the platform puts on the latest fix, in metres. Rides the same
-   * report as the speed; the server needs it to decide whether this position
-   * is precise enough to place the user in a district. */
-  const accuracyRef        = useRef<number | null>(null);
   const followingRef       = useRef(false);
   const watchRef           = useRef<Location.LocationSubscription | null>(null);
   const startingWatchRef   = useRef(false);
@@ -1690,19 +1721,6 @@ export default function MapScreen() {
     return outline ? ringsForDisplay(outline) : [];
   }, [selfZone, regionOutlines]);
 
-  /** How wide to draw the owner's own zone circle, or 0 for "draw nothing".
-   *
-   * Zero rather than "don't render the Circle": the switch must not add or
-   * remove a child of the MapView. See the note at the render site — turning
-   * the zone off was taking the owner's own marker off the map with it. */
-  const selfZoneCircleRadius = useMemo(() => {
-    if (!selfZone?.zone_active) return 0;
-    // In region mode the polygons are the zone; a circle as well would be a
-    // second, wrong claim about where it reaches.
-    if (selfZone.zone_mode === 'region' && selfZone.zone_region_id) return 0;
-    return selfZone.zone_radius > 0 ? selfZone.zone_radius : 0;
-  }, [selfZone]);
-
   /** Set once the viewer is standing where the basemap disagrees with GPS.
    *
    * Google serves GCJ-02 tiles inside mainland China while everything Aura
@@ -1747,13 +1765,6 @@ export default function MapScreen() {
     // constrain anything: this rule exists to stop a marker being flung across
     // a boundary the eye can see, and an undrawn circle has no such boundary.
     // Their music zones are drawn, and still do.
-    //
-    // Every music zone is listed here, including the ones `visibleMusicZones`
-    // ends up dropping because their owner was counted rather than drawn.
-    // Filtering by that would be circular — it is derived from `markerLayout`,
-    // which is derived from this — and it would buy nothing: a counted pile
-    // skips the fan entirely, so the constraint it would have imposed is never
-    // consulted for the person whose ring went away.
     for (const u of visibleNearby) {
       if (u.latitude == null || u.longitude == null) continue;
       if (!u.music_zone_separate || !(u.music_zone_radius ?? 0)) continue;
@@ -1772,9 +1783,6 @@ export default function MapScreen() {
     // that somebody's music reached here, but not whose.
     const zones: {
       key: string;
-      /** Whose marker this ring belongs to, in `markerLayout.placed` terms —
-       *  so a ring can be dropped when its owner is not on the map. */
-      markerKey: string;
       center: GeoPoint;
       radius: number;
       mine?: boolean;
@@ -1789,7 +1797,6 @@ export default function MapScreen() {
     ) {
       zones.push({
         key: 'music-self',
-        markerKey: SELF_KEY,
         center: displayCoords,
         radius: selfZone.music_zone_radius,
         mine: true,
@@ -1819,7 +1826,6 @@ export default function MapScreen() {
       if (u.zone_mode === 'region' && !u.music_zone_separate) continue;
       zones.push({
         key: `music-${u.id}`,
-        markerKey: `u-${u.id}`,
         center: { latitude: u.latitude, longitude: u.longitude },
         radius: u.music_zone_radius!,
         // Only friends are ever drawn here — the server withholds
@@ -1872,28 +1878,6 @@ export default function MapScreen() {
     [markerLayout],
   );
 
-  /**
-   * The music zones actually drawn: only those whose owner is on the map.
-   *
-   * A ring outlives its owner otherwise. Once zoomed out far enough that a pile
-   * is counted rather than fanned, its members are deliberately not drawn —
-   * but their zones are real geography and kept their true size and place, so
-   * the map was left with circles round nobody, labelled with the @name of
-   * someone who was no longer there. That is the state that read as people
-   * having vanished out of their own zones.
-   *
-   * Strictly "not on the map", not "far out" — a zone disappears exactly when
-   * the person it belongs to does, at whatever zoom that happens, and comes
-   * back with them.
-   *
-   * The owner is exempt: they are never counted and never leave the map, and
-   * before the viewport has been measured `placed` is empty for everyone.
-   */
-  const visibleMusicZones = useMemo(
-    () => musicZones.filter((z) => z.mine || markerLayout.placed.has(z.markerKey)),
-    [musicZones, markerLayout],
-  );
-
   // Nearby people used to generate alerts from here — "@miras is nearby ·
   // 180m away", "@aisha shares your interests". They no longer do: being
   // somewhere is not an event, and the map already shows who is around. The
@@ -1924,26 +1908,15 @@ export default function MapScreen() {
     hiToastTimer.current = setTimeout(() => setHiToast(false), 1500);
   }
 
-  const fetchStories = useCallback(async () => {
-    console.log('[Stories] fetching nearby stories...');
+  const fetchMapData = useCallback(async () => {
     try {
-      const r = await api.get<Story[]>('/api/stories/nearby/');
-      const data = r.data;
-      console.log('[Stories] received:', data.length, 'stories');
-      console.log('[Stories] first story coords:', data[0]?.latitude, data[0]?.longitude);
-      console.log('[Stories] after reaction fetch:', JSON.stringify(data.map(s => ({ id: s.id, reactions: s.reactions }))));
-      setStories(data);
-      data.forEach(s => {
-        if (s.image) ExpoImage.prefetch(s.image);
-      });
-    } catch {}
-  }, []);
-
-  const fetchClubMeetups = useCallback(async () => {
-    try {
-      const r = await api.get<ClubMeetup[]>('/api/clubs/events/nearby/');
+      const r = await api.get<MapNearbyResponse>('/api/map/nearby/');
+      const { users, stories, meetups } = r.data;
+      setNearby(users);
+      setStories(stories);
+      stories.forEach(s => { if (s.image) ExpoImage.prefetch(s.image); });
       const now = Date.now();
-      setClubMeetups(r.data.filter((e) => new Date(e.expires_at).getTime() > now));
+      setClubMeetups(meetups.filter((e) => new Date(e.expires_at).getTime() > now));
     } catch {}
   }, []);
 
@@ -1957,7 +1930,6 @@ export default function MapScreen() {
   async function reactToStory(storyId: number, reaction: ReactionType) {
     try {
       const response = await api.post(`/api/stories/${storyId}/react/`, { reaction: reaction });
-      console.log('[Reaction] success:', response.data);
       const applyReaction = <T extends Story>(s: T): T => {
         if (s.id !== storyId) return s;
         const wasActive = s.user_reaction === reaction;
@@ -1968,7 +1940,7 @@ export default function MapScreen() {
       };
       setStoryViewer((prev) => prev ? { stories: prev.stories.map(applyReaction) } : prev);
       setStories((prev) => prev.map(applyReaction));
-      await fetchStories();
+      await fetchMapData();
     } catch (error: any) {
       console.log('[Reaction] error:', error.response?.status, JSON.stringify(error.response?.data));
     }
@@ -1979,31 +1951,22 @@ export default function MapScreen() {
     if (!c) throw new Error('No location');
     const lat = parseFloat(c.latitude.toFixed(6));
     const lng = parseFloat(c.longitude.toFixed(6));
-    console.log('[Story] posting story at:', lat, lng);
-    console.log('[Story] content:', text);
-    const formData = new FormData();
-    formData.append('text', text);
-    formData.append('content', text);
-    formData.append('latitude', String(lat));
-    formData.append('longitude', String(lng));
-    if (photoUri) {
-      formData.append('image', {
-        uri: photoUri,
-        type: 'image/jpeg',
-        name: 'story-image.jpg',
-      } as any);
-    }
-    console.log('[Story] posting with image:', photoUri ? 'yes' : 'no');
-    console.log('[Story] formData fields:', text, lat, lng);
     try {
-      const response = await api.post('/api/stories/', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // The photo goes straight to Cloudinary; Django only ever sees the URL.
+      // One hop instead of two, and no Railway worker held for the transfer.
+      const imageUrl = photoUri ? await uploadImageToCloudinary(photoUri) : null;
+      const response = await api.post('/api/stories/', {
+        content: text,
+        latitude: lat,
+        longitude: lng,
+        ...(imageUrl ? { image_url: imageUrl } : {}),
+      });
       const newStory = response.data;
-      console.log('[Story] success:', newStory);
       setStories(prev => [...prev, newStory]);
       recordOwnStory(newStory);
-      setTimeout(() => fetchStories(), 500);
+      setTimeout(() => fetchMapData(), 500);
     } catch (error: any) {
-      console.log('[Story] error:', error.response?.status, JSON.stringify(error.response?.data));
+      console.log('[Story] error:', error.response?.status ?? error.message);
       throw error;
     }
   }
@@ -2040,7 +2003,6 @@ export default function MapScreen() {
           music_zone_radius:
             Number(d.music_radius_m) > 0 ? Number(d.music_radius_m) : Number(d.zone_radius) || 500,
         };
-        console.log('[Zone] self zone:', JSON.stringify(normalized));
         setSelfZone(normalized);
       })
       .catch((e: any) => console.log('[Zone] self zone fetch error:', e?.response?.status));
@@ -2082,10 +2044,6 @@ export default function MapScreen() {
           // changes on every fix and nothing renders from it directly, so
           // setting state here would re-render the whole map for nothing.
           speedRef.current = loc.coords.speed ?? null;
-          // Same reasoning as speed, for the same ride-along: the server needs
-          // to know how well this fix is known before it will place the user
-          // in a district. Not rendered from, so not state.
-          accuracyRef.current = loc.coords.accuracy ?? null;
           recordSpeed(loc.coords.speed);
         },
       );
@@ -2134,37 +2092,39 @@ export default function MapScreen() {
     // ourselves out of it), so keep retrying the identity fetch until it lands.
     if (currentUserIdRef.current === null) loadSelf();
 
-    const [, nearbyResult] = await Promise.allSettled([
+    await Promise.allSettled([
       // Honours the Location sharing setting; sends nothing when paused.
       // Speed rides along on the same request — the server buckets it into a
       // coarse class and never stores the figure itself.
-      reportLocation(
-        { latitude: c.latitude, longitude: c.longitude },
-        speedRef.current,
-        accuracyRef.current,
-      ),
-      api.get<NearbyUser[]>('/api/proximity/nearby/'),
+      reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current),
+      fetchMapData(),
     ]);
+  }, [fetchMapData, loadSelf]);
 
-    if (nearbyResult.status === 'fulfilled') {
-      const users = nearbyResult.value.data;
-      users.forEach((u) => {
-        if (u.zone_active || u.zone_radius) {
-          console.log('[Map] zone data:', u.username, u.zone_active, u.zone_radius, u.zone_audio_url);
-        }
-      });
-      setNearby(users);
-    }
-    await fetchFriends();
-    await fetchClubMeetups();
-  }, [fetchFriends, loadSelf, fetchClubMeetups]);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Start the tick when coords first arrive; stop when the component unmounts.
   useEffect(() => {
     if (!coords) return;
     tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => clearInterval(id);
+    tickRef.current = setInterval(tick, POLL_MS);
+    return () => {
+      if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+    };
   }, [!!coords]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pause the tick when the app goes to the background and resume on return.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') {
+        if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+      } else if (coordsRef.current && !tickRef.current) {
+        tick();
+        tickRef.current = setInterval(tick, POLL_MS);
+      }
+    });
+    return () => sub.remove();
+  }, [tick]);
 
   // Register tick as the global refresh so other screens can trigger it
   useEffect(() => {
@@ -2177,17 +2137,6 @@ export default function MapScreen() {
     });
   }, []);
 
-  useEffect(() => {
-    fetchStories();
-    const id = setInterval(fetchStories, STORY_POLL_MS);
-    return () => clearInterval(id);
-  }, [fetchStories]);
-
-  useEffect(() => {
-    fetchClubMeetups();
-    const id = setInterval(fetchClubMeetups, STORY_POLL_MS);
-    return () => clearInterval(id);
-  }, [fetchClubMeetups]);
 
 
   // Keep the open sheet in sync with the latest nearby fetch
@@ -2405,6 +2354,12 @@ export default function MapScreen() {
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
 
+  // Keep last non-null selection cached so the sheets stay mounted.
+  if (selectedUser)   lastUserRef.current   = selectedUser;
+  if (selectedMeetup) lastMeetupRef.current = selectedMeetup;
+  const sheetUser   = lastUserRef.current;
+  const sheetMeetup = lastMeetupRef.current;
+
   return (
     <View style={styles.container}>
       {permState && permState !== 'granted' ? (
@@ -2453,7 +2408,6 @@ export default function MapScreen() {
         <MapView
           ref={mapRef}
           onLayout={(e) => {
-            console.log('[Map] step 5: map rendering');
             setMapH(e.nativeEvent.layout.height);
           }}
           style={styles.map}
@@ -2521,7 +2475,7 @@ export default function MapScreen() {
               same colour those people's markers already use, so taking the hue
               from `colors` fixes the contrast and makes the ring match the dots
               it belongs to. Dark mode is unchanged. */}
-          {visibleMusicZones.map(({ key, center, radius, color }) => (
+          {musicZones.map(({ key, center, radius, color }) => (
             <Circle
               key={key}
               center={center}
@@ -2532,44 +2486,30 @@ export default function MapScreen() {
             />
           ))}
 
-          {/* Own zone, region shape.
+          {/* Own zone.
               One polygon per *piece*, not per ring: a region straddling the
               ±180 meridian is cut in two there, so it draws as the island group
               it is instead of as a band stretched around the planet. Regions
-              that do not cross come back as a single piece, unchanged.
-              `selfZoneRings` is already empty unless the zone is switched on
-              and in region mode, so the switch needs no test of its own. */}
-          {selfZoneRings.map((piece, i) => (
-            <Polygon
-              key={`self-zone-${i}`}
-              coordinates={piece}
-              fillColor={withAlpha(colors.purple, 0.05)}
-              strokeColor={withAlpha(colors.purple, 0.35)}
-              strokeWidth={1.5}
-            />
-          ))}
-
-          {/* Own zone, radius shape — and the one child on this map that is
-              mounted whether or not it draws anything.
-              This used to be `zone_active && <Circle/>`, so switching the zone
-              off *unmounted a child of the MapView*. Android's MapView keeps
-              every overlay and every marker in one flat `features` list and
-              removes them strictly by index (MapManager.removeViewAt →
-              MapView.removeFeatureAt), so a child disappearing from the middle
-              of that list takes something else out with it — which is why
-              turning the zone off deleted the owner's own avatar and left the
-              circle sitting there.
-              Nothing is added or removed now: the switch only changes a radius
-              on a feature that is always there, and a zero-radius circle draws
-              nothing. Colours go transparent with it so a stroke rounding up to
-              a pixel cannot leave a dot behind at your feet. */}
-          <Circle
-            center={displayCoords}
-            radius={selfZoneCircleRadius}
-            fillColor={selfZoneCircleRadius > 0 ? withAlpha(colors.purple, 0.07) : 'transparent'}
-            strokeColor={selfZoneCircleRadius > 0 ? withAlpha(colors.purple, 0.35) : 'transparent'}
-            strokeWidth={selfZoneCircleRadius > 0 ? 1.5 : 0}
-          />
+              that do not cross come back as a single piece, unchanged. */}
+          {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
+            ? selfZoneRings.map((piece, i) => (
+                <Polygon
+                  key={`self-zone-${i}`}
+                  coordinates={piece}
+                  fillColor={withAlpha(colors.purple, 0.05)}
+                  strokeColor={withAlpha(colors.purple, 0.35)}
+                  strokeWidth={1.5}
+                />
+              ))
+            : selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
+              <Circle
+                center={displayCoords}
+                radius={selfZone.zone_radius}
+                fillColor={withAlpha(colors.purple, 0.07)}
+                strokeColor={withAlpha(colors.purple, 0.35)}
+                strokeWidth={1.5}
+              />
+            )}
 
           {/* The chip that says which ring is which — literally, now: a
               friend's ring is labelled with their @name and drawn in their own
@@ -2578,7 +2518,7 @@ export default function MapScreen() {
               them, and skipped when the ring is too small on screen for a label
               to mean anything. Your own is included: where your music stops is
               the one thing you cannot check by listening. */}
-          {visibleMusicZones.filter((z) => musicBadgeVisible(z.radius)).map((z) => (
+          {musicZones.filter((z) => musicBadgeVisible(z.radius)).map((z) => (
             <MusicZoneBadge
               key={`${z.key}-badge`}
               center={z.center}
@@ -2700,12 +2640,9 @@ export default function MapScreen() {
             />
           )}
 
-          {/* Piles too spread out to fan without drawing people hundreds of
-              metres from where they stand — which is what zooming far out does
-              to a pixel-sized fan. A number where they actually are, and a tap
-              to go in and see who.
-              Only past `FAN_MAX_M`, so this is a zoomed-way-out state rather
-              than something that happens the moment two people are close. */}
+          {/* Piles that could not be fanned apart without moving someone too far
+              — which is what zooming out does to a pixel-sized fan. A number
+              instead, and a tap to go in and see who. */}
           {markerLayout.clusters.filter((c) => isDrawable(c.position)).map((cluster) => (
             <ClusterMarker
               key={cluster.key}
@@ -2724,23 +2661,15 @@ export default function MapScreen() {
             username={selfProfile?.username ?? ''}
           />
 
-          {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => {
-            const first = authorStories[0];
-            return (
-              <Marker
-                key={`story-author-${authorId}`}
-                coordinate={{ latitude: first.latitude, longitude: first.longitude }}
-                anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
-                // Above the people markers, which now claim a zIndex of their
-                // own — a bubble is drawn above its point, so it covers nobody.
-                zIndex={Z_STORY}
-                onPress={() => openStoryViewer(authorStories)}
-              >
-                <StoryBubble story={first} count={authorStories.length} />
-              </Marker>
-            );
-          })}
+          {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => (
+            // Keyed by author *and* newest story, so a fresh story remounts
+            // the marker rather than reusing a stale frozen snapshot.
+            <StoryMarker
+              key={`story-author-${authorId}-${authorStories[0].id}`}
+              stories={authorStories}
+              onPress={() => openStoryViewer(authorStories)}
+            />
+          ))}
 
           {/* Approved club meetup pins — one per event, above story bubbles. */}
           {clubMeetups.map((meetup) => (
@@ -2778,29 +2707,39 @@ export default function MapScreen() {
         </View>
       ) : null}
 
-      {/* User detail sheet — where zone audio lives now. */}
-      {selectedUser && (
-        <UserSheet
-          user={selectedUser}
-          sheetY={sheetY}
-          onDismiss={closeSheet}
-          onFriendChange={handleHiSent}
-          viewerCoords={displayCoords ?? null}
-          zoneRegion={
-            selectedUser.zone_region_id
-              ? regionOutlines.get(selectedUser.zone_region_id) ?? null
-              : null
-          }
-        />
+      {/* User detail sheet — kept mounted after first tap to avoid remount cost. */}
+      {sheetUser && (
+        <View
+          style={[StyleSheet.absoluteFill, { opacity: selectedUser ? 1 : 0 }]}
+          pointerEvents={selectedUser ? 'box-none' : 'none'}
+        >
+          <UserSheet
+            user={sheetUser}
+            sheetY={sheetY}
+            onDismiss={closeSheet}
+            onFriendChange={handleHiSent}
+            viewerCoords={displayCoords ?? null}
+            zoneRegion={
+              sheetUser.zone_region_id
+                ? regionOutlines.get(sheetUser.zone_region_id) ?? null
+                : null
+            }
+          />
+        </View>
       )}
 
-      {/* Club meetup detail sheet */}
-      {selectedMeetup && (
-        <MeetupSheet
-          meetup={selectedMeetup}
-          sheetY={sheetY}
-          onDismiss={closeMeetupSheet}
-        />
+      {/* Club meetup detail sheet — same pre-mount strategy. */}
+      {sheetMeetup && (
+        <View
+          style={[StyleSheet.absoluteFill, { opacity: selectedMeetup ? 1 : 0 }]}
+          pointerEvents={selectedMeetup ? 'box-none' : 'none'}
+        >
+          <MeetupSheet
+            meetup={sheetMeetup}
+            sheetY={sheetY}
+            onDismiss={closeMeetupSheet}
+          />
+        </View>
       )}
 
       {/* Full-screen story viewer */}

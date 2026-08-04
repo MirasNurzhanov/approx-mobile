@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { clubsApi } from '@/services/clubs';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -609,9 +610,11 @@ export default function ClubChatScreen() {
       sender_id: currentUserIdRef.current ?? -1,
       created_at: new Date().toISOString(), pending: true,
     }]);
-    const form = new FormData();
-    form.append('image', { uri: asset.uri, type: asset.mimeType ?? 'image/jpeg', name: 'attachment.jpg' } as any);
-    api.post(`/api/clubs/${clubId}/messages/`, form, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
+    // Straight to Cloudinary, then only the URL to Django — the server
+    // broadcasts it to the club socket group like any other message.
+    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
+      .then((imageUrl) => api.post(`/api/clubs/${clubId}/messages/`, { image_url: imageUrl }))
+      .catch(() => {});
   }
 
   async function handleAttach() {
@@ -787,6 +790,9 @@ export default function ClubChatScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
           onScroll={onScroll}
           scrollEventThrottle={200}
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
@@ -801,9 +807,6 @@ export default function ClubChatScreen() {
             const hydratedItem = hydrate(item);
 
             // ── Meetup proposal card ──────────────────────────────────────
-            if (item.message_type === 'meetup_proposal') {
-              console.log('[Proposal] raw message:', JSON.stringify(item));
-            }
             if (item.message_type === 'meetup_proposal' && item.proposal) {
               return (
                 <View style={styles.proposalRow}>

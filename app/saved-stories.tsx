@@ -352,6 +352,8 @@ export default function SavedStoriesScreen() {
           key={activeTab}
           keyExtractor={(item) => String(item.id)}
           numColumns={2}
+          windowSize={5}
+          initialNumToRender={8}
           columnWrapperStyle={styles.gridRow}
           contentContainerStyle={[styles.grid, { paddingBottom: bottom + (selectMode ? 120 : 32) }]}
           renderItem={({ item }) => (

@@ -91,6 +91,8 @@ export default function BlockedUsersScreen() {
         <FlatList
           data={list}
           keyExtractor={(item) => String(item.id)}
+          windowSize={5}
+          initialNumToRender={8}
           contentContainerStyle={[styles.list, { paddingBottom: bottom + 32 }]}
           renderItem={({ item }) => (
             <Card style={styles.card}>

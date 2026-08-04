@@ -240,6 +240,8 @@ export default function SearchScreen() {
       <FlatList
         data={results}
         keyExtractor={(item) => String(item.id)}
+        windowSize={5}
+        initialNumToRender={8}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

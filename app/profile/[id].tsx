@@ -338,7 +338,6 @@ export default function UserProfileScreen() {
         {/* ── Clubs ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Clubs</Text>
-          {console.log('[Profile] clubs data:', JSON.stringify(profile.clubs)) as any}
           {!profile.clubs || profile.clubs.length === 0 ? (
             <Text style={styles.clubsEmpty}>Not a member of any clubs yet</Text>
           ) : (

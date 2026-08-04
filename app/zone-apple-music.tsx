@@ -175,6 +175,8 @@ export default function ZoneAppleMusicScreen() {
           <FlatList
             data={results}
             keyExtractor={(song) => song.id}
+            windowSize={5}
+            initialNumToRender={8}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             contentContainerStyle={[styles.list, { paddingBottom: bottom + 32 }]}

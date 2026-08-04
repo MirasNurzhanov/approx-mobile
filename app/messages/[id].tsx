@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { decodeStoryReply } from '@/services/storyReply';
 import { announce } from '@/hooks/useReduceMotion';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -245,9 +246,11 @@ export default function MessagesScreen() {
       { id: tempId, image: asset.uri, sender_id: currentUserIdRef.current ?? -1, created_at: new Date().toISOString(), pending: true },
     ]);
 
-    const formData = new FormData();
-    formData.append('image', { uri: asset.uri, type: asset.mimeType ?? 'image/jpeg', name: 'attachment.jpg' } as any);
-    api.post(`/api/friends/messages/${id}/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
+    // Straight to Cloudinary, then only the URL to Django — the server
+    // broadcasts it over the socket to both ends like any other message.
+    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
+      .then((imageUrl) => api.post(`/api/friends/messages/${id}/`, { image_url: imageUrl }))
+      .catch(() => {});
   }
 
   async function handleAttach() {
@@ -335,6 +338,9 @@ export default function MessagesScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyText}>No messages yet — say hello!</Text>

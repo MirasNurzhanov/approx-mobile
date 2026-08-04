@@ -5,7 +5,6 @@ import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
 import { reportLocation } from './location';
-import { getPref } from './preferences';
 import { getCachedLocationSharing } from './privacy';
 
 const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
@@ -109,11 +108,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 );
 
 export async function startBackgroundLocationUpdates(): Promise<void> {
-  if (!(await getPref('backgroundLocation'))) {
-    console.log('[BG Location] disabled by user preference, skipping');
-    return;
-  }
-
   // "Pause location sharing entirely" should stop the phone tracking us at
   // all, not just stop the uploads. The per-update check in the task is the
   // correctness guarantee; this is the one that saves the battery.

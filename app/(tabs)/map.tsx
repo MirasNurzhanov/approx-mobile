@@ -2027,9 +2027,11 @@ export default function MapScreen() {
     if (watchRef.current || startingWatchRef.current) return;
     startingWatchRef.current = true;
     try {
-      // Background location is optional and is *not* asked for here. It now
-      // lives in Settings → Permissions, where the user can opt in knowingly
-      // rather than being ambushed on first launch.
+      // Not asked for here — this fires on every watch (re)start, including
+      // the permission-regained effect below, and re-asking on every one of
+      // those would be a dialog storm. The one place that primes and requests
+      // it is the mount effect, once, right after foreground is granted. This
+      // call only starts the OS task if that already succeeded.
       await startBackgroundLocationUpdates();
       const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
@@ -2060,8 +2062,15 @@ export default function MapScreen() {
     (async () => {
       // Primed, not cold. The old code fired the system dialog the instant the
       // map mounted, and then fired the *background* location dialog straight
-      // after it — two unexplained prompts back to back, with iOS allowing
-      // exactly one chance at each.
+      // after it — two unexplained prompts with no explanation between them,
+      // and iOS allows exactly one chance at each.
+      //
+      // Both are still asked here, on first login, but sequenced through the
+      // primer: foreground first, and only once it is granted and the map is
+      // already working does the background one get its own explanation and
+      // its own prompt. A user who says no to either has lost nothing they
+      // had a moment ago, and background is optional everywhere downstream —
+      // `startBackgroundLocationUpdates` is a no-op without it.
       const granted = await ensurePermission('location');
       if (!granted) {
         const info = await checkPermission('location');
@@ -2070,6 +2079,9 @@ export default function MapScreen() {
       }
       setPermState('granted');
       await startWatching();
+      if (await ensurePermission('locationBackground')) {
+        await startBackgroundLocationUpdates();
+      }
     })();
 
     return () => {

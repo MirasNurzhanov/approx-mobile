@@ -13,19 +13,13 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 
 import { api } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
-import {
-  startBackgroundLocationUpdates,
-  stopBackgroundLocationUpdates,
-  syncBackgroundLocationSharing,
-} from '@/services/backgroundLocation';
+import { syncBackgroundLocationSharing } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
-import { getPref, setPref } from '@/services/preferences';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import {
   refreshPrivacy,
@@ -50,7 +44,6 @@ import {
   IconMail,
   IconMoon,
   IconMusic,
-  IconPin,
   IconShield,
   IconSun,
   IconTrash,
@@ -180,7 +173,6 @@ export default function SettingsScreen() {
   const [zoneActive, setZoneActive] = useState<boolean | null>(null);
   const [zoneShape, setZoneShape] = useState<string | null>(null);
   const [zoneSaving, setZoneSaving] = useState(false);
-  const [bgLocation, setBgLocation] = useState(true);
   const [notifAllowed, setNotifAllowed] = useState<boolean | null>(null);
 
   const refreshNotifPermission = useCallback(async () => {
@@ -204,7 +196,6 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     refreshPrivacy().catch(() => setPrivacyFailed(true));
-    getPref('backgroundLocation').then(setBgLocation);
   }, []);
 
   // Re-read on every focus, not once per mount. This is a tab, so it stays
@@ -249,38 +240,6 @@ export default function SettingsScreen() {
     } finally {
       setZoneSaving(false);
     }
-  }
-
-  async function toggleBgLocation(value: boolean) {
-    setBgLocation(value);
-    await setPref('backgroundLocation', value);
-
-    if (!value) {
-      await stopBackgroundLocationUpdates();
-      return;
-    }
-
-    let granted = false;
-    try {
-      const { status } = await Location.requestBackgroundPermissionsAsync();
-      granted = status === 'granted';
-    } catch {
-      granted = false;
-    }
-    if (!granted) {
-      setBgLocation(false);
-      await setPref('backgroundLocation', false);
-      Alert.alert(
-        'Permission needed',
-        'Allow background location access ("Always") in system settings so Aura can update your location while the app is closed.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ],
-      );
-      return;
-    }
-    await startBackgroundLocationUpdates();
   }
 
   async function toggleNotifications(value: boolean) {
@@ -427,11 +386,6 @@ export default function SettingsScreen() {
                   <PrefSwitch value={zoneActive} onValueChange={toggleZone} disabled={zoneSaving} />
                 )
               }
-            />
-            <SettingsRow
-              icon={IconPin}
-              label="Background location"
-              right={<PrefSwitch value={bgLocation} onValueChange={toggleBgLocation} />}
             />
             {/* Switches first, then the rows that leave this screen — see the
                 note above SettingsRow. "Auto-play zone audio" used to sit in

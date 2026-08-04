@@ -1299,19 +1299,21 @@ function UserSheet({
 
   // Friends and connections get the real number; a stranger gets a band.
   const distLine = identified ? dist : distanceBand(user.distance);
-  const zoneLine = isFriend && user.zone_audio_url ? 'in their sound zone' : null;
+  const zoneLine = identified && user.zone_audio_url ? 'in their sound zone' : null;
   const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
 
 
   // ── Their zone track ──
-  // The server only sends zone_audio_url to viewers allowed to hear it, so a
-  // URL here is already permission to play — but permission is not a reason to
-  // start. Nothing loads until the play button below is pressed.
+  // The server only sends zone_audio_url to viewers allowed to hear it —
+  // friends and connections, never a stranger, whatever the owner's Zone
+  // audio setting says — so a URL here is already permission to play. This
+  // check is redundant with that server gate, kept as a second line of
+  // defence rather than trusting the field's mere presence.
   //
   // The track is its own switch. `zone_active` governs whether they are drawn
   // with a zone on the map, and reading it here is what made turning that
   // circle off silently mute a song its owner had not touched.
-  const zoneUrl = isFriend ? user.zone_audio_url : undefined;
+  const zoneUrl = identified ? user.zone_audio_url : undefined;
   const zoneRadius = user.zone_radius && user.zone_radius > 0 ? user.zone_radius : 500;
   const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
   // A region zone is a shape, not a distance: someone 3km away can be well
@@ -2599,12 +2601,11 @@ export default function MapScreen() {
                 // Dropped when this marker shares its spot: the fan separates
                 // rings, and a name chip is wider than the ring it hangs under.
                 caption={layout.crowded ? undefined : user.username}
-                // A connection has no zone access, so tagging one would be
-                // advertising a door they cannot open. The tag marks a track
-                // you can play, so it follows the track rather than the
-                // map-zone switch.
+                // Friends and connections both have zone access. The tag
+                // marks a track you can play, so it follows the track rather
+                // than the map-zone switch.
                 captionTag={
-                  !layout.crowded && isFriend && user.zone_audio_url ? 'zone' : undefined
+                  !layout.crowded && (isFriend || isConnected) && user.zone_audio_url ? 'zone' : undefined
                 }
                 zIndex={Z_FRIEND}
                 onPress={() => openSheet(user)}

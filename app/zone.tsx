@@ -314,14 +314,6 @@ export default function ZoneScreen() {
     );
   }
 
-  async function setFriendsOnly(friendsOnly: boolean) {
-    try {
-      await updatePrivacy({ visibility_zone_audio: friendsOnly ? 'friends' : 'everyone' });
-    } catch {
-      Alert.alert('Could not update', 'Your previous setting is still in effect.');
-    }
-  }
-
   if (loading) {
     return (
       <View style={[styles.root, styles.center]}>
@@ -431,28 +423,19 @@ export default function ZoneScreen() {
             </Pressable>
           )}
 
-          {/* Who can hear it. This is the same setting as Privacy → Zone audio,
-              phrased as the question people actually ask about their zone. */}
+          {/* Who can hear it. Not a toggle: a music zone is never audible or
+              visible to a stranger, whatever this says — only "hidden from
+              everyone" (set in Privacy & safety) changes anything here. */}
           <View style={styles.controlRow}>
             <IconLock size={18} color={colors.t2} />
             <View style={styles.controlText}>
-              <Text style={styles.controlLabel}>Audible to friends only</Text>
+              <Text style={styles.controlLabel}>Audible to connections & friends</Text>
               <Text style={styles.controlHint}>
                 {audience === 'nobody'
                   ? 'Zone audio is hidden from everyone in Privacy & safety.'
-                  : audience === 'friends'
-                    ? 'Strangers still see your zone on the map, they just hear nothing.'
-                    : 'Anyone who walks into your zone can play it.'}
+                  : 'Strangers never see or hear this zone.'}
               </Text>
             </View>
-            <Switch
-              value={audience !== 'everyone'}
-              onValueChange={setFriendsOnly}
-              disabled={audience === 'nobody'}
-              trackColor={{ false: colors.surface2, true: colors.teal }}
-              thumbColor={colors.t1}
-              ios_backgroundColor={colors.surface2}
-            />
           </View>
         </View>
 

@@ -81,6 +81,7 @@ import {
   check as checkPermission,
   openAppSettings,
   refreshPermissions,
+  request as requestPermission,
   usePermissionStore,
   type PermissionState,
 } from '@/services/permissions';
@@ -2061,16 +2062,8 @@ export default function MapScreen() {
   useEffect(() => {
     (async () => {
       // Primed, not cold. The old code fired the system dialog the instant the
-      // map mounted, and then fired the *background* location dialog straight
-      // after it — two unexplained prompts with no explanation between them,
-      // and iOS allows exactly one chance at each.
-      //
-      // Both are still asked here, on first login, but sequenced through the
-      // primer: foreground first, and only once it is granted and the map is
-      // already working does the background one get its own explanation and
-      // its own prompt. A user who says no to either has lost nothing they
-      // had a moment ago, and background is optional everywhere downstream —
-      // `startBackgroundLocationUpdates` is a no-op without it.
+      // map mounted — this sheet explains first so the one shot iOS gives a
+      // cold "Don't Allow" is not spent on a dialog nobody had context for.
       const granted = await ensurePermission('location');
       if (!granted) {
         const info = await checkPermission('location');
@@ -2079,9 +2072,10 @@ export default function MapScreen() {
       }
       setPermState('granted');
       await startWatching();
-      if (await ensurePermission('locationBackground')) {
-        await startBackgroundLocationUpdates();
-      }
+      // Background gets no primer sheet of its own — straight to the OS
+      // dialog once foreground is already granted and the map is working.
+      await requestPermission('locationBackground');
+      await startBackgroundLocationUpdates();
     })();
 
     return () => {

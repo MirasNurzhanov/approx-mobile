@@ -1,4 +1,3 @@
-import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -92,13 +91,7 @@ import { PresenceDot } from '@/components/PresenceDot';
 import { useMotionTrails } from '@/hooks/useMotionTrails';
 import { recordSpeed } from '@/services/ownMotion';
 import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
-import {
-    cachedZonePresets,
-    fmtRadius,
-    loadZonePresets,
-    trackTitle,
-    type ZonePreset,
-} from '@/services/zoneAudio';
+import { fmtRadius, trackTitle } from '@/services/zoneAudio';
 import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
 import {
     getRegion,
@@ -1336,15 +1329,6 @@ function UserSheet({
        regionContains(zoneRegion!, viewerCoords.latitude, viewerCoords.longitude))
     : (distanceM == null || distanceM < musicRadius);
 
-  // Preset names arrive from the API; until they do, the fallback list stands
-  // in and an upload is named after its file either way.
-  const [presets, setPresets] = useState<ZonePreset[]>(cachedZonePresets);
-  useEffect(() => {
-    let alive = true;
-    loadZonePresets().then((list) => { if (alive) setPresets(list); }).catch(() => {});
-    return () => { alive = false; };
-  }, []);
-
   return (
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
@@ -1416,10 +1400,10 @@ function UserSheet({
               // cannot leave the previous one loaded.
               key={zoneUrl}
               url={zoneUrl}
-              // An Apple track knows its own name and artist; a preset and an
-              // upload are still named from the URL, which for Apple's CDN
-              // would be a hash.
-              title={user.zone_track_title || trackTitle(zoneUrl, presets)}
+              // An Apple track knows its own name and artist; an upload is
+              // still named from the URL, which for Apple's CDN would be a
+              // hash.
+              title={user.zone_track_title || trackTitle(zoneUrl)}
               artwork={user.zone_track_artwork}
               startMs={user.zone_track_start_ms ?? 0}
               endMs={user.zone_track_end_ms ?? null}
@@ -1529,7 +1513,6 @@ export default function MapScreen() {
   const COLOR_FRIEND    = colors.blue;
   const COLOR_CONNECTED = colors.orange;
   const COLOR_STRANGER  = colors.teal;
-  useEffect(() => { console.log('[Map] step 1: component mounted'); }, []);
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
@@ -1899,10 +1882,6 @@ export default function MapScreen() {
   // stop on unmount: a friend's track is loaded by the player inside their card
   // and unloaded when that card closes. Walking into a zone is an invitation,
   // not a command to a stranger's phone speaker.
-  //
-  // Only the track *names* are fetched here, once, so a friend's card can say
-  // "Rain" instead of the URL it came from.
-  useEffect(() => { loadZonePresets().catch(() => {}); }, []);
 
   function handleHiSent() {
     fetchFriends();
@@ -1932,7 +1911,7 @@ export default function MapScreen() {
 
   async function reactToStory(storyId: number, reaction: ReactionType) {
     try {
-      const response = await api.post(`/api/stories/${storyId}/react/`, { reaction: reaction });
+      await api.post(`/api/stories/${storyId}/react/`, { reaction });
       const applyReaction = <T extends Story>(s: T): T => {
         if (s.id !== storyId) return s;
         const wasActive = s.user_reaction === reaction;
@@ -1978,7 +1957,6 @@ export default function MapScreen() {
   // login would otherwise never retry (leaving the owner's zone invisible),
   // and changes made in Zone Setup must show up when returning to the map.
   const loadSelf = useCallback(() => {
-    console.log('[Map] step 4: loading self (me/profile/zone)');
     api.get<{ id: number; username: string }>('/api/users/me/')
       .then((r) => setCurrentUserId(r.data.id))
       .catch((e: any) => console.log('[Map] /users/me/ error:', e?.response?.status));
@@ -2035,7 +2013,6 @@ export default function MapScreen() {
       // call only starts the OS task if that already succeeded.
       await startBackgroundLocationUpdates();
       const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
       fixAtRef.current = init.timestamp;
       setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
       recordSpeed(init.coords.speed);
@@ -2683,10 +2660,7 @@ export default function MapScreen() {
             <MeetupMarker
               key={`meetup-${meetup.id}`}
               meetup={meetup}
-              onPress={() => {
-                console.log('[Meetup] marker tapped:', meetup.id);
-                openMeetupSheet(meetup);
-              }}
+              onPress={() => openMeetupSheet(meetup)}
             />
           ))}
         </MapView>

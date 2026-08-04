@@ -217,7 +217,7 @@ export default function ZoneAppleMusicScreen() {
           <Text style={styles.unavailableTitle}>{FAULT_TITLE[fault.code]}</Text>
           <Text style={styles.faultDetail}>{fault.message}</Text>
           <Text style={styles.emptyText}>
-            Your presets and your own uploads still work in the meantime.
+            Your own uploads still work in the meantime.
           </Text>
         </View>
       )}

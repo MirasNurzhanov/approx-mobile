@@ -124,7 +124,12 @@ export function visibilityLabel(club: Club): string {
 export const clubsApi = {
   list:         ()                               => api.get<Club[]>('/api/clubs/'),
   myList:       ()                               => api.get<Club[]>('/api/clubs/?joined=true'),
-  userClubs:    (userId: number)                 => api.get<Club[]>(`/api/clubs/?user=${userId}`),
+  // Somebody *else's* clubs come from their profile — `profile.clubs` on
+  // GET /api/users/profile/<id>/ — and only from there. There used to be a
+  // `userClubs(id)` helper here calling `/api/clubs/?user=<id>`; the list
+  // endpoint has never read a `user` parameter, so it silently ignored the id
+  // and answered with the *caller's* own discovery list instead. The profile
+  // endpoint is the one that applies the club visibility rules per viewer.
   get:          (id: number)                     => api.get<Club>(`/api/clubs/${id}/`),
   members:      (id: number)                     => api.get<ClubMember[]>(`/api/clubs/${id}/members/`),
   create:       (data: FormData)                 => api.post<Club>('/api/clubs/', data, { headers: { 'Content-Type': 'multipart/form-data' } }),

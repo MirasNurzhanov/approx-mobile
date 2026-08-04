@@ -23,8 +23,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     const location = data?.locations?.at(-1);
     if (!location) return;
 
-    console.log('[BG Task] running, checking zones...');
-
     try {
       // Honours the Location sharing setting: paused sends nothing at all,
       // approximate coarsens before transmitting.
@@ -53,7 +51,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
           music_zone_radius?: number; music_zone_separate?: boolean;
         }[]
       >('/api/proximity/nearby/');
-      console.log('[BG Task] nearby users:', nearbyUsers.length);
 
       // "You entered a zone — tap to listen", so this has to agree with what is
       // actually audible. Three rules, all mirroring _trigger_zone_music_alerts
@@ -84,8 +81,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         const earshot = u.music_zone_radius ?? u.zone_radius ?? 500;
         return (u.distance_km ?? Infinity) * 1000 < earshot;
       });
-      console.log('[BG Task] zone found:', zoneUser?.username);
-
       if (zoneUser) {
         const lastNotified = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
         if (lastNotified !== zoneUser.username) {

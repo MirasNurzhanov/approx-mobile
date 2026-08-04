@@ -698,7 +698,6 @@ export default function ClubChatScreen() {
         latitude: propLocation?.lat,
         longitude: propLocation?.lng,
       };
-      console.log('[Proposal] POST body:', JSON.stringify(body));
       await api.post(`/api/clubs/${clubId}/events/`, body);
       closeProposalModal();
     } catch (e: any) {

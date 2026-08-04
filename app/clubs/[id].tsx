@@ -263,7 +263,6 @@ export default function ClubDetailScreen() {
   }
 
   async function handleKick(member: ClubMember) {
-    console.log('[Kick] calling with userId:', member.user.id, 'member object:', JSON.stringify(member));
     try {
       await clubsApi.kick(clubId, member.user.id);
       setMembers((prev) => prev.filter((m) => m.user.id !== member.user.id));

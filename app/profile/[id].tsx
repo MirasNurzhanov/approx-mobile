@@ -96,7 +96,6 @@ export default function UserProfileScreen() {
 
   useEffect(() => {
     const numId = Number(id);
-    console.log('[UserProfile] fetching profile + relationship for id:', numId);
 
     Promise.allSettled([
       api.get<UserProfile>(`/api/users/profile/${numId}/`),
@@ -105,7 +104,6 @@ export default function UserProfileScreen() {
       api.get<{ id: number; relationship?: string }[]>('/api/proximity/nearby/'),
     ]).then(([profileRes, friendsRes, requestsRes, nearbyRes]) => {
       if (profileRes.status === 'fulfilled') {
-        console.log('[UserProfile] profile:', JSON.stringify(profileRes.value.data).slice(0, 300));
         setProfile(profileRes.value.data);
         if (profileRes.value.data.relationship) {
           setRelationship(profileRes.value.data.relationship);
@@ -130,7 +128,6 @@ export default function UserProfileScreen() {
         if (found?.relationship) rel = found.relationship as Relationship;
       }
 
-      console.log('[UserProfile] derived relationship:', rel);
       setRelationship(rel);
     }).finally(() => setLoading(false));
   }, [id]);

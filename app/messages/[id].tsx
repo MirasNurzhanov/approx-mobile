@@ -115,9 +115,8 @@ export default function MessagesScreen() {
 
 
   useEffect(() => {
-    console.log("[Messages] fetching current user profile..")
     api.get<{ id: number | string }>('/api/users/profile/')
-      .then((r) => {console.log("[Messages] User's current id:" , r.data.id) ,  currentUserIdRef.current = Number(r.data.id); })
+      .then((r) => { currentUserIdRef.current = Number(r.data.id); })
       .catch(() => {});
 
     // Presence rides the profile fetch this screen already makes. Refreshed on

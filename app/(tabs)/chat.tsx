@@ -216,10 +216,14 @@ function ClubCard({
       <View style={styles.clubCardBody}>
         <View style={styles.clubCardTop}>
           <Text style={styles.clubCardName} numberOfLines={1}>{club.name}</Text>
-          {club.role && (
+          {/* `my_role`, not `role`: the club list serialises the viewer's own
+              membership under that name (see ClubSerializer.get_my_role). It
+              is absent on a club you have not joined, which is what keeps the
+              badge off the discover list. */}
+          {club.my_role && (
             <View style={styles.clubRoleBadge}>
               <Text style={styles.clubRoleText}>
-                {club.role === 'owner' ? '👑 Owner' : 'Member'}
+                {club.my_role === 'owner' ? '👑 Owner' : 'Member'}
               </Text>
             </View>
           )}

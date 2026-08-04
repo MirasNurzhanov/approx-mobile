@@ -47,7 +47,9 @@
       "Bash(awk 'NR>400' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)",
       "Bash(xargs ls -la)",
       "Bash(ls \"/c/Users/My Account/.vscode/extensions\" 2>/dev/null | grep -iE \"java|gradle|redhat|oracle|microsoft|vscjava\" || echo \"\\(none matched\\)\")",
-      "Read(//c/Users/My Account/.vscode/extensions/**)"
+      "Read(//c/Users/My Account/.vscode/extensions/**)",
+      "Bash(pwd && echo \"---\" && ls -la /Users/mirasnurzhanov/Desktop/ && echo \"---aura-mobile contents---\" && ls -la /Users/mirasnurzhanov/Desktop/aura-mobile)",
+      "Read(//Users/mirasnurzhanov/Desktop/**)"
     ]
   }
 }

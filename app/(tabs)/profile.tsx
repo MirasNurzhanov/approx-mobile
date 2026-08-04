@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { sectionise } from '@/services/interestCategories';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
 import { useAuth } from '@/context/AuthContext';
@@ -51,7 +52,7 @@ interface Profile {
   bio?: string;
   links?: ProfileLink[];
   date_joined?: string;
-  interests?: { icon: string; name: string }[];
+  interests?: { icon: string; name: string; category?: string; category_label?: string }[];
   aura_points?: number;
   profile_picture?: string;
   profession?: string | null;
@@ -116,16 +117,27 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // Mirrors of the state above, updated alongside it, so fetchAll can read
+  // current values without closing over the state itself — closing over it
+  // would give fetchAll a new identity on every fetch, and useFocusEffect
+  // re-runs its effect whenever that identity changes while the screen is
+  // focused, which would turn this into an infinite refetch loop.
+  const profileRef = useRef(profile);
+  const friendCountRef = useRef(friendCount);
+  const connectionCountRef = useRef(connectionCount);
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     const [profileRes, friendsRes] = await Promise.allSettled([
       api.get<Profile>('/api/users/profile/'),
       api.get<FriendList>('/api/friends/list/'),
     ]);
-    const p = profileRes.status === 'fulfilled' ? profileRes.value.data : profile;
-    let fc = friendCount;
-    let cc = connectionCount;
-    if (profileRes.status === 'fulfilled') setProfile(p);
+    const p = profileRes.status === 'fulfilled' ? profileRes.value.data : profileRef.current;
+    let fc = friendCountRef.current;
+    let cc = connectionCountRef.current;
+    if (profileRes.status === 'fulfilled') {
+      setProfile(p);
+      profileRef.current = p;
+    }
     if (friendsRes.status === 'fulfilled') {
       const data = friendsRes.value.data;
       const friendIds = new Set(data.friends.map((f) => f.id));
@@ -133,21 +145,23 @@ export default function ProfileScreen() {
       cc = data.connections.filter((c) => !friendIds.has(c.id)).length;
       setFriendCount(fc);
       setConnectionCount(cc);
+      friendCountRef.current = fc;
+      connectionCountRef.current = cc;
     }
     _cache = { profile: p, friendCount: fc, connectionCount: cc };
-  }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       fetchAll().finally(() => setLoading(false));
-    }, [])
+    }, [fetchAll])
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchAll();
     setRefreshing(false);
-  }, []);
+  }, [fetchAll]);
 
   async function pickImage() {
     // No permission request: the system photo picker runs out of process and
@@ -194,6 +208,7 @@ export default function ProfileScreen() {
   }
 
   const interests = profile?.interests ?? [];
+  const interestSections = sectionise(interests);
 
   const _ageRaw = profile?.date_of_birth
     ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
@@ -277,21 +292,39 @@ export default function ProfileScreen() {
           </View>
         </Card>
 
-        {/* Interests */}
+        {/* Interests, grouped the same way the pickers group them. A profile
+            with thirty picks used to be one undifferentiated wall of chips;
+            the headings are what let someone see at a glance that you are
+            mostly sport, or mostly music. */}
         {interests.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>INTERESTS</Text>
-            <View style={styles.chipWrap}>
-              {interests.map((tag, i) => {
-                const Icon = iconForInterest(tag.name);
-                return (
-                  <View key={i} style={styles.chip}>
-                    <Icon size={14} color={colors.t2} />
-                    <Text style={styles.chipText}>{tag.name}</Text>
+            {interestSections.map((group, index) => (
+              <View
+                key={group.key || 'more'}
+                style={index > 0 ? styles.interestGroup : undefined}
+              >
+                {/* Only worth a heading when there is more than one — a single
+                    group would just be the word "INTERESTS" said twice. */}
+                {interestSections.length > 1 && (
+                  <View style={styles.interestGroupHeader}>
+                    <Ionicons name={group.icon} size={13} color={group.color} />
+                    <Text style={styles.interestGroupLabel}>{group.label}</Text>
                   </View>
-                );
-              })}
-            </View>
+                )}
+                <View style={styles.chipWrap}>
+                  {group.items.map((tag, i) => {
+                    const Icon = iconForInterest(tag.name);
+                    return (
+                      <View key={i} style={styles.chip}>
+                        <Icon size={14} color={colors.t2} />
+                        <Text style={styles.chipText}>{tag.name}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
           </View>
         )}
 
@@ -452,6 +485,20 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // Interests
+  interestGroup: { marginTop: 14 },
+  interestGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  interestGroupLabel: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.t2,
+  },
+
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',

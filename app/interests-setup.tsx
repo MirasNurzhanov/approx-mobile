@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -14,32 +15,44 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { CATEGORY_STYLES, UNGROUPED, type CategoryStyle } from '@/services/interestCategories';
 import { fonts, lightColors as L, withAlpha } from '@/constants/theme';
 
 // ─── Category definitions ─────────────────────────────────────────────────────
-type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+// The nine groups come from the server, on every interest, and their order and
+// membership are its decision — see services/interestCategories. What is added
+// here is where each bubble sits on the canvas, which is nothing but layout.
+//
+// This screen used to define eight categories of its own and sort 681
+// interests into them with a regex over the names. Most of the catalogue fell
+// through to a bucket called "Casual": Sports showed a fraction of its 186
+// entries, and there was no bubble at all for Fitness, Travel or Entertainment.
 
-interface Category {
-  key: string;
-  label: string;
-  icon: IoniconName;
-  color: string;
+interface Category extends CategoryStyle {
   x: number;
   y: number;
   size: number;
 }
 
-const CATEGORIES: Category[] = [
-  { key: 'sports',   label: 'Sports',       icon: 'football-outline',        color: '#E8714A', x: 12,  y: 14,  size: 138 },
-  { key: 'gaming',   label: 'Gaming',       icon: 'game-controller-outline', color: '#8B6FD4', x: 196, y: 40,  size: 112 },
-  { key: 'music',    label: 'Music',        icon: 'musical-notes-outline',   color: '#4D8DFF', x: 44,  y: 168, size: 104 },
-  { key: 'casual',   label: 'Casual',       icon: 'cafe-outline',            color: '#C9932E', x: 200, y: 176, size: 118 },
-  { key: 'food',     label: 'Food & Drink', icon: 'restaurant-outline',      color: '#E0567F', x: 30,  y: 300, size: 126 },
-  { key: 'art',      label: 'Art & Making', icon: 'color-palette-outline',   color: '#12A594', x: 210, y: 314, size: 106 },
-  { key: 'tech',     label: 'Tech',         icon: 'code-slash-outline',      color: '#5EA83C', x: 28,  y: 440, size: 98  },
-  { key: 'outdoors', label: 'Outdoors',     icon: 'leaf-outline',            color: '#E8714A', x: 178, y: 432, size: 122 },
+/** Placement on the 350×580 canvas, in the server's own order. Sizes are
+ *  roughly proportional to how big each group is, so the biggest one is also
+ *  the biggest target. */
+const LAYOUT: { x: number; y: number; size: number }[] = [
+  { x: 8,   y: 6,   size: 140 }, // Sports — the largest group, 186 entries
+  { x: 196, y: 30,  size: 108 }, // Fitness & Wellness
+  { x: 30,  y: 158, size: 110 }, // Music
+  { x: 186, y: 152, size: 128 }, // Arts & Creativity
+  { x: 12,  y: 288, size: 116 }, // Food & Drink
+  { x: 156, y: 300, size: 112 }, // Travel & Outdoors
+  { x: 6,   y: 418, size: 118 }, // Games & Tech
+  { x: 146, y: 428, size: 110 }, // Entertainment & Culture
+  { x: 258, y: 300, size: 92  }, // Lifestyle & Social
 ];
 
+const CATEGORIES: Category[] = CATEGORY_STYLES.map((style, i) => ({
+  ...style,
+  ...LAYOUT[i],
+}));
 
 // ─── Interest type ────────────────────────────────────────────────────────────
 interface Interest {
@@ -47,25 +60,20 @@ interface Interest {
   name: string;
   icon: string;
   category?: string;
-}
-
-// ─── Client-side categorization ───────────────────────────────────────────────
-function categorize(name: string): string {
-  const n = name.toLowerCase();
-  if (/sport|football|basketball|soccer|tennis|swim|run|gym|fitness|yoga|martial|boxing|cycl|volleyball|baseball|hockey/.test(n)) return 'sports';
-  if (/gaming|gamer|esport|video.?game|playstation|xbox|nintendo|rpg|fps|strategy/.test(n)) return 'gaming';
-  if (/music|guitar|piano|drum|sing|dj|rap|hip.?hop|jazz|concert|festival|instrument|songwrit/.test(n)) return 'music';
-  if (/food|cooking|baking|coffee|wine|cocktail|restaurant|recipe|vegan|culinary|drink|beer/.test(n)) return 'food';
-  if (/art|paint|sculpt|draw|photograph|fashion|film|theatre|dance|writ|literature|poetry|novel|cinema/.test(n)) return 'art';
-  if (/tech|programming|coding|software|ai\b|robotics|data|cyber|startup|engineering|developer/.test(n)) return 'tech';
-  if (/outdoor|nature|hiking|camping|surfing|skiing|snowboard|travel|adventure|gardening/.test(n)) return 'outdoors';
-  return 'casual';
+  category_label?: string;
 }
 
 // ─── Float animation config ───────────────────────────────────────────────────
+// Indexed modulo their own length, because how many bubbles there are is now a
+// property of the catalogue rather than a constant — a tenth bubble appears
+// whenever there are ungrouped interests, and reading past the end of these
+// gave it an undefined drift variant and a NaN duration.
 type Variant = 'A' | 'B' | 'C';
 const VARIANTS: Variant[] = ['A', 'B', 'C', 'A', 'B', 'C', 'B', 'A'];
 const DURATIONS           = [7200, 6100, 8000, 6800, 7600, 6400, 8400, 7000];
+
+const variantFor  = (i: number) => VARIANTS[i % VARIANTS.length];
+const durationFor = (i: number) => DURATIONS[i % DURATIONS.length];
 
 // ─── Floating bubble ──────────────────────────────────────────────────────────
 function FloatingBubble({
@@ -81,10 +89,10 @@ function FloatingBubble({
   onPress: () => void;
 }) {
   const anim    = useRef(new Animated.Value(0)).current;
-  const variant = VARIANTS[index];
+  const variant = variantFor(index);
 
   useEffect(() => {
-    const dur = DURATIONS[index];
+    const dur = durationFor(index);
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(anim, {
@@ -197,6 +205,7 @@ export default function InterestsSetupScreen() {
   const [loading, setLoading]               = useState(true);
   const [saving, setSaving]                 = useState(false);
   const [error, setError]                   = useState<string | null>(null);
+  const [query, setQuery]                   = useState('');
 
   useEffect(() => {
     api.get<Interest[]>('/api/interests/')
@@ -207,6 +216,9 @@ export default function InterestsSetupScreen() {
 
   function openCategory(cat: Category) {
     setActiveCategory(cat);
+    // Cleared on entry, so a search left behind in Sports does not make Music
+    // look empty.
+    setQuery('');
     setStep('interests');
   }
 
@@ -227,16 +239,28 @@ export default function InterestsSetupScreen() {
     router.replace('/onboarding-profession');
   }
 
-  // Group interests by category key
+  // Group interests by the category the server gave them. Anything without one
+  // — a custom entry from the retired "Other" flow — collects under "More",
+  // which is only shown when it has something in it.
   const byCategory = useMemo(() => {
     const map = new Map<string, Interest[]>();
     for (const cat of CATEGORIES) map.set(cat.key, []);
+    map.set(UNGROUPED.key, []);
     for (const item of interests) {
-      const key = item.category ?? categorize(item.name);
-      (map.get(key) ?? map.get('casual')!).push(item);
+      const key = item.category ?? '';
+      (map.get(key) ?? map.get(UNGROUPED.key)!).push(item);
     }
     return map;
   }, [interests]);
+
+  /** The bubbles to draw: the nine, plus "More" only if it is not empty. */
+  const bubbles = useMemo<Category[]>(() => {
+    const ungrouped = byCategory.get(UNGROUPED.key) ?? [];
+    if (!ungrouped.length) return CATEGORIES;
+    // Tucked into the gap at the top right rather than given a slot in the
+    // layout, because whether it exists at all depends on the data.
+    return [...CATEGORIES, { ...UNGROUPED, x: 262, y: 6, size: 84 }];
+  }, [byCategory]);
 
   // Selected count per category
   const pickedPerCategory = useMemo(() => {
@@ -252,6 +276,12 @@ export default function InterestsSetupScreen() {
     const catItems  = byCategory.get(activeCategory.key) ?? [];
     const catPicked = pickedPerCategory.get(activeCategory.key) ?? 0;
     const { color }  = activeCategory;
+    // Sports alone is 186 entries. A category that is a long scroll needs a
+    // way through it that is not scrolling.
+    const needle  = query.trim().toLowerCase();
+    const shown   = needle
+      ? catItems.filter((i) => i.name.toLowerCase().includes(needle))
+      : catItems;
 
     return (
       <View style={[s.root, { paddingTop: top }]}>
@@ -280,6 +310,31 @@ export default function InterestsSetupScreen() {
           </View>
         </View>
 
+        <View style={s.searchBar}>
+          <Ionicons name="search" size={17} color={L.t3} />
+          <TextInput
+            style={s.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={`Search ${activeCategory.label.toLowerCase()}…`}
+            placeholderTextColor={L.t3}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel={`Search ${activeCategory.label}`}
+          />
+          {query.length > 0 && (
+            <Pressable
+              onPress={() => setQuery('')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+            >
+              <Ionicons name="close-circle" size={17} color={L.t3} />
+            </Pressable>
+          )}
+        </View>
+
         <ScrollView
           contentContainerStyle={s.chipsContainer}
           showsVerticalScrollIndicator={false}
@@ -287,9 +342,11 @@ export default function InterestsSetupScreen() {
         >
           {catItems.length === 0 ? (
             <Text style={s.emptyText}>No interests in this category yet.</Text>
+          ) : shown.length === 0 ? (
+            <Text style={s.emptyText}>Nothing here matches “{query.trim()}”.</Text>
           ) : (
             <View style={s.chips}>
-              {catItems.map(item => {
+              {shown.map(item => {
                 const sel = selected.has(item.id);
                 return (
                   <Pressable
@@ -357,9 +414,9 @@ export default function InterestsSetupScreen() {
         >
           {/* 350×560 absolute-positioned canvas */}
           <View style={s.canvas}>
-            {CATEGORIES.map((cat, i) => (
+            {bubbles.map((cat, i) => (
               <FloatingBubble
-                key={cat.key}
+                key={cat.key || 'more'}
                 category={cat}
                 index={i}
                 picked={pickedPerCategory.get(cat.key) ?? 0}
@@ -479,6 +536,27 @@ const s = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 13,
     color: '#8C8475',
+  },
+
+  // Search within a category
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E8E4DA',
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 11,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: '#2D2A22',
   },
 
   // Interest chips

@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
 import { blockUser } from '@/services/blocked';
+import { sectionise } from '@/services/interestCategories';
 import { type ClubRole } from '@/services/clubs';
 import { Ionicons } from '@expo/vector-icons';
 import { IconBack, IconMore } from '@/components/ui/icons';
@@ -32,7 +33,7 @@ import type { Presence } from '@/services/presence';
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'hi_received' | 'connected' | 'friend';
 
-interface Interest { icon: string; name: string; }
+interface Interest { icon: string; name: string; category?: string; category_label?: string; }
 
 interface UserProfile {
   id: number;
@@ -314,16 +315,32 @@ export default function UserProfileScreen() {
         </View>
 
         {/* ── Interests ── */}
+        {/* Grouped like everywhere else. On somebody else's profile this is
+            what the list is actually for: "mostly climbing and cycling" reads
+            in a glance where twenty ungrouped chips do not. */}
         {interests.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Interests</Text>
-            <View style={styles.chipWrap}>
-              {interests.map((tag, i) => (
-                <View key={i} style={styles.chip}>
-                  <Text style={styles.chipText}>{tag.name}</Text>
+            {sectionise(interests).map((group, index, all) => (
+              <View
+                key={group.key || 'more'}
+                style={index > 0 ? styles.interestGroup : undefined}
+              >
+                {all.length > 1 && (
+                  <View style={styles.interestGroupHeader}>
+                    <Ionicons name={group.icon} size={13} color={group.color} />
+                    <Text style={styles.interestGroupLabel}>{group.label}</Text>
+                  </View>
+                )}
+                <View style={styles.chipWrap}>
+                  {group.items.map((tag, i) => (
+                    <View key={i} style={styles.chip}>
+                      <Text style={styles.chipText}>{tag.name}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
+              </View>
+            ))}
           </View>
         )}
 
@@ -467,6 +484,20 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   sectionTitle: {
     fontFamily: fonts.body, fontWeight: '700', fontSize: 10,
     letterSpacing: 1.2, textTransform: 'uppercase', color: colors.t3, marginBottom: 12,
+  },
+
+  interestGroup: { marginTop: 14 },
+  interestGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  interestGroupLabel: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.t2,
   },
 
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { sectionise } from '@/services/interestCategories';
 import { Button } from '@/components/ui/Button';
 import { IconBack, InterestChipIcon } from '@/components/ui/icons';
 import { fonts, radius } from '@/constants/theme';
@@ -23,6 +24,8 @@ interface Interest {
   id: number;
   name: string;
   icon: string;
+  category?: string;
+  category_label?: string;
 }
 
 export default function EditInterestsScreen() {
@@ -39,9 +42,18 @@ export default function EditInterestsScreen() {
   const [query, setQuery] = useState('');
 
   const normalizedQuery = query.trim().toLowerCase();
-  const visibleInterests = normalizedQuery
-    ? interests.filter((i) => i.name.toLowerCase().includes(normalizedQuery))
-    : interests;
+  const visibleInterests = useMemo(
+    () =>
+      normalizedQuery
+        ? interests.filter((i) => i.name.toLowerCase().includes(normalizedQuery))
+        : interests,
+    [interests, normalizedQuery],
+  );
+
+  // 681 interests is not a list, it is a wall. Sectioning is what makes it one
+  // — the groups and their order come from the server, so this screen and the
+  // onboarding one agree about what "Sports" contains.
+  const sections = useMemo(() => sectionise(visibleInterests), [visibleInterests]);
 
   async function load() {
     setError(null);
@@ -153,23 +165,51 @@ export default function EditInterestsScreen() {
             {visibleInterests.length === 0 && (
               <Text style={styles.emptyText}>No interests match “{query.trim()}”</Text>
             )}
-            <View style={styles.chips}>
-              {visibleInterests.map((item) => {
-                const sel = selected.has(item.id);
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => toggle(item.id)}
-                    style={[styles.chip, sel && styles.chipSelected]}
-                  >
-                    <InterestChipIcon name={item.name} icon={item.icon} />
-                    <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
-                      {item.name}
+
+            {sections.map((section) => {
+              const picked = section.items.filter((i) => selected.has(i.id)).length;
+              return (
+                <View key={section.key || 'more'} style={styles.section}>
+                  <View style={styles.sectionHeader}>
+                    <View
+                      style={[
+                        styles.sectionIcon,
+                        { backgroundColor: `${section.color}1F` },
+                      ]}
+                    >
+                      <Ionicons name={section.icon} size={15} color={section.color} />
+                    </View>
+                    <Text style={styles.sectionTitle}>{section.label}</Text>
+                    {/* The count of what you have chosen here, not of what is
+                        on offer — the chips below already show that. */}
+                    <Text style={styles.sectionMeta}>
+                      {picked > 0 ? `${picked} / ${section.items.length}` : section.items.length}
                     </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+                  </View>
+
+                  <View style={styles.chips}>
+                    {section.items.map((item) => {
+                      const sel = selected.has(item.id);
+                      return (
+                        <Pressable
+                          key={item.id}
+                          onPress={() => toggle(item.id)}
+                          style={[styles.chip, sel && styles.chipSelected]}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: sel }}
+                          accessibilityLabel={`${item.name}, ${section.label}`}
+                        >
+                          <InterestChipIcon name={item.name} icon={item.icon} />
+                          <Text style={[styles.chipLabel, sel && styles.chipLabelSelected]}>
+                            {item.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })}
           </ScrollView>
         </>
       )}
@@ -261,6 +301,34 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 16,
   },
+
+  section: { marginBottom: 24 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  sectionIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitle: {
+    flex: 1,
+    fontFamily: fonts.display,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.t1,
+  },
+  sectionMeta: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.t3,
+  },
+
   chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',

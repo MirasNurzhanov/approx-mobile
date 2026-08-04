@@ -39,7 +39,14 @@ import {
 } from '@/services/alerts';
 import { NotifRow, RequestRow } from '@/components/alerts/AlertRow';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { clubsApi, type Club } from '@/services/clubs';
+import {
+  clubsApi,
+  fetchMyLocation,
+  UNPLACED,
+  visibilityLabel,
+  type Club,
+  type MyClubLocation,
+} from '@/services/clubs';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -223,6 +230,17 @@ function ClubCard({
         <View style={styles.clubMemberRow}>
           <Ionicons name="people-outline" size={12} color={colors.t3} />
           <Text style={styles.clubMemberCount}>{club.member_count} members</Text>
+          {/* Where the club reaches. Worth a line on the card: a district club
+              and a city club are different offers, and the difference is
+              invisible once you are inside the area either way. */}
+          {visibilityLabel(club) ? (
+            <>
+              <Ionicons name="location-outline" size={12} color={colors.t3} />
+              <Text style={styles.clubMemberCount} numberOfLines={1}>
+                {visibilityLabel(club)}
+              </Text>
+            </>
+          ) : null}
         </View>
       </View>
       {onJoin !== undefined && (
@@ -356,6 +374,10 @@ export default function ChatScreen() {
   const [discoverClubs, setDiscoverClubs] = useState<Club[]>([]);
   const [loadingClubs, setLoadingClubs] = useState(false);
   const [joiningClubId, setJoiningClubId] = useState<number | null>(null);
+  // Discovery only shows clubs scoped to where this user actually is, so when
+  // the server cannot place them the tab has to say so rather than look empty.
+  const [clubPlace, setClubPlace] = useState<MyClubLocation>(UNPLACED);
+  const [refreshingPlace, setRefreshingPlace] = useState(false);
 
   const fetchUnreadBreakdown = useCallback(async () => {
     try {
@@ -426,16 +448,31 @@ export default function ChatScreen() {
   const fetchClubs = useCallback(async () => {
     setLoadingClubs(true);
     try {
-      const [myRes, discoverRes] = await Promise.allSettled([
-        clubsApi.myList(),   // GET /api/clubs/?member=true  — only joined clubs
-        clubsApi.list(),     // GET /api/clubs/              — only unjoined clubs
+      const [myRes, discoverRes, placeRes] = await Promise.allSettled([
+        clubsApi.myList(),   // GET /api/clubs/?joined=true  — only joined clubs
+        clubsApi.list(),     // GET /api/clubs/              — unjoined, and in this area
+        fetchMyLocation(),   // why the discover list looks the way it does
       ]);
       if (myRes.status === 'fulfilled') setMyClubs(myRes.value.data);
       if (discoverRes.status === 'fulfilled') setDiscoverClubs(discoverRes.value.data);
+      if (placeRes.status === 'fulfilled') setClubPlace(placeRes.value);
     } catch {} finally {
       setLoadingClubs(false);
     }
   }, []);
+
+  /** Ask the server to work out where we are properly, upstream and all.
+   *  The cheap lookup on every load answers from stored boundaries; this is the
+   *  one that can place somebody in a city nobody has opened this tab in. */
+  async function retryLocation() {
+    setRefreshingPlace(true);
+    try {
+      setClubPlace(await fetchMyLocation(true));
+      await fetchClubs();
+    } finally {
+      setRefreshingPlace(false);
+    }
+  }
 
   async function handleJoinFromCard(clubId: number) {
     setJoiningClubId(clubId);
@@ -443,7 +480,18 @@ export default function ChatScreen() {
       await clubsApi.join(clubId);
       await fetchClubs();
     } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not join club.');
+      // A 404 here means the list on screen is older than the user's position —
+      // they have walked out of the club's area since it was fetched. Say so,
+      // and reload rather than leaving a card that cannot be joined.
+      if (e?.response?.status === 404) {
+        Alert.alert(
+          'Not available here',
+          'This club is only for people in its area, and you are outside it now.',
+        );
+        await fetchClubs();
+      } else {
+        Alert.alert('Error', e?.response?.data?.detail ?? 'Could not join club.');
+      }
     } finally {
       setJoiningClubId(null);
     }
@@ -811,7 +859,40 @@ export default function ChatScreen() {
                 </>
               )}
 
-              <Text style={styles.clubsSectionLabel}>DISCOVER</Text>
+              <Text style={styles.clubsSectionLabel}>
+                {clubPlace.resolved && clubPlace.city
+                  ? `DISCOVER IN ${clubPlace.city.name.toUpperCase()}`
+                  : 'DISCOVER'}
+              </Text>
+
+              {/* An unplaceable user is not shown an empty list and left to
+                  guess. Clubs are scoped to areas now, so "we cannot tell where
+                  you are" is the answer, and it comes with the fix. */}
+              {!clubPlace.resolved && (
+                <View style={styles.locationNotice}>
+                  <Ionicons name="location-outline" size={18} color={colors.t2} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.locationNoticeText}>
+                      {clubPlace.detail ||
+                        'Aura needs your location to show clubs near you.'}
+                    </Text>
+                    <Pressable
+                      style={styles.locationNoticeBtn}
+                      onPress={retryLocation}
+                      disabled={refreshingPlace}
+                      accessibilityRole="button"
+                      accessibilityLabel="Update my location"
+                    >
+                      {refreshingPlace ? (
+                        <ActivityIndicator color={colors.teal} size="small" />
+                      ) : (
+                        <Text style={styles.locationNoticeBtnText}>Update my location</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
               {discoverClubs.length > 0 ? (
                 discoverClubs.map((club) => (
                   <ClubCard
@@ -823,7 +904,13 @@ export default function ChatScreen() {
                   />
                 ))
               ) : (
-                <Text style={styles.clubsEmptyText}>No clubs to discover yet.</Text>
+                clubPlace.resolved && (
+                  <Text style={styles.clubsEmptyText}>
+                    {clubPlace.city
+                      ? `No clubs in ${clubPlace.city.name} yet. Create the first one.`
+                      : 'No clubs to discover yet.'}
+                  </Text>
+                )
               )}
             </>
           )}
@@ -1106,5 +1193,41 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     textAlign: 'center',
     lineHeight: 21,
     paddingVertical: 24,
+  },
+
+  locationNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 14,
+    marginBottom: 12,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  locationNoticeText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.t2,
+  },
+  locationNoticeBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.m,
+    backgroundColor: colors.tealTint,
+    borderWidth: 1,
+    borderColor: colors.tealLine,
+  },
+  locationNoticeBtnText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.teal,
   },
 });

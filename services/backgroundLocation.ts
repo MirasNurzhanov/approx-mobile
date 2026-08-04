@@ -29,10 +29,14 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     try {
       // Honours the Location sharing setting: paused sends nothing at all,
       // approximate coarsens before transmitting.
-      const sent = await reportLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
+      const sent = await reportLocation(
+        {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        },
+        location.coords.speed,
+        location.coords.accuracy,
+      );
       if (!sent) {
         console.log('[BG Location] sharing paused, nothing sent');
         return;

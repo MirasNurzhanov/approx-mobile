@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,7 +20,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 import { api } from '@/services/api';
-import { clubsApi } from '@/services/clubs';
+import {
+  clubsApi,
+  fetchMyLocation,
+  levelLabel,
+  UNPLACED,
+  type ClubVisibilityLevel,
+  type MyClubLocation,
+} from '@/services/clubs';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -30,6 +37,17 @@ interface Interest {
   name: string;
   icon: string;
 }
+
+/** Widest first, the way the options read down the screen: city at the top as
+ *  the safe default, narrowing as you go. The server sends `available_levels`
+ *  narrowest first, so this is deliberately the other order. */
+const LEVEL_ORDER: ClubVisibilityLevel[] = ['city', 'region', 'district'];
+
+const LEVEL_HINT: Record<ClubVisibilityLevel, string> = {
+  city: 'Anyone in the city can find this club.',
+  region: 'Only people in this part of the city can find it.',
+  district: 'Only people in this district can find it.',
+};
 
 export default function CreateClubScreen() {
   const { colors } = useTheme();
@@ -47,6 +65,40 @@ export default function CreateClubScreen() {
   const [interestQuery, setInterestQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+
+  // ── Where this club will live ──────────────────────────────────────────────
+  // Resolved by the server from the position it already holds. The screen never
+  // sends a place of its own: it shows what the server found, and sends back
+  // only which of the offered levels the creator picked.
+  const [place, setPlace] = useState<MyClubLocation>(UNPLACED);
+  const [loadingPlace, setLoadingPlace] = useState(true);
+  const [level, setLevel] = useState<ClubVisibilityLevel | null>(null);
+
+  const levelOptions = useMemo(
+    () => LEVEL_ORDER.filter((l) => place.available_levels.includes(l)),
+    [place.available_levels],
+  );
+
+  async function loadPlace(refresh = false) {
+    setLoadingPlace(true);
+    // The first load is allowed to go upstream: in a city nobody has opened
+    // this screen in before, that lookup is what puts the boundaries in the
+    // shared cache — and everyone who follows reads them for free.
+    const next = await fetchMyLocation(refresh);
+    setPlace(next);
+    // Default to the widest option, which is the least surprising thing to
+    // create by accident. Anything narrower is a deliberate choice.
+    setLevel((current) =>
+      current && next.available_levels.includes(current)
+        ? current
+        : (next.available_levels.includes('city') ? 'city' : next.available_levels[0] ?? null),
+    );
+    setLoadingPlace(false);
+  }
+
+  useEffect(() => {
+    loadPlace(true);
+  }, []);
 
   // The catalog is hundreds of interests long. Same filter as the two interest
   // screens, so searching means the same thing everywhere it appears.
@@ -92,12 +144,25 @@ export default function CreateClubScreen() {
       Alert.alert('Name required', 'Give your club a name.');
       return;
     }
+    if (!level) {
+      Alert.alert(
+        'Where is this club?',
+        place.detail || 'Aura needs to know where you are before you can create a club.',
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const form = new FormData();
       form.append('name', name.trim());
       if (description.trim()) form.append('description', description.trim());
       if (selectedInterest) form.append('interest_id', String(selectedInterest.id));
+      form.append('visibility_level', level);
+      // The place this screen actually showed. The server ignores it for
+      // scoping — it resolves the creator's position itself — and uses it only
+      // to notice that they have moved since the options were drawn.
+      const shown = place[level]?.id;
+      if (shown) form.append('visibility_place_id', String(shown));
       if (emblemUri) {
         form.append('emblem', {
           uri: emblemUri,
@@ -114,7 +179,14 @@ export default function CreateClubScreen() {
         } as any);
       }, 1200);
     } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create club. Try again.');
+      if (e?.response?.status === 409) {
+        // Moved between opening the picker and pressing create. Re-resolve so
+        // the options describe where they are now, and let them look again.
+        Alert.alert('You have moved', e.response.data?.detail ?? 'Check the area and try again.');
+        loadPlace(true);
+      } else {
+        Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create club. Try again.');
+      }
       setSubmitting(false);
     }
   }
@@ -190,6 +262,82 @@ export default function CreateClubScreen() {
             <Ionicons name="chevron-down" size={16} color={colors.t3} />
           </Pressable>
 
+          {/* Visibility */}
+          <Text style={styles.label}>Group visibility <Text style={styles.required}>*</Text></Text>
+
+          {loadingPlace ? (
+            <View style={styles.placeCard}>
+              <ActivityIndicator color={colors.teal} size="small" />
+              <Text style={styles.placeHint}>Working out where you are…</Text>
+            </View>
+          ) : !place.resolved || levelOptions.length === 0 ? (
+            <View style={styles.placeCard}>
+              <Ionicons name="location-outline" size={18} color={colors.t3} />
+              <Text style={styles.placeHint}>
+                {place.detail ||
+                  'Aura could not work out which area you are in, so a club cannot be created here yet.'}
+              </Text>
+              <Pressable
+                style={styles.retryBtn}
+                onPress={() => loadPlace(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Check my location again"
+              >
+                <Text style={styles.retryBtnText}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <View style={styles.placeCard}>
+                <Text style={styles.placeCaption}>Current location</Text>
+                {(['city', 'region', 'district'] as ClubVisibilityLevel[]).map((tier) =>
+                  place[tier] ? (
+                    <Text key={tier} style={styles.placeLine}>
+                      <Text style={styles.placeTier}>
+                        {tier[0].toUpperCase() + tier.slice(1)}:{' '}
+                      </Text>
+                      {place[tier]!.name}
+                    </Text>
+                  ) : null,
+                )}
+              </View>
+
+              {levelOptions.map((option) => {
+                const selected = level === option;
+                return (
+                  <Pressable
+                    key={option}
+                    style={[styles.levelRow, selected && styles.levelRowActive]}
+                    onPress={() => setLevel(option)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={levelLabel(option, place)}
+                    accessibilityHint={LEVEL_HINT[option]}
+                  >
+                    <Ionicons
+                      name={selected ? 'radio-button-on' : 'radio-button-off'}
+                      size={20}
+                      color={selected ? colors.teal : colors.t3}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.levelName, selected && styles.levelNameActive]}>
+                        {levelLabel(option, place)}
+                      </Text>
+                      <Text style={styles.levelHint}>{LEVEL_HINT[option]}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+
+              {/* Said once, plainly: this is not editable later, and it is the
+                  thing people get wrong about a scoped club. */}
+              <Text style={styles.levelFootnote}>
+                People outside the area you pick will not see this club. A club
+                never reaches beyond its city.
+              </Text>
+            </>
+          )}
+
           {/* Submit / success */}
           {success ? (
             <View style={styles.successBanner}>
@@ -197,9 +345,11 @@ export default function CreateClubScreen() {
             </View>
           ) : (
             <Pressable
-              style={[styles.createBtn, submitting && styles.createBtnOff]}
+              style={[styles.createBtn, (submitting || !level) && styles.createBtnOff]}
               onPress={handleCreate}
-              disabled={submitting}
+              disabled={submitting || !level}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: submitting || !level }}
             >
               {submitting
                 ? <ActivityIndicator color={colors.bg} size="small" />
@@ -354,6 +504,66 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   selectorValue: { fontFamily: fonts.body, fontSize: 15, color: colors.t1 },
   selectorPlaceholder: { fontFamily: fonts.body, fontSize: 15, color: colors.t3 },
+
+  // Visibility
+  placeCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.m,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    gap: 6,
+    marginBottom: 12,
+  },
+  placeCaption: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.6,
+    color: colors.t3,
+    textTransform: 'uppercase',
+  },
+  placeLine: { fontFamily: fonts.body, fontSize: 14, color: colors.t1 },
+  placeTier: { color: colors.t3 },
+  placeHint: { fontFamily: fonts.body, fontSize: 13, color: colors.t2, lineHeight: 19 },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.m,
+    backgroundColor: colors.tealTint,
+    borderWidth: 1,
+    borderColor: colors.tealLine,
+  },
+  retryBtnText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.teal },
+
+  levelRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    // 44pt minimum touch target, which the two lines of text clear on their
+    // own; the padding is what keeps a one-line row from falling short.
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginBottom: 8,
+  },
+  levelRowActive: { borderColor: colors.teal, backgroundColor: colors.tealTint },
+  levelName: { fontFamily: fonts.body, fontSize: 15, color: colors.t1 },
+  levelNameActive: { fontWeight: '700', color: colors.teal },
+  levelHint: { fontFamily: fonts.body, fontSize: 12, color: colors.t2, marginTop: 2 },
+  levelFootnote: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.t2,
+    lineHeight: 17,
+    marginTop: 4,
+  },
 
   createBtn: {
     marginTop: 36,

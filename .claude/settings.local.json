@@ -45,7 +45,9 @@
       "Bash(sed -n '190,240p' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)",
       "Bash(sed -n '338,400p' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)",
       "Bash(awk 'NR>400' /Users/mirasnurzhanov/Desktop/aura-mobile/app/clubs/\\\\[id\\\\]/chat.tsx)",
-      "Bash(xargs ls -la)"
+      "Bash(xargs ls -la)",
+      "Bash(ls \"/c/Users/My Account/.vscode/extensions\" 2>/dev/null | grep -iE \"java|gradle|redhat|oracle|microsoft|vscjava\" || echo \"\\(none matched\\)\")",
+      "Read(//c/Users/My Account/.vscode/extensions/**)"
     ]
   }
 }

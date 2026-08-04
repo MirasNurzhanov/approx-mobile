@@ -17,7 +17,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
-import { clubsApi, type Club, type ClubMember, type ClubRole } from '@/services/clubs';
+import {
+  clubsApi,
+  visibilityLabel,
+  type Club,
+  type ClubMember,
+  type ClubRole,
+} from '@/services/clubs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { fonts, radius } from '@/constants/theme';
@@ -89,6 +95,10 @@ export default function ClubDetailScreen() {
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Set when the club exists as far as this screen knows but the server will
+   *  not serve it from where the user is standing. Distinct from `!club`,
+   *  which is also what a genuinely missing club looks like. */
+  const [unavailable, setUnavailable] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actioning, setActioning] = useState(false);
 
@@ -122,7 +132,22 @@ export default function ClubDetailScreen() {
     const meId = meRes.status === 'fulfilled' ? meRes.value.data.id : null;
     if (meId) setCurrentUserId(meId);
 
+    if (clubRes.status === 'rejected') {
+      // A 404 here is usually not a deleted club: it is a club scoped to an
+      // area this user has left — or one they opened from a list fetched
+      // before they moved. The server tells the two apart only by whether it
+      // could place the user at all, and that is what `location_status` is.
+      const status = (clubRes.reason as any)?.response?.data?.location_status;
+      setUnavailable(
+        status
+          ? (clubRes.reason as any).response.data.detail ||
+            'Aura needs your location before it can open clubs near you.'
+          : 'This club is not available where you are.',
+      );
+    }
+
     if (clubRes.status === 'fulfilled') {
+      setUnavailable(null);
       let clubData = clubRes.value.data;
       if (meId && !clubData.my_role && !clubData.is_member) {
         const myMembership = fetchedMembers.find((m) => Number(m.user.id) === Number(meId));
@@ -328,7 +353,7 @@ export default function ClubDetailScreen() {
   if (!club) {
     return (
       <View style={[styles.root, styles.center, { paddingTop: top }]}>
-        <Text style={styles.errorText}>Club not found.</Text>
+        <Text style={styles.errorText}>{unavailable ?? 'Club not found.'}</Text>
         <Pressable onPress={() => router.back()} style={styles.backLink}>
           <Text style={styles.backLinkText}>Go back</Text>
         </Pressable>
@@ -386,6 +411,15 @@ export default function ClubDetailScreen() {
               <Ionicons name="people-outline" size={13} color={colors.t3} />
               <Text style={styles.memberCountText}>{members.length || club.member_count}</Text>
             </View>
+            {/* Where this club can be found. Members keep their club wherever
+                they go, so this is information rather than a warning — but a
+                member who wonders why nobody new turns up deserves to see it. */}
+            {visibilityLabel(club) ? (
+              <View style={styles.memberCountBadge}>
+                <Ionicons name="location-outline" size={13} color={colors.t3} />
+                <Text style={styles.memberCountText}>{visibilityLabel(club)}</Text>
+              </View>
+            ) : null}
           </View>
 
           {myRole && (

@@ -630,8 +630,22 @@ function SelfMarker({ coordinate, uri, username }: {
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
 
+  // A marker freezes its bitmap the instant tracking stops, so it must never
+  // stop before the view underneath has been drawn once. With no profile
+  // picture to wait on, `imageReady` is true from the very first render — the
+  // raster froze on an unmeasured view and the halo came back blank, which
+  // looks exactly like the marker having vanished. The 400ms settle is the
+  // same one DotMarker and ClusterMarker already use, and it re-arms whenever
+  // the marker is rebuilt rather than only on mount.
+  const [settling, setSettling] = useState(true);
+  useEffect(() => {
+    setSettling(true);
+    const t = setTimeout(() => setSettling(false), 400);
+    return () => clearTimeout(t);
+  }, [uri, username]);
+
   return (
-    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={!imageReady}>
+    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={settling || !imageReady}>
       <View style={styles.selfHalo}>
         <View style={styles.selfCore}>
           {uri && !imageFailed ? (
@@ -1533,6 +1547,10 @@ export default function MapScreen() {
   /** Latest platform speed estimate, in m/s; null when it has none. A ref, not
    * state — it changes on every fix and only the next poll reads it. */
   const speedRef           = useRef<number | null>(null);
+  /** Radius the platform puts on the latest fix, in metres. Rides the same
+   * report as the speed; the server needs it to decide whether this position
+   * is precise enough to place the user in a district. */
+  const accuracyRef        = useRef<number | null>(null);
   const followingRef       = useRef(false);
   const watchRef           = useRef<Location.LocationSubscription | null>(null);
   const startingWatchRef   = useRef(false);
@@ -1672,6 +1690,19 @@ export default function MapScreen() {
     return outline ? ringsForDisplay(outline) : [];
   }, [selfZone, regionOutlines]);
 
+  /** How wide to draw the owner's own zone circle, or 0 for "draw nothing".
+   *
+   * Zero rather than "don't render the Circle": the switch must not add or
+   * remove a child of the MapView. See the note at the render site — turning
+   * the zone off was taking the owner's own marker off the map with it. */
+  const selfZoneCircleRadius = useMemo(() => {
+    if (!selfZone?.zone_active) return 0;
+    // In region mode the polygons are the zone; a circle as well would be a
+    // second, wrong claim about where it reaches.
+    if (selfZone.zone_mode === 'region' && selfZone.zone_region_id) return 0;
+    return selfZone.zone_radius > 0 ? selfZone.zone_radius : 0;
+  }, [selfZone]);
+
   /** Set once the viewer is standing where the basemap disagrees with GPS.
    *
    * Google serves GCJ-02 tiles inside mainland China while everything Aura
@@ -1716,6 +1747,13 @@ export default function MapScreen() {
     // constrain anything: this rule exists to stop a marker being flung across
     // a boundary the eye can see, and an undrawn circle has no such boundary.
     // Their music zones are drawn, and still do.
+    //
+    // Every music zone is listed here, including the ones `visibleMusicZones`
+    // ends up dropping because their owner was counted rather than drawn.
+    // Filtering by that would be circular — it is derived from `markerLayout`,
+    // which is derived from this — and it would buy nothing: a counted pile
+    // skips the fan entirely, so the constraint it would have imposed is never
+    // consulted for the person whose ring went away.
     for (const u of visibleNearby) {
       if (u.latitude == null || u.longitude == null) continue;
       if (!u.music_zone_separate || !(u.music_zone_radius ?? 0)) continue;
@@ -1734,6 +1772,9 @@ export default function MapScreen() {
     // that somebody's music reached here, but not whose.
     const zones: {
       key: string;
+      /** Whose marker this ring belongs to, in `markerLayout.placed` terms —
+       *  so a ring can be dropped when its owner is not on the map. */
+      markerKey: string;
       center: GeoPoint;
       radius: number;
       mine?: boolean;
@@ -1748,6 +1789,7 @@ export default function MapScreen() {
     ) {
       zones.push({
         key: 'music-self',
+        markerKey: SELF_KEY,
         center: displayCoords,
         radius: selfZone.music_zone_radius,
         mine: true,
@@ -1777,6 +1819,7 @@ export default function MapScreen() {
       if (u.zone_mode === 'region' && !u.music_zone_separate) continue;
       zones.push({
         key: `music-${u.id}`,
+        markerKey: `u-${u.id}`,
         center: { latitude: u.latitude, longitude: u.longitude },
         radius: u.music_zone_radius!,
         // Only friends are ever drawn here — the server withholds
@@ -1827,6 +1870,28 @@ export default function MapScreen() {
     (key: string, fallback: GeoPoint): GeoPoint =>
       markerLayout.placed.get(key)?.position ?? fallback,
     [markerLayout],
+  );
+
+  /**
+   * The music zones actually drawn: only those whose owner is on the map.
+   *
+   * A ring outlives its owner otherwise. Once zoomed out far enough that a pile
+   * is counted rather than fanned, its members are deliberately not drawn —
+   * but their zones are real geography and kept their true size and place, so
+   * the map was left with circles round nobody, labelled with the @name of
+   * someone who was no longer there. That is the state that read as people
+   * having vanished out of their own zones.
+   *
+   * Strictly "not on the map", not "far out" — a zone disappears exactly when
+   * the person it belongs to does, at whatever zoom that happens, and comes
+   * back with them.
+   *
+   * The owner is exempt: they are never counted and never leave the map, and
+   * before the viewport has been measured `placed` is empty for everyone.
+   */
+  const visibleMusicZones = useMemo(
+    () => musicZones.filter((z) => z.mine || markerLayout.placed.has(z.markerKey)),
+    [musicZones, markerLayout],
   );
 
   // Nearby people used to generate alerts from here — "@miras is nearby ·
@@ -2017,6 +2082,10 @@ export default function MapScreen() {
           // changes on every fix and nothing renders from it directly, so
           // setting state here would re-render the whole map for nothing.
           speedRef.current = loc.coords.speed ?? null;
+          // Same reasoning as speed, for the same ride-along: the server needs
+          // to know how well this fix is known before it will place the user
+          // in a district. Not rendered from, so not state.
+          accuracyRef.current = loc.coords.accuracy ?? null;
           recordSpeed(loc.coords.speed);
         },
       );
@@ -2069,7 +2138,11 @@ export default function MapScreen() {
       // Honours the Location sharing setting; sends nothing when paused.
       // Speed rides along on the same request — the server buckets it into a
       // coarse class and never stores the figure itself.
-      reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current),
+      reportLocation(
+        { latitude: c.latitude, longitude: c.longitude },
+        speedRef.current,
+        accuracyRef.current,
+      ),
       api.get<NearbyUser[]>('/api/proximity/nearby/'),
     ]);
 
@@ -2448,7 +2521,7 @@ export default function MapScreen() {
               same colour those people's markers already use, so taking the hue
               from `colors` fixes the contrast and makes the ring match the dots
               it belongs to. Dark mode is unchanged. */}
-          {musicZones.map(({ key, center, radius, color }) => (
+          {visibleMusicZones.map(({ key, center, radius, color }) => (
             <Circle
               key={key}
               center={center}
@@ -2459,30 +2532,44 @@ export default function MapScreen() {
             />
           ))}
 
-          {/* Own zone.
+          {/* Own zone, region shape.
               One polygon per *piece*, not per ring: a region straddling the
               ±180 meridian is cut in two there, so it draws as the island group
               it is instead of as a band stretched around the planet. Regions
-              that do not cross come back as a single piece, unchanged. */}
-          {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
-            ? selfZoneRings.map((piece, i) => (
-                <Polygon
-                  key={`self-zone-${i}`}
-                  coordinates={piece}
-                  fillColor={withAlpha(colors.purple, 0.05)}
-                  strokeColor={withAlpha(colors.purple, 0.35)}
-                  strokeWidth={1.5}
-                />
-              ))
-            : selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
-              <Circle
-                center={displayCoords}
-                radius={selfZone.zone_radius}
-                fillColor={withAlpha(colors.purple, 0.07)}
-                strokeColor={withAlpha(colors.purple, 0.35)}
-                strokeWidth={1.5}
-              />
-            )}
+              that do not cross come back as a single piece, unchanged.
+              `selfZoneRings` is already empty unless the zone is switched on
+              and in region mode, so the switch needs no test of its own. */}
+          {selfZoneRings.map((piece, i) => (
+            <Polygon
+              key={`self-zone-${i}`}
+              coordinates={piece}
+              fillColor={withAlpha(colors.purple, 0.05)}
+              strokeColor={withAlpha(colors.purple, 0.35)}
+              strokeWidth={1.5}
+            />
+          ))}
+
+          {/* Own zone, radius shape — and the one child on this map that is
+              mounted whether or not it draws anything.
+              This used to be `zone_active && <Circle/>`, so switching the zone
+              off *unmounted a child of the MapView*. Android's MapView keeps
+              every overlay and every marker in one flat `features` list and
+              removes them strictly by index (MapManager.removeViewAt →
+              MapView.removeFeatureAt), so a child disappearing from the middle
+              of that list takes something else out with it — which is why
+              turning the zone off deleted the owner's own avatar and left the
+              circle sitting there.
+              Nothing is added or removed now: the switch only changes a radius
+              on a feature that is always there, and a zero-radius circle draws
+              nothing. Colours go transparent with it so a stroke rounding up to
+              a pixel cannot leave a dot behind at your feet. */}
+          <Circle
+            center={displayCoords}
+            radius={selfZoneCircleRadius}
+            fillColor={selfZoneCircleRadius > 0 ? withAlpha(colors.purple, 0.07) : 'transparent'}
+            strokeColor={selfZoneCircleRadius > 0 ? withAlpha(colors.purple, 0.35) : 'transparent'}
+            strokeWidth={selfZoneCircleRadius > 0 ? 1.5 : 0}
+          />
 
           {/* The chip that says which ring is which — literally, now: a
               friend's ring is labelled with their @name and drawn in their own
@@ -2491,7 +2578,7 @@ export default function MapScreen() {
               them, and skipped when the ring is too small on screen for a label
               to mean anything. Your own is included: where your music stops is
               the one thing you cannot check by listening. */}
-          {musicZones.filter((z) => musicBadgeVisible(z.radius)).map((z) => (
+          {visibleMusicZones.filter((z) => musicBadgeVisible(z.radius)).map((z) => (
             <MusicZoneBadge
               key={`${z.key}-badge`}
               center={z.center}
@@ -2613,9 +2700,12 @@ export default function MapScreen() {
             />
           )}
 
-          {/* Piles that could not be fanned apart without moving someone too far
-              — which is what zooming out does to a pixel-sized fan. A number
-              instead, and a tap to go in and see who. */}
+          {/* Piles too spread out to fan without drawing people hundreds of
+              metres from where they stand — which is what zooming far out does
+              to a pixel-sized fan. A number where they actually are, and a tap
+              to go in and see who.
+              Only past `FAN_MAX_M`, so this is a zoomed-way-out state rather
+              than something that happens the moment two people are close. */}
           {markerLayout.clusters.filter((c) => isDrawable(c.position)).map((cluster) => (
             <ClusterMarker
               key={cluster.key}

@@ -337,8 +337,13 @@ export function Speedometer() {
                   key={i}
                   d={sectorPath(s.start, s.end)}
                   fill={i === activeIdx ? colors.teal : colors.surface}
-                  stroke="#000000"
-                  strokeWidth={2}
+                  // Used to be a flat "#000000" at 2px — a hard black ring
+                  // around every wedge on top of the gap that already
+                  // separates them, and it didn't soften for light mode. The
+                  // same border colour every other card and divider in the
+                  // app already uses reads as a seam, not a cutout.
+                  stroke={colors.border}
+                  strokeWidth={1}
                 />
               ))}
 

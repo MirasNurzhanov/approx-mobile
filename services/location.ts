@@ -67,13 +67,20 @@ export async function prepareCoordinates(coords: Coordinates): Promise<Coordinat
 export async function reportLocation(
   coords: Coordinates,
   speed?: number | null,
+  accuracy?: number | null,
 ): Promise<boolean> {
   const payload = await prepareCoordinates(coords);
   if (!payload) return false;
   // Absent rather than null when there is no estimate: the server treats a
   // missing speed as "no new information" and leaves the previous class alone,
   // which is the honest reading of a fix that could not measure it.
-  const body = speed == null || speed < 0 ? payload : { ...payload, speed };
+  const body: Record<string, unknown> = { ...payload };
+  if (speed != null && speed >= 0) body.speed = speed;
+  // How well the phone knows where it is. Unlike speed this is stored, because
+  // club visibility turns on which district somebody is standing in and a fix
+  // with a two-kilometre radius cannot answer that. Sent at full precision
+  // even on Approximate sharing: it says nothing about *where* they are.
+  if (accuracy != null && accuracy >= 0) body.accuracy = accuracy;
   await api.patch('/api/proximity/location/', body);
   return true;
 }

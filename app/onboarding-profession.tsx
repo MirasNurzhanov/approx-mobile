@@ -26,7 +26,7 @@ export default function OnboardingProfessionScreen() {
   const [saving, setSaving] = useState(false);
 
   function goToMap() {
-    router.replace('/(tabs)/map');
+    router.replace('/onboarding-nationality');
   }
 
   async function handleContinue() {

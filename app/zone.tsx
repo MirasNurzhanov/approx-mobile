@@ -354,17 +354,22 @@ export default function ZoneScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Adding and removing the zone lives in Settings → Zone on the map,
-            and only there. It was a card at the top of this screen for a while,
-            which meant two controls for one piece of state on two screens one
-            tap apart. This screen is the music now; the line below is the one
-            thing it still has to say about the zone, because a track nobody
-            can hear needs a reason. */}
-        {!active && (
+            and only there. This screen is the music.
+
+            There is deliberately no "your zone is off, so nobody can hear this"
+            note any more, because it is no longer true: the map switch removes
+            the circle drawn around you and leaves the sound alone. What silences
+            a track is clearing it, right here. When earshot is inherited rather
+            than separate the zone's radius is still the distance it carries —
+            that is a number, not an on/off — so the line below says which
+            distance is in force instead. */}
+        {!active && !musicSeparate && audioUrl && (
           <View style={styles.offNote}>
             <IconInfo size={16} color={colors.t2} />
             <Text style={styles.offNoteText}>
-              Your zone is off, so nobody can hear this. Turn it back on in
-              Settings → Zone on the map.
+              Your zone isn’t shown on the map, but this still plays for anyone
+              within {fmtRadius(earshot)}. Give the music its own range below to
+              set that separately.
             </Text>
           </View>
         )}
@@ -382,11 +387,9 @@ export default function ZoneScreen() {
               title={title ?? 'Zone audio'}
               artwork={zone.zone_apple_artwork}
               subtitle={
-                !active
-                  ? 'Preview only — your zone is off'
-                  : inheritsRegion
-                    ? 'Loops for anyone inside your zone'
-                    : `Loops for anyone within ${fmtRadius(earshot)}`
+                inheritsRegion
+                  ? 'Loops for anyone inside your zone'
+                  : `Loops for anyone within ${fmtRadius(earshot)}`
               }
               startMs={zone.zone_track_start_ms ?? 0}
               endMs={zone.zone_track_end_ms ?? null}

@@ -410,7 +410,13 @@ export default function SettingsScreen() {
             {/* The zone is the circle that puts you on the map, not the music
                 that plays in it — this switch adds and removes the zone
                 itself. It was labelled "Sound zone", which made turning it off
-                look like a way to mute a track. */}
+                look like a way to mute a track.
+
+                It used to *be* a way to mute a track: everything about the
+                music zone was gated on this flag, so removing the circle also
+                stopped friends hearing a song and stopped the earshot alerts.
+                The two are separate now. Music is switched off by clearing the
+                track in Zone Music. */}
             <SettingsRow
               icon={IconLocate}
               label="Zone on the map"

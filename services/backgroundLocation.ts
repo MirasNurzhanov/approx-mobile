@@ -46,20 +46,41 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         {
           id: number; username: string; zone_active?: boolean; zone_radius?: number;
           zone_mode?: 'radius' | 'region'; distance_km?: number;
+          zone_audio_url?: string | null;
+          music_zone_radius?: number; music_zone_separate?: boolean;
         }[]
       >('/api/proximity/nearby/');
       console.log('[BG Task] nearby users:', nearbyUsers.length);
 
-      // Region zones are deliberately excluded. "You entered a zone" is worth
-      // interrupting someone for because walking into a 500m circle is an
-      // event; being in the same city as a friend is the standing state of
-      // most friendships, so the same notification would fire on arrival and
-      // then again for every friend who lives there. Region zones are still
-      // fully live on the map and in the player — they just do not push.
-      const zoneUser = nearbyUsers.find(
-        (u) => u.zone_active && u.zone_mode !== 'region' &&
-          (u.distance_km ?? Infinity) * 1000 < (u.zone_radius ?? 500),
-      );
+      // "You entered a zone — tap to listen", so this has to agree with what is
+      // actually audible. Three rules, all mirroring _trigger_zone_music_alerts
+      // on the server, because a push that fires on different terms to the
+      // server's own alert is two features disagreeing about one event.
+      const zoneUser = nearbyUsers.find((u) => {
+        // 1. There must be something to listen to. Not `zone_active` — that
+        //    switch removes the circle drawn around someone on the map, which
+        //    is a different question. The server only sends `zone_audio_url`
+        //    to viewers allowed to hear it, so its presence already means both
+        //    "there is music" and "you may play it".
+        if (!u.zone_audio_url) return false;
+
+        // 2. A region zone is a city border, not a listening range, and its
+        //    owner never chose it as one. Walking into a 500m circle is an
+        //    event; being in the same city as a friend is the standing state
+        //    of most friendships, and pushing on it would fire for every
+        //    friend who lives there. Giving the music its own range is exactly
+        //    how someone in region mode opts back in — that range is a circle.
+        if (u.zone_mode === 'region' && !u.music_zone_separate) return false;
+
+        // 3. Earshot, not the zone. `music_zone_radius` arrives already
+        //    resolved — the server sends `music_radius_m`, which is the
+        //    separate dial or the zone's own radius inherited — so this is the
+        //    distance the track really carries. Comparing against
+        //    `zone_radius` fired at the wrong distance in both directions for
+        //    anyone who had separated the two.
+        const earshot = u.music_zone_radius ?? u.zone_radius ?? 500;
+        return (u.distance_km ?? Infinity) * 1000 < earshot;
+      });
       console.log('[BG Task] zone found:', zoneUser?.username);
 
       if (zoneUser) {

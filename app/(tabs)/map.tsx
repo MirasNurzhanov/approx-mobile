@@ -53,7 +53,20 @@ import {
     type IconComponent,
 } from '@/components/ui/icons';
 import { ZonePlayer } from '@/components/ZonePlayer';
-import { fonts, radius, type } from '@/constants/theme';
+import { mapStyleFor } from '@/constants/mapStyle';
+import {
+    CAPTION_GAP,
+    CAPTION_H,
+    layoutMarkers,
+    offsetByMeters,
+    type FanInput,
+    M_PER_DEG,
+    SELF_KEY,
+    type GeoPoint,
+    type MarkerLayout,
+    type ZoneArea,
+} from '@/services/markerLayout';
+import { fonts, radius, type, withAlpha, zoneRingColor } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
@@ -83,10 +96,11 @@ import {
     trackTitle,
     type ZonePreset,
 } from '@/services/zoneAudio';
+import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
 import {
     getRegion,
     regionContains,
-    toLatLng,
+    ringsForDisplay,
     type Region as ZoneRegion,
     type ZoneMode,
 } from '@/services/zoneArea';
@@ -195,10 +209,14 @@ const DOT_HALO = 30;
  *  core has to hold a 13pt icon and its ring, not a 14pt point. */
 const DOT_HALO_ICON = 38;
 
-/** Name plate under a marker. Shared by the avatar markers and by the stranger
- *  dots, which now carry the interest that put them on your map. */
-const CAPTION_GAP = 5;
-const CAPTION_H = 17;
+/** Avatar URLs that have decoded at least once this session.
+ *
+ * Module-level on purpose: it has to outlive the markers themselves, because
+ * the whole point is surviving an unmount. Grows with the number of distinct
+ * people seen on one run of the app — a few hundred strings at worst — and is
+ * discarded with the process. */
+const loadedAvatars = new Set<string>();
+
 
 
 /**
@@ -211,6 +229,9 @@ const CAPTION_H = 17;
  * two apart. You always know where you are; the map is for everyone else.
  */
 const Z_SELF = 1;
+//: Above the circles it labels, below every person on the map — a label for a
+//: zone must never be the thing covering someone standing in it.
+const Z_MUSIC = 2;
 const Z_STRANGER = 4;
 const Z_FRIEND = 5;
 /** Above the people it stands in for: while a pile is collapsed, the badge is
@@ -231,28 +252,6 @@ const STORY_POLL_MS      = 10_000;
 /** How still the camera must be before the marker layout reacts to a new zoom. */
 const ZOOM_SETTLE_MS     = 220;
 
-// Neutral dark map per the redesign: tonal grays only, muted labels, no accent color.
-const DARK_MAP_STYLE = [
-  { elementType: 'geometry',                    stylers: [{ color: '#0E0E11' }] },
-  { elementType: 'labels.text.fill',            stylers: [{ color: '#5E5E68' }] },
-  { elementType: 'labels.text.stroke',          stylers: [{ color: '#0A0A0B' }] },
-  { featureType: 'road', elementType: 'geometry',              stylers: [{ color: '#1A1A20' }] },
-  { featureType: 'road', elementType: 'geometry.stroke',       stylers: [{ color: '#16161B' }] },
-  { featureType: 'road', elementType: 'labels.text.fill',      stylers: [{ color: '#5E5E68' }] },
-  { featureType: 'road.highway', elementType: 'geometry',      stylers: [{ color: '#1A1A20' }] },
-  { featureType: 'water', elementType: 'geometry',             stylers: [{ color: '#0A0A0D' }] },
-  { featureType: 'water', elementType: 'labels.text.fill',     stylers: [{ color: '#5E5E68' }] },
-  { featureType: 'poi', elementType: 'geometry',               stylers: [{ color: '#101312' }] },
-  { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.business', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', elementType: 'geometry',           stylers: [{ color: '#16161B' }] },
-  { featureType: 'administrative', elementType: 'geometry',         stylers: [{ color: '#1A1A20' }] },
-  { featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{ color: '#5E5E68' }] },
-];
-const LIGHT_MAP_STYLE = [
-  { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi.business', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-];
 /** How far the sheet travels to get off screen — not its height, which sizes
  *  to content. Raised from 400 when the zone player moved into the card: a
  *  friend broadcasting a track makes the tallest card the sheet holds, and a
@@ -309,50 +308,6 @@ function fmtTimeLeft(expiresAt: string): string {
   return h > 0 ? `${h}h ${m}m remaining` : `${m}m remaining`;
 }
 
-// ─── Overlapping markers ──────────────────────────────────────────────────────
-/**
- * People standing together are, on the map, one marker with the others hidden
- * underneath it — and because the owner's marker is drawn *below* everyone
- * else's on purpose (see Z_SELF), the one that disappears is you.
- *
- * Neither draw order nor marker size can fix that: at the same coordinate,
- * something has to be on top. So markers that collide on screen are fanned out
- * around the spot they share, and a leader line runs from each one back to it.
- * The fan is measured in pixels, not metres, so it separates by the same amount
- * at every zoom — and the lines are what keep it honest, since the marker is
- * then a few metres from where its owner actually is.
- *
- * Only markers move. Zones, the approximate-location haze and motion trails are
- * real geography and stay exactly where they are.
- */
-const M_PER_DEG = 111_320;
-
-/** Markers whose centres land closer than this are treated as one pile. */
-const OVERLAP_PX = 26;
-/** Marker footprint the fan has to keep clear between neighbours. */
-const MARKER_PX = 44;
-/** Clearance from the owner's marker. Measured against its solid 34 px core,
- *  not the 54 px halo — the halo is translucent, so a neighbour sitting over its
- *  edge is still perfectly readable, and using the full halo would push everyone
- *  a further 10 px (20 m at the default zoom) from where they really are. */
-const SELF_CLEAR_PX = (34 + MARKER_PX) / 2;
-/** The key the owner's own marker is filed under. */
-const SELF_KEY = 'self';
-
-/**
- * The hard ceiling on how far the fan may move a marker.
- *
- * The fan is sized in pixels, which is what keeps it legible at every zoom — but
- * a pixel is worth more metres the further you zoom out, so left uncapped the
- * same 39 px nudge becomes a kilometre. Two things break at that point: the
- * marker stops describing where its owner is, and anyone standing inside a sound
- * zone gets pushed outside the circle they are audibly within.
- *
- * So the fan is capped, and when the cap leaves too little room to separate a
- * pile, the pile is drawn as a count instead. Zooming out therefore trades
- * individuals for a number rather than for a fiction.
- */
-const FAN_MAX_M = 80;
 
 /**
  * Widest span the layout will reason about, in degrees of latitude.
@@ -360,13 +315,12 @@ const FAN_MAX_M = 80;
  * Google Maps will happily zoom out to the whole globe, at which point a pixel
  * is worth tens of kilometres and `SELF_CLEAR_PX` worth of offset lands a badge
  * in another hemisphere — or past the poles, which is an invalid coordinate and
- * takes the native map down with it. Past this the layout stops caring how far
- * out you are: everything is one pile either way.
+ * takes the native map down with it.
  */
 const MAX_ZOOM_DELTA = 2;
 
 /**
- * Zoom, snapped to √2 steps.
+ * The zoom, rounded to half a power of two.
  *
  * The layout only needs a rough idea of how far out the camera is, and a
  * continuous value meant every marker re-rendered on every zoom event Android
@@ -387,194 +341,6 @@ function isDrawable(p?: GeoPoint | null): p is GeoPoint {
     Math.abs(p.latitude) <= 85 &&
     Math.abs(p.longitude) <= 180
   );
-}
-
-interface ZoneArea extends GeoPoint { radius: number }
-
-interface GeoPoint { latitude: number; longitude: number }
-
-function metersPerDegLng(latitude: number): number {
-  // Guard the poles: cos(90°) is 0 and would send the offset to infinity.
-  return M_PER_DEG * Math.max(Math.cos((latitude * Math.PI) / 180), 0.01);
-}
-
-function offsetByMeters(p: GeoPoint, northM: number, eastM: number): GeoPoint {
-  // Clamped: an offset that runs off the top of the world is an invalid
-  // coordinate, and the native map does not survive being handed one.
-  const latitude = Math.max(-85, Math.min(85, p.latitude + northM / M_PER_DEG));
-  return { latitude, longitude: p.longitude + eastM / metersPerDegLng(p.latitude) };
-}
-
-/** Flat-earth distance. Over the tens of metres this is used for, the error is
- *  far below the pixel it is being compared against. */
-function roughMeters(a: GeoPoint, b: GeoPoint): number {
-  const dNorth = (a.latitude - b.latitude) * M_PER_DEG;
-  const dEast = (a.longitude - b.longitude) * metersPerDegLng(a.latitude);
-  return Math.hypot(dNorth, dEast);
-}
-
-export interface FanInput extends GeoPoint { key: string }
-export interface FanResult {
-  /** Where to draw the marker. Equal to the true point when nothing collided. */
-  position: GeoPoint;
-  /** True point, when the marker was moved — the leader line's other end. */
-  anchor?: GeoPoint;
-}
-export interface ClusterResult {
-  key: string;
-  /** How many people the badge stands in for. */
-  count: number;
-  position: GeoPoint;
-  /** Set when the badge had to be moved off the spot it describes. */
-  anchor?: GeoPoint;
-}
-export interface MarkerLayout {
-  /** Markers drawn individually, by key. A key that is absent was folded into
-   *  a cluster — its owner must not also be drawn. */
-  placed: Map<string, FanResult>;
-  clusters: ClusterResult[];
-}
-
-/**
- * How far a marker at `center` may move without leaving a zone it is inside.
- *
- * A marker `d` metres from the middle of a zone of radius `R` has `R − d` to
- * spare. Being inside someone's sound zone is an audible fact, so a marker that
- * the fan pushed across the circle's edge would contradict what the user can
- * hear. Zones the point is already outside impose nothing.
- */
-function fanCapMeters(center: GeoPoint, zones: ZoneArea[]): number {
-  let cap = FAN_MAX_M;
-  for (const zone of zones) {
-    const d = roughMeters(center, zone);
-    if (d >= zone.radius) continue;
-    cap = Math.min(cap, zone.radius - d);
-  }
-  return cap;
-}
-
-/** Ring radius whose straight-line gap between neighbours is one marker wide.
- *  Sizing by arc length instead looks right but comes out short — a ring of
- *  three lands 36 px apart and still overlaps. */
-function ringRadiusPx(count: number): number {
-  return count < 2 ? MARKER_PX : MARKER_PX / (2 * Math.sin(Math.PI / count));
-}
-
-/**
- * Decide where every marker goes: fanned apart, or replaced by a count.
- *
- * `metersPerPx` converts the pixel thresholds above into map distance at the
- * current zoom, so a fan separates by the same amount on screen however far in
- * you are — and zooming in shrinks how far each marker sits from the truth.
- *
- * Two rules survive every zoom level:
- *
- *  - **The owner never moves.** When a pile contains them they keep their real
- *    position and everyone else rings around it. Your own marker is the one
- *    position on this map you can check against the world outside the phone, and
- *    it is the centre of your own zone — nudging it would put your avatar
- *    off-centre inside your own circle. They are never folded into a count
- *    either: "you" is not a statistic.
- *  - **Nobody is moved further than the cap.** If separating a pile would cost
- *    more than that, the pile becomes one badge with a number on it. That is the
- *    zoomed-out case: a count is true, whereas a fan that flings people across a
- *    neighbourhood — or out of a sound zone they are standing in — is not.
- */
-function layoutMarkers(
-  points: FanInput[],
-  metersPerPx: number,
-  zones: ZoneArea[],
-): MarkerLayout {
-  const placed = new Map<string, FanResult>();
-  const clusters: ClusterResult[] = [];
-  if (points.length === 0 || !Number.isFinite(metersPerPx) || metersPerPx <= 0) {
-    return { placed, clusters };
-  }
-
-  /**
-   * Badge keys are the rounded centre, not the member list.
-   *
-   * Keying on membership looked tidier and was the bug: one person walking in or
-   * out changed the key, React unmounted the badge and mounted a new one, and a
-   * fresh marker re-arms `tracksViewChanges`. Do that repeatedly — which is
-   * exactly what a pinch does — and Android is re-rasterizing markers every
-   * frame until it runs out of memory. A position key keeps the same badge
-   * mounted while the pile stays put.
-   */
-  const usedKeys = new Set<string>();
-  const badgeKey = (center: GeoPoint) => {
-    const base = `cluster-${center.latitude.toFixed(4)}-${center.longitude.toFixed(4)}`;
-    let key = base;
-    for (let i = 2; usedKeys.has(key); i++) key = `${base}-${i}`;
-    usedKeys.add(key);
-    return key;
-  };
-
-  const threshold = OVERLAP_PX * metersPerPx;
-  const piles: FanInput[][] = [];
-  for (const p of points) {
-    const pile = piles.find((group) => group.some((q) => roughMeters(q, p) <= threshold));
-    if (pile) pile.push(p);
-    else piles.push([p]);
-  }
-
-  const keep = (p: FanInput) => {
-    placed.set(p.key, { position: { latitude: p.latitude, longitude: p.longitude } });
-  };
-
-  for (const pile of piles) {
-    if (pile.length === 1) {
-      keep(pile[0]);
-      continue;
-    }
-
-    const self = pile.find((p) => p.key === SELF_KEY);
-    const others = self ? pile.filter((p) => p.key !== SELF_KEY) : pile;
-
-    // Ring centre: the owner's exact position when they are in the pile,
-    // otherwise the pile's centroid — which keeps a group of other people put
-    // when the server re-orders them between polls.
-    const center: GeoPoint = self
-      ? { latitude: self.latitude, longitude: self.longitude }
-      : {
-          latitude: pile.reduce((s, p) => s + p.latitude, 0) / pile.length,
-          longitude: pile.reduce((s, p) => s + p.longitude, 0) / pile.length,
-        };
-
-    if (self) keep(self);
-
-    // With the owner sitting at the centre, the ring also has to clear *them*.
-    const wantPx = self
-      ? Math.max(SELF_CLEAR_PX, ringRadiusPx(others.length))
-      : ringRadiusPx(others.length);
-    const wantM = wantPx * metersPerPx;
-    const capM = fanCapMeters(center, zones);
-
-    if (wantM > capM) {
-      clusters.push({
-        key: badgeKey(center),
-        count: others.length,
-        // A badge stands for a group rather than claiming to be one person's
-        // position, so moving it clear of the owner's marker costs nothing —
-        // and it has to move, because the owner's marker is staying put.
-        position: self ? offsetByMeters(center, SELF_CLEAR_PX * metersPerPx, 0) : center,
-        anchor: self ? center : undefined,
-      });
-      continue;
-    }
-
-    const radiusM = wantM;
-    others.forEach((p, i) => {
-      // Start at the top and go clockwise.
-      const angle = (2 * Math.PI * i) / others.length - Math.PI / 2;
-      placed.set(p.key, {
-        position: offsetByMeters(center, -radiusM * Math.sin(angle), radiusM * Math.cos(angle)),
-        anchor: center,
-      });
-    });
-  }
-
-  return { placed, clusters };
 }
 
 /**
@@ -609,13 +375,18 @@ function distanceBand(m?: number): string | null {
  * which is safe to show, because it is not really about them — it is the
  * overlap, and you already know your own half of it.
  */
-function DotMarker({ coordinate, color, presence, zIndex, sharedInterests, onPress }: {
+function DotMarker({
+  coordinate, color, presence, zIndex, sharedInterests, showCaption = true, onPress,
+}: {
   coordinate: { latitude: number; longitude: number };
   color: string;
   presence?: Presence;
   zIndex?: number;
   /** Interests you both have. First one is shown; the rest become a count. */
   sharedInterests?: string[];
+  /** False when this dot shares its spot with others — the glyph stays, the
+   *  word under it goes. See `FanResult.crowded`. */
+  showCaption?: boolean;
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
@@ -628,6 +399,8 @@ function DotMarker({ coordinate, color, presence, zIndex, sharedInterests, onPre
   const primary = sharedInterests?.[0];
   const extra = Math.max((sharedInterests?.length ?? 0) - 1, 0);
   const InterestIcon = primary ? iconForInterest(primary) : null;
+  /** The word under the dot. Suppressed in a pile — see `showCaption`. */
+  const captionText = showCaption ? primary : undefined;
 
   const [settling, setSettling] = useState(true);
   useEffect(() => {
@@ -638,13 +411,13 @@ function DotMarker({ coordinate, color, presence, zIndex, sharedInterests, onPre
     // once settled, so an interest that arrives on a later poll — the first
     // one can land before the interest data does — would otherwise never be
     // drawn at all.
-  }, [color, online, primary, extra]);
+  }, [color, online, primary, extra, captionText]);
 
   // The glyph needs a bigger core to sit in than a bare point does, and the
   // caption makes the marker taller than its halo — so the anchor moves off
   // centre to keep the *dot* over the coordinate rather than the whole box.
   const haloH = primary ? DOT_HALO_ICON : DOT_HALO;
-  const totalH = primary ? haloH + CAPTION_GAP + CAPTION_H : haloH;
+  const totalH = captionText ? haloH + CAPTION_GAP + CAPTION_H : haloH;
 
   return (
     <Marker
@@ -684,10 +457,10 @@ function DotMarker({ coordinate, color, presence, zIndex, sharedInterests, onPre
           </View>
         </View>
 
-        {primary ? (
+        {captionText ? (
           <View style={styles.markerCaption}>
             <Text style={styles.markerCaptionText} numberOfLines={1}>
-              {primary}
+              {captionText}
               {extra > 0 ? (
                 <Text style={[styles.markerCaptionTag, { color }]}>{` +${extra}`}</Text>
               ) : null}
@@ -738,13 +511,27 @@ function AvatarMarker({
   // Markers rasterize their children: keep tracking until the remote image is
   // drawn, and re-arm briefly when the ring color changes (friend data arrives
   // after the first nearby fetch).
-  const [imageReady, setImageReady] = useState(!uri);
+  // Seeded from `loadedAvatars`, which is why avatars stopped blinking.
+  //
+  // A marker unmounts whenever its owner is folded into a headcount badge —
+  // pinching, or a poll that nudges two people within overlap distance — and
+  // remounts when the pile opens again. A fresh mount meant `imageReady` went
+  // back to false, so a picture already sitting in the image cache was drawn as
+  // a blank ring and then filled in. Repeat that through a pinch and every
+  // avatar on screen flickers.
+  //
+  // Remembering which URIs have decoded at least once makes a remount cheap:
+  // the ring comes back already wearing its face.
+  const [imageReady, setImageReady] = useState(() => !uri || loadedAvatars.has(uri));
   const [imageFailed, setImageFailed] = useState(false);
   const [ringSettling, setRingSettling] = useState(true);
 
   const online = presence?.is_online;
 
-  useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
+  useEffect(() => {
+    setImageReady(!uri || loadedAvatars.has(uri));
+    setImageFailed(false);
+  }, [uri]);
   useEffect(() => {
     setRingSettling(true);
     const t = setTimeout(() => setRingSettling(false), 400);
@@ -786,7 +573,10 @@ function AvatarMarker({
             <Image
               source={{ uri }}
               style={{ width: inner, height: inner, borderRadius: inner / 2 }}
-              onLoad={() => setTimeout(() => setImageReady(true), 250)}
+              onLoad={() => {
+                loadedAvatars.add(uri);
+                setTimeout(() => setImageReady(true), 250);
+              }}
               onError={() => { setImageFailed(true); setImageReady(true); }}
             />
           ) : (
@@ -848,7 +638,10 @@ function SelfMarker({ coordinate, uri, username }: {
             <Image
               source={{ uri }}
               style={styles.selfAvatar}
-              onLoad={() => setTimeout(() => setImageReady(true), 250)}
+              onLoad={() => {
+                loadedAvatars.add(uri);
+                setTimeout(() => setImageReady(true), 250);
+              }}
               onError={() => { setImageFailed(true); setImageReady(true); }}
             />
           ) : (
@@ -872,6 +665,62 @@ function SelfMarker({ coordinate, uri, username }: {
  * mutual. A number gives the one thing worth knowing from this far out — how many
  * people are over there — and tapping goes in for the detail.
  */
+/**
+ * The label that makes a music zone legible as one.
+ *
+ * A second ring around a person is otherwise just another ring — the map is
+ * full of circles, and "this one is how far the sound carries" is not
+ * something a stroke colour can say. So the ring is drawn faintly and a small
+ * note-and-distance chip sits on its edge, which is where the two facts people
+ * actually want live: that it is music, and where it stops.
+ *
+ * Pinned due north of the centre so it lands on the ring itself rather than
+ * floating near it, and so two zones on top of each other stack their labels
+ * in a readable column instead of overlapping at the same point.
+ */
+function MusicZoneBadge({ center, radius, mine, label, color }: {
+  center: GeoPoint;
+  radius: number;
+  mine?: boolean;
+  /** What the chip says: a friend's @name, or your own reach. */
+  label: string;
+  /** The ring's colour, repeated here so the chip and the circle it labels are
+   *  visibly one thing when several overlap. */
+  color: string;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  // Same reason as ClusterMarker: let it draw, then freeze the raster.
+  const [settling, setSettling] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setSettling(false), 400);
+    return () => clearTimeout(t);
+  }, [radius]);
+
+  return (
+    <Marker
+      coordinate={offsetByMeters(center, radius, 0)}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={settling}
+      zIndex={Z_MUSIC}
+      accessibilityLabel={
+        mine
+          ? `Your music carries ${fmtRadius(radius)}`
+          // The name goes first: a screen reader arriving at this chip is
+          // answering "whose zone is this", same as the colour does visually.
+          : `${label}'s music zone, ${fmtRadius(radius)} across`
+      }
+    >
+      <View style={[styles.musicBadge, { borderColor: withAlpha(color, 0.55) }]}>
+        <IconMusic size={10} color={color} />
+        <Text style={[styles.musicBadgeText, { color }]} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
+    </Marker>
+  );
+}
+
 function ClusterMarker({ coordinate, count, onPress }: {
   coordinate: { latitude: number; longitude: number };
   count: number;
@@ -1406,7 +1255,7 @@ function UserSheet({
 
   // Friends and connections get the real number; a stranger gets a band.
   const distLine = identified ? dist : distanceBand(user.distance);
-  const zoneLine = isFriend && user.zone_active ? 'in their sound zone' : null;
+  const zoneLine = isFriend && user.zone_audio_url ? 'in their sound zone' : null;
   const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
 
 
@@ -1414,7 +1263,11 @@ function UserSheet({
   // The server only sends zone_audio_url to viewers allowed to hear it, so a
   // URL here is already permission to play — but permission is not a reason to
   // start. Nothing loads until the play button below is pressed.
-  const zoneUrl = isFriend && user.zone_active ? user.zone_audio_url : undefined;
+  //
+  // The track is its own switch. `zone_active` governs whether they are drawn
+  // with a zone on the map, and reading it here is what made turning that
+  // circle off silently mute a song its owner had not touched.
+  const zoneUrl = isFriend ? user.zone_audio_url : undefined;
   const zoneRadius = user.zone_radius && user.zone_radius > 0 ? user.zone_radius : 500;
   const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
   // A region zone is a shape, not a distance: someone 3km away can be well
@@ -1744,7 +1597,20 @@ export default function MapScreen() {
     return nearby.filter((u) => {
       const uid = Number(u.id);
       if (uid === currentUserId) return false;
+
+      // The server's own verdict, and it is the authority: it computes the
+      // relationship from the friend and Hi tables on every poll, and it is
+      // what puts friends in this payload at any distance in the first place.
+      //
+      // Checked *before* the local sets, because those come from a separate
+      // request that fails silently. When /friends/list/ blipped, `friendIds`
+      // stayed empty and the last line below quietly dropped every friend who
+      // happened to share no interests — the people most likely to be missed
+      // being exactly the ones the map exists to show.
+      if (u.relationship === 'friend' || u.relationship === 'connected') return true;
       if (friendIds.has(uid) || connectionIds.has(uid)) return true;
+
+      // Strangers earn their place on the map by sharing something.
       return (u.shared_interests?.length ?? 0) > 0;
     });
   }, [nearby, currentUserId, friendIds, connectionIds]);
@@ -1791,6 +1657,33 @@ export default function MapScreen() {
     return () => { alive = false; };
   }, [neededRegionIds, regionOutlines]);
 
+  /** The viewer's own zone outline, cut into drawable pieces.
+   *
+   * No mainland-China display shift here, unlike the zone-area preview: this
+   * map draws markers, clusters, trails and circles from the same coordinates,
+   * and shifting only the polygon would put your zone's border in the right
+   * street while leaving your own dot in the wrong one. That trade is worse
+   * than a uniform offset, because "am I inside it?" is the single question
+   * the outline exists to answer. See services/gcj02 and `chinaOffsetNotice`. */
+  const selfZoneRings = useMemo(() => {
+    const id = selfZone?.zone_region_id;
+    if (!selfZone?.zone_active || selfZone.zone_mode !== 'region' || !id) return [];
+    const outline = regionOutlines.get(id);
+    return outline ? ringsForDisplay(outline) : [];
+  }, [selfZone, regionOutlines]);
+
+  /** Set once the viewer is standing where the basemap disagrees with GPS.
+   *
+   * Google serves GCJ-02 tiles inside mainland China while everything Aura
+   * measures is WGS-84, so the two are a few hundred metres apart. Saying so
+   * beats drawing a zone that silently sits in the wrong street. */
+  const chinaOffsetNotice = useMemo(
+    () =>
+      displayCoords &&
+      isInMainlandChina(displayCoords.latitude, displayCoords.longitude),
+    [displayCoords],
+  );
+
   /** Every live sound zone, so the fan can be held inside the circles people
    *  are audibly standing in. */
   // Region zones are deliberately absent: this constraint exists to stop a
@@ -1809,22 +1702,100 @@ export default function MapScreen() {
     // audible, so it constrains the fan wherever it exists — including for a
     // region-mode zone, whose shape is skipped above but whose music zone is
     // still a plain circle someone is either inside or not.
+    //
+    // Deliberately not gated on `zone_active`. That switch adds and removes the
+    // zone drawn on the map; it is not a mute button, and treating it as one
+    // meant turning off the circle also silenced a track the user never touched.
     if (
-      displayCoords && selfZone?.zone_active && selfZone.music_zone_separate &&
+      displayCoords && selfZone?.music_zone_separate &&
       selfZone.music_zone_radius > 0
     ) {
       areas.push({ ...displayCoords, radius: selfZone.music_zone_radius });
     }
+    // Other people's detection zones are no longer drawn, so they no longer
+    // constrain anything: this rule exists to stop a marker being flung across
+    // a boundary the eye can see, and an undrawn circle has no such boundary.
+    // Their music zones are drawn, and still do.
     for (const u of visibleNearby) {
-      if (!u.zone_active || u.latitude == null || u.longitude == null) continue;
-      if (u.music_zone_separate && (u.music_zone_radius ?? 0) > 0) {
-        areas.push({ latitude: u.latitude, longitude: u.longitude, radius: u.music_zone_radius! });
-      }
-      if (u.zone_mode === 'region' || !(u.zone_radius ?? 0)) continue;
-      areas.push({ latitude: u.latitude, longitude: u.longitude, radius: u.zone_radius! });
+      if (u.latitude == null || u.longitude == null) continue;
+      if (!u.music_zone_separate || !(u.music_zone_radius ?? 0)) continue;
+      areas.push({ latitude: u.latitude, longitude: u.longitude, radius: u.music_zone_radius! });
     }
     return areas;
   }, [visibleNearby, displayCoords, selfZone]);
+
+  /** Every music zone on screen — the viewer's own, and each friend whose
+   *  track they are allowed to hear. Assembled once so the faint ring and the
+   *  badge that labels it can never disagree about which circles exist. */
+  const musicZones = useMemo(() => {
+    // `label` and `color` are what make one ring tellable from another. Drawn
+    // in a single colour with only a radius on the chip, two friends
+    // broadcasting near each other were two identical circles: you could see
+    // that somebody's music reached here, but not whose.
+    const zones: {
+      key: string;
+      center: GeoPoint;
+      radius: number;
+      mine?: boolean;
+      label: string;
+      color: string;
+    }[] = [];
+    // Again independent of `zone_active`: a music zone is switched off by
+    // clearing the track, not by removing the circle you appear inside.
+    if (
+      displayCoords && selfZone?.music_zone_separate &&
+      selfZone.music_zone_radius > 0
+    ) {
+      zones.push({
+        key: 'music-self',
+        center: displayCoords,
+        radius: selfZone.music_zone_radius,
+        mine: true,
+        // Yours says how far it carries, not who it is — you know who you are,
+        // and where your own music stops is the one thing you cannot check by
+        // listening. Purple means "yours" everywhere else on the map.
+        label: fmtRadius(selfZone.music_zone_radius),
+        color: colors.purple,
+      });
+    }
+    for (const u of visibleNearby) {
+      // `zone_audio_url` is the real switch: no track, no ring to label. The
+      // server only sends it to viewers allowed to hear it, so a ring drawn
+      // here is always one the viewer could walk into and play.
+      if (!(u.music_zone_radius ?? 0) || !u.zone_audio_url) continue;
+      if (u.latitude == null || u.longitude == null) continue;
+      // Not gated on `music_zone_separate` any more. `music_zone_radius`
+      // arrives already resolved — the server sends `music_radius_m`, the
+      // separate dial or the zone radius inherited — so it is the right circle
+      // either way, and requiring the flag meant a friend who had never opened
+      // the earshot setting showed no music zone at all. That is almost
+      // everybody, which made the feature look broken rather than off.
+      //
+      // The exception is a region-mode friend who has *not* separated earshot:
+      // their listening range is the city outline, not a circle, and drawing
+      // their zone radius as one would claim a boundary that is not theirs.
+      if (u.zone_mode === 'region' && !u.music_zone_separate) continue;
+      zones.push({
+        key: `music-${u.id}`,
+        center: { latitude: u.latitude, longitude: u.longitude },
+        radius: u.music_zone_radius!,
+        // Only friends are ever drawn here — the server withholds
+        // `zone_audio_url` from everyone else — so naming them reveals nothing
+        // their marker does not already caption.
+        label: `@${u.username}`,
+        color: zoneRingColor(u.username),
+      });
+    }
+    return zones;
+  }, [visibleNearby, displayCoords, selfZone, colors.purple]);
+
+  /** A badge is only worth drawing when the ring it labels is big enough on
+   *  screen to read as a ring. Zoomed out, a 200m circle is a few pixels wide
+   *  and its label would be a chip floating over nothing. */
+  const musicBadgeVisible = useCallback((radius: number) => {
+    const metersPerPx = mapH > 0 ? (zoomDelta * M_PER_DEG) / mapH : 0;
+    return metersPerPx > 0 && radius / metersPerPx >= 24;
+  }, [mapH, zoomDelta]);
 
   /**
    * Where every marker is drawn, and which piles became a count instead.
@@ -2414,7 +2385,7 @@ export default function MapScreen() {
           }}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
-          customMapStyle={themeMode === 'dark' ? DARK_MAP_STYLE : LIGHT_MAP_STYLE}
+          customMapStyle={mapStyleFor(themeMode)}
           initialRegion={region}
           showsUserLocation={false}
           showsMyLocationButton={false}
@@ -2446,71 +2417,60 @@ export default function MapScreen() {
             locationToastTimer.current = setTimeout(() => setLocationToast(false), 2000);
           }}
         >
-          {/* Zones for nearby users — a circle, or the outline of the place
-              they picked. A region whose outline has not landed yet draws
-              nothing rather than falling back to a circle: a 500m ring where a
-              city belongs is a worse answer than a moment's absence. */}
-          {visibleNearby
-            .filter((u) => u.zone_active && u.latitude != null && u.longitude != null)
-            .map((u) => {
-              if (u.zone_mode === 'region') {
-                const outline = u.zone_region_id ? regionOutlines.get(u.zone_region_id) : null;
-                if (!outline) return null;
-                return outline.rings.map((ring, i) => (
-                  <Polygon
-                    key={`zone-${u.id}-${i}`}
-                    coordinates={toLatLng(ring)}
-                    fillColor="rgba(31,199,182,0.06)"
-                    strokeColor="rgba(31,199,182,0.35)"
-                    strokeWidth={1.5}
-                  />
-                ));
-              }
-              if (!(u.zone_radius ?? 0)) return null;
-              return (
-                <Circle
-                  key={`zone-${u.id}`}
-                  center={{ latitude: u.latitude, longitude: u.longitude }}
-                  radius={u.zone_radius!}
-                  fillColor="rgba(31,199,182,0.08)"
-                  strokeColor="rgba(31,199,182,0.35)"
-                  strokeWidth={1.5}
-                />
-              );
-            })}
+          {/* Other people's detection zones are deliberately not drawn.
+              A zone is a radar: it decides who *its owner* can find. Seeing a
+              stranger's radar tells you nothing you can act on — you are on it
+              or you are not, and either way the answer is already the fact that
+              they are on your screen. What it did do was fill the map with
+              overlapping teal circles, one per person, until the only thing
+              legible was the circles.
+              Your own zone is below, because that one is a tool: it is the
+              reach you are tuning when you change its size. And music zones
+              stay, because those answer a question you can act on — walk
+              inside one and you can hear what is playing. */}
 
           {/* Earshot, where it is not the zone. Drawn only for people who gave
               their music a zone of its own *and* whose track this viewer is
               allowed to hear — a second ring is worth the ink when it means
               "the music stops here", and is noise when it traces the circle
               already underneath it.
-              Unfilled and a shade brighter, so it reads as an edge drawn across
-              the zone rather than a second region stacked on it. Not dashed:
-              `lineDashPattern` on a Circle is Apple-Maps-only and this map is
-              PROVIDER_GOOGLE, so the dashes would silently never appear. */}
-          {visibleNearby
-            .filter((u) =>
-              u.zone_active && u.music_zone_separate && (u.music_zone_radius ?? 0) > 0 &&
-              u.zone_audio_url && u.latitude != null && u.longitude != null)
-            .map((u) => (
-              <Circle
-                key={`music-zone-${u.id}`}
-                center={{ latitude: u.latitude, longitude: u.longitude }}
-                radius={u.music_zone_radius!}
-                fillColor="transparent"
-                strokeColor="rgba(31,199,182,0.8)"
-                strokeWidth={2}
-              />
-            ))}
+              A hairline and nothing else. What identifies it as *music* is the
+              badge on its edge, not the stroke — the map already has circles in
+              this colour, and shouting with opacity would only have made a
+              louder anonymous ring. Not dashed either: `lineDashPattern` on a
+              Circle is Apple-Maps-only and this map is PROVIDER_GOOGLE, so the
+              dashes would silently never appear. */}
+          {/* Colours come from the palette, not from literals.
+              Somebody else's ring used to be a hardcoded rgba(31,199,182) —
+              the *dark* theme's teal — so on the light map it stayed a pale
+              teal thread over a near-white basemap and simply could not be
+              seen. The light palette answers `teal` with a strong orange, the
+              same colour those people's markers already use, so taking the hue
+              from `colors` fixes the contrast and makes the ring match the dots
+              it belongs to. Dark mode is unchanged. */}
+          {musicZones.map(({ key, center, radius, color }) => (
+            <Circle
+              key={key}
+              center={center}
+              radius={radius}
+              fillColor="transparent"
+              strokeColor={withAlpha(color, 0.6)}
+              strokeWidth={1.5}
+            />
+          ))}
 
-          {/* Own zone */}
+          {/* Own zone.
+              One polygon per *piece*, not per ring: a region straddling the
+              ±180 meridian is cut in two there, so it draws as the island group
+              it is instead of as a band stretched around the planet. Regions
+              that do not cross come back as a single piece, unchanged. */}
           {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
-            ? regionOutlines.get(selfZone.zone_region_id)?.rings.map((ring, i) => (
+            ? selfZoneRings.map((piece, i) => (
                 <Polygon
                   key={`self-zone-${i}`}
-                  coordinates={toLatLng(ring)}
-                  fillColor="rgba(139,92,246,0.05)"
-                  strokeColor="rgba(139,92,246,0.35)"
+                  coordinates={piece}
+                  fillColor={withAlpha(colors.purple, 0.05)}
+                  strokeColor={withAlpha(colors.purple, 0.35)}
                   strokeWidth={1.5}
                 />
               ))
@@ -2518,24 +2478,29 @@ export default function MapScreen() {
               <Circle
                 center={displayCoords}
                 radius={selfZone.zone_radius}
-                fillColor="rgba(139,92,246,0.07)"
-                strokeColor="rgba(139,92,246,0.35)"
+                fillColor={withAlpha(colors.purple, 0.07)}
+                strokeColor={withAlpha(colors.purple, 0.35)}
                 strokeWidth={1.5}
               />
             )}
 
-          {/* Your own earshot. The one thing you cannot check by listening:
-              everyone else can hear where your music stops, and you can't. */}
-          {selfZone?.zone_active && selfZone.music_zone_separate
-            && selfZone.music_zone_radius > 0 && displayCoords && (
-              <Circle
-                center={displayCoords}
-                radius={selfZone.music_zone_radius}
-                fillColor="transparent"
-                strokeColor="rgba(139,92,246,0.85)"
-                strokeWidth={2}
-              />
-            )}
+          {/* The chip that says which ring is which — literally, now: a
+              friend's ring is labelled with their @name and drawn in their own
+              colour, so two overlapping circles are two people rather than one
+              anonymous smudge. Drawn after every circle so it sits on top of
+              them, and skipped when the ring is too small on screen for a label
+              to mean anything. Your own is included: where your music stops is
+              the one thing you cannot check by listening. */}
+          {musicZones.filter((z) => musicBadgeVisible(z.radius)).map((z) => (
+            <MusicZoneBadge
+              key={`${z.key}-badge`}
+              center={z.center}
+              radius={z.radius}
+              mine={z.mine}
+              label={z.label}
+              color={z.color}
+            />
+          ))}
 
           {/* Approximate sharers get a haze instead of a precise-looking pin —
               the marker would otherwise imply accuracy the data doesn't have. */}
@@ -2604,10 +2569,16 @@ export default function MapScreen() {
                 ringColor={color}
                 presence={user.presence}
                 motion={user.motion_class}
-                caption={user.username}
+                // Dropped when this marker shares its spot: the fan separates
+                // rings, and a name chip is wider than the ring it hangs under.
+                caption={layout.crowded ? undefined : user.username}
                 // A connection has no zone access, so tagging one would be
-                // advertising a door they cannot open.
-                captionTag={isFriend && user.zone_active ? 'zone' : undefined}
+                // advertising a door they cannot open. The tag marks a track
+                // you can play, so it follows the track rather than the
+                // map-zone switch.
+                captionTag={
+                  !layout.crowded && isFriend && user.zone_audio_url ? 'zone' : undefined
+                }
                 zIndex={Z_FRIEND}
                 onPress={() => openSheet(user)}
               />
@@ -2618,6 +2589,11 @@ export default function MapScreen() {
                 color={color}
                 presence={user.presence}
                 sharedInterests={user.shared_interests}
+                // The interest *name* is this marker's caption and the widest
+                // thing it draws — four of them stacked down a street is what
+                // made the map unreadable. The glyph inside the dot still says
+                // which interest it is, so only the word goes.
+                showCaption={!layout.crowded}
                 zIndex={Z_STRANGER}
                 onPress={() => openSheet(user)}
               />
@@ -2631,8 +2607,8 @@ export default function MapScreen() {
             <Circle
               center={displayCoords}
               radius={APPROX_RADIUS_M}
-              fillColor="rgba(139,92,246,0.06)"
-              strokeColor="rgba(139,92,246,0.22)"
+              fillColor={withAlpha(colors.purple, 0.06)}
+              strokeColor={withAlpha(colors.purple, 0.22)}
               strokeWidth={1}
             />
           )}
@@ -2697,6 +2673,20 @@ export default function MapScreen() {
         onSearch={() => router.push('/search')}
         onList={() => router.push('/nearby')}
       />
+
+      {/* The one place the map admits it is drawing on a shifted basemap.
+          Stated rather than silently corrected: everything here — your dot,
+          everyone else's, the zone outline — is in true GPS coordinates and
+          agrees with itself, but the tiles underneath are offset. */}
+      {chinaOffsetNotice && mapVisible ? (
+        <View
+          style={[styles.offsetNotice, { top: topInset + 52 }]}
+          accessible
+          accessibilityRole="alert"
+        >
+          <Text style={styles.offsetNoticeText}>{MAINLAND_CHINA_NOTICE}</Text>
+        </View>
+      ) : null}
 
       {/* User detail sheet — where zone audio lives now. */}
       {selectedUser && (
@@ -2939,6 +2929,35 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.teal,
   },
+
+  // ── Music-zone label ──
+  // Deliberately smaller and quieter than the cluster badge it borrows its
+  // shape from: a cluster is something to tap, this is something to read.
+  musicBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    // Overridden per zone with that person's own colour — this is the fallback
+    // for a chip drawn before one is resolved.
+    borderColor: colors.tealLine,
+    opacity: 0.92,
+    // A username has no length limit; a chip pinned to the edge of a circle
+    // does. Past this the name truncates rather than growing a label wider
+    // than the ring it belongs to.
+    maxWidth: 120,
+  },
+  musicBadgeText: {
+    fontFamily: fonts.body,
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    color: colors.teal,
+  },
   clusterCount: {
     fontFamily: fonts.body,
     fontSize: 13,
@@ -3017,6 +3036,26 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontWeight: '600',
     fontSize: 12,
     color: colors.bg,
+  },
+
+  // ── Basemap offset notice (mainland China only) ──
+  offsetNotice: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.m,
+    backgroundColor: 'rgba(10,10,11,0.86)',
+    borderWidth: 1,
+    borderColor: colors.border,
+    zIndex: 99,
+  },
+  offsetNoticeText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#F5F5F7',
   },
 
   // ── Top bar (flat, no blur) ──

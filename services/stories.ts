@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 
 import { api } from './api';
+import { withNumericCoordsList } from './coords';
 
 // Shared story types + the story-archive store. The archive ("Mine" = every
 // story the user posted, "Saved" = bookmarks of other people's stories) is
@@ -34,6 +35,19 @@ export interface Story {
   is_saved?: boolean;
   /** Present on items from the saved list: when the bookmark was created. */
   saved_at?: string;
+}
+
+/**
+ * Every story that enters this module goes through here.
+ *
+ * `latitude`/`longitude` are typed `number` above but arrive from DRF as
+ * strings — see services/coords.ts for why that is fatal on the map now. The
+ * fix belongs at the boundary rather than at the marker: the archive persists
+ * these rows to disk, so a string that got past this point would survive a
+ * restart and crash a later session from the cache.
+ */
+export function normalizeStories(stories: Story[] | null | undefined): Story[] {
+  return withNumericCoordsList(stories) as Story[];
 }
 
 export const ARCHIVE_PAGE_SIZE = 30;
@@ -119,7 +133,9 @@ async function persist(key: string, list: Story[] | null) {
 async function loadCache(key: string): Promise<Story[] | null> {
   try {
     const raw = await AsyncStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as Story[]) : null;
+    // Normalised on the way out too: caches written before coordinates were
+    // coerced still hold strings.
+    return raw ? normalizeStories(JSON.parse(raw) as Story[]) : null;
   } catch {
     return null;
   }
@@ -146,7 +162,7 @@ export async function refreshMine(): Promise<void> {
   const { data } = await api.get<ArchivePage>('/api/stories/mine/', {
     params: { limit: ARCHIVE_PAGE_SIZE, offset: 0 },
   });
-  const mine = data.results.filter((s) => !state.deletedIds.has(s.id));
+  const mine = normalizeStories(data.results).filter((s) => !state.deletedIds.has(s.id));
   setState({ mine, mineTotal: data.count });
   persist(MINE_KEY, mine);
 }
@@ -155,8 +171,9 @@ export async function refreshSaved(): Promise<void> {
   const { data } = await api.get<ArchivePage>('/api/stories/saved/', {
     params: { limit: ARCHIVE_PAGE_SIZE, offset: 0 },
   });
-  setState({ saved: data.results, savedTotal: data.count, savedIds: savedIdsOf(data.results) });
-  persist(SAVED_KEY, data.results);
+  const saved = normalizeStories(data.results);
+  setState({ saved, savedTotal: data.count, savedIds: savedIdsOf(saved) });
+  persist(SAVED_KEY, saved);
 }
 
 async function loadMore(kind: 'mine' | 'saved'): Promise<void> {
@@ -168,7 +185,7 @@ async function loadMore(kind: 'mine' | 'saved'): Promise<void> {
     params: { limit: ARCHIVE_PAGE_SIZE, offset: list.length },
   });
   const seen = new Set(list.map((s) => s.id));
-  const merged = [...list, ...data.results.filter((s) => !seen.has(s.id))];
+  const merged = [...list, ...normalizeStories(data.results).filter((s) => !seen.has(s.id))];
   if (kind === 'mine') {
     setState({ mine: merged.filter((s) => !state.deletedIds.has(s.id)), mineTotal: data.count });
   } else {

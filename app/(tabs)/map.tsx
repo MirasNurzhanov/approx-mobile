@@ -100,11 +100,13 @@ import {
     type ZoneMode,
 } from '@/services/zoneArea';
 import {
+    normalizeStories,
     recordOwnStory,
     useStoryArchive,
     type ReactionType,
     type Story,
 } from '@/services/stories';
+import { withNumericCoordsList } from '@/services/coords';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'connected' | 'friend';
@@ -2025,11 +2027,19 @@ export default function MapScreen() {
     try {
       const r = await api.get<MapNearbyResponse>('/api/map/nearby/');
       const { users, stories, meetups } = r.data;
-      setNearby(users);
-      setStories(stories);
-      stories.forEach(s => { if (s.image) Image.prefetch(s.image); });
+      // Stories and meetups are ModelSerializer output, so their coordinates
+      // arrive as strings and have to be coerced before they reach a Marker —
+      // see services/coords.ts. `users` is hand-assembled server-side and comes
+      // through numeric today; it goes through the same gate anyway so one
+      // serializer changing shape can't put the redbox back.
+      setNearby(withNumericCoordsList(users));
+      const placedStories = normalizeStories(stories);
+      setStories(placedStories);
+      placedStories.forEach(s => { if (s.image) Image.prefetch(s.image); });
       const now = Date.now();
-      setClubMeetups(meetups.filter((e) => new Date(e.expires_at).getTime() > now));
+      setClubMeetups(
+        withNumericCoordsList(meetups).filter((e) => new Date(e.expires_at).getTime() > now),
+      );
     } catch {}
   }, []);
 
@@ -2075,7 +2085,11 @@ export default function MapScreen() {
         longitude: lng,
         ...(imageUrl ? { image_url: imageUrl } : {}),
       });
-      const newStory = response.data;
+      // The POST echoes the story back through the same serializer as the map
+      // poll, so its coordinates need the same coercion — this is the one path
+      // that puts a marker on screen without going through fetchMapData first.
+      const [newStory] = normalizeStories([response.data]);
+      if (!newStory) throw new Error('Story saved without a usable position');
       setStories(prev => [...prev, newStory]);
       recordOwnStory(newStory);
       setTimeout(() => fetchMapData(), 500);

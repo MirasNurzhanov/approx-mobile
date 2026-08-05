@@ -14,6 +14,7 @@ import {
 import { router } from 'expo-router';
 
 import { useAuth } from '@/context/AuthContext';
+import { runBusy } from '@/services/busy';
 import { lightColors as L } from '@/constants/theme';
 import { fonts } from '@/constants/theme';
 
@@ -31,16 +32,10 @@ export default function LoginScreen() {
   async function handleLogin() {
     if (!email || !password) return;
     setSubmitting(true);
-    // The reset is mirrored on both paths rather than pulled into a `finally`:
-    // React Compiler cannot lower a `finally` and gives up on any component
-    // containing one, which costs this screen its automatic memoization.
-    try {
-      await login(email, password);
-      setSubmitting(false);
-    } catch {
-      Alert.alert('Login failed', 'Invalid email or password');
-      setSubmitting(false);
-    }
+    await runBusy(
+      () => login(email, password),
+      () => setSubmitting(false),
+    ).catch(() => Alert.alert('Login failed', 'Invalid email or password'));
   }
 
   return (

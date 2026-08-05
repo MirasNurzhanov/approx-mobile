@@ -17,6 +17,7 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { useAuth } from '@/context/AuthContext';
 import { syncBackgroundLocationSharing } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
@@ -456,15 +457,12 @@ export default function SettingsScreen() {
   async function selectLocationSharing(mode: LocationSharing) {
     if (mode === settings?.location_sharing || saving) return;
     setSaving(true);
-    try {
+    await runBusy(async () => {
       await updatePrivacy({ location_sharing: mode });
       // Pausing must stop OS tracking now, not at the next app launch.
       await syncBackgroundLocationSharing();
-      setSaving(false);
-    } catch {
-      Alert.alert('Could not update', 'Your previous setting is still in effect.');
-      setSaving(false);
-    }
+    }, () => setSaving(false))
+      .catch(() => Alert.alert('Could not update', 'Your previous setting is still in effect.'));
   }
 
   async function toggleZone(value: boolean) {
@@ -472,14 +470,13 @@ export default function SettingsScreen() {
     const prev = zoneActive;
     setZoneActive(value);
     setZoneSaving(true);
-    try {
-      await api.patch('/api/users/zone/', { zone_active: value });
-    } catch {
+    await runBusy(
+      () => api.patch('/api/users/zone/', { zone_active: value }),
+      () => setZoneSaving(false),
+    ).catch(() => {
       setZoneActive(prev);
       Alert.alert('Could not update zone', 'Please try again.');
-    }
-    // Always reached: the `catch` rolls the toggle back and stops there.
-    setZoneSaving(false);
+    });
   }
 
   async function toggleNotifications(value: boolean) {

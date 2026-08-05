@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import MapView, { Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { reportLocation } from '@/services/location';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { Card } from '@/components/ui/Card';
@@ -704,9 +705,10 @@ export default function ZoneAreaScreen() {
   // Everything saves as you touch it, matching the zone-music screen next door.
   const save = useCallback(async (patch: Partial<ZoneState>, revert: () => void) => {
     setSaving(true);
-    try {
-      await api.patch('/api/users/zone/', patch);
-    } catch (e: any) {
+    await runBusy(
+      () => api.patch('/api/users/zone/', patch),
+      () => setSaving(false),
+    ).catch((e: any) => {
       revert();
       Alert.alert(
         'Could not save',
@@ -715,10 +717,7 @@ export default function ZoneAreaScreen() {
         e?.response?.data?.detail ??
         'Please try again.',
       );
-    }
-    // Reached on both paths: the `catch` reverts, alerts and stops there. Not a
-    // `finally` — React Compiler bails on any component containing one.
-    setSaving(false);
+    });
   }, []);
 
   const commitRadius = useCallback((next: number) => {

@@ -70,6 +70,7 @@ import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
@@ -1107,17 +1108,13 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
       return;
     }
     setPosting(true);
-    try {
+    await runBusy(async () => {
       await onPost(text.trim(), photoUri);
       setText('');
       setPhotoUri(null);
       onClose();
-    } catch {
-      Alert.alert('Failed to post', 'Please try again.');
-    }
-    // Both paths land here — the `catch` rethrows nothing — so the button
-    // re-enables without a `finally`, which React Compiler cannot compile.
-    setPosting(false);
+    }, () => setPosting(false))
+      .catch(() => Alert.alert('Failed to post', 'Please try again.'));
   }
 
   return (

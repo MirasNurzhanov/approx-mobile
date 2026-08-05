@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { clubsApi } from '@/services/clubs';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
@@ -795,7 +796,7 @@ function useMeetupProposal(clubId: number) {
       return;
     }
     setProposalSubmitting(true);
-    try {
+    await runBusy(async () => {
       await api.post(`/api/clubs/${clubId}/events/`, {
         title: propTitle.trim(),
         description: propDesc.trim() || undefined,
@@ -805,11 +806,9 @@ function useMeetupProposal(clubId: number) {
         longitude: propLocation?.lng,
       });
       close();
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create proposal.');
-    }
-    // Reached on both paths: the `catch` alerts and stops there.
-    setProposalSubmitting(false);
+    }, () => setProposalSubmitting(false)).catch((e: any) =>
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create proposal.'),
+    );
   }
 
   return {

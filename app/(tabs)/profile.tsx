@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { sectionise } from '@/services/interestCategories';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
@@ -177,7 +178,7 @@ export default function ProfileScreen() {
     });
     if (!result.canceled && result.assets[0]) {
       setUploading(true);
-      try {
+      await runBusy(async () => {
         const uri = result.assets[0].uri;
         const filename = uri.split('/').pop() ?? 'photo.jpg';
         const ext = /\.(\w+)$/.exec(filename)?.[1]?.toLowerCase() ?? 'jpeg';
@@ -191,12 +192,9 @@ export default function ProfileScreen() {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
         setProfile(data);
-      } catch (e: any) {
-        Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.');
-      }
-      // Reached either way: the `catch` handles every failure. Not a `finally`,
-      // because React Compiler bails on any component containing one.
-      setUploading(false);
+      }, () => setUploading(false)).catch((e: any) =>
+        Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.'),
+      );
     }
   }
 

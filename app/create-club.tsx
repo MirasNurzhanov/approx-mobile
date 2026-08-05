@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import {
   clubsApi,
   fetchMyLocation,
@@ -318,16 +319,12 @@ export default function CreateClubScreen() {
     setShowInterestPicker(true);
     if (interests.length > 0) return;
     setLoadingInterests(true);
-    try {
+    await runBusy(async () => {
       const res = await api.get<Interest[]>('/api/interests/');
       const data = res.data;
       setInterests(Array.isArray(data) ? data : (data as any).results ?? []);
-    } catch {
-      Alert.alert('Error', 'Could not load interests.');
-    }
-    // Reached on both paths: the `catch` alerts and stops there. Not a
-    // `finally` — React Compiler bails on any component containing one.
-    setLoadingInterests(false);
+    }, () => setLoadingInterests(false))
+      .catch(() => Alert.alert('Error', 'Could not load interests.'));
   }
 
   async function pickEmblem() {
@@ -360,7 +357,10 @@ export default function CreateClubScreen() {
       return;
     }
     setSubmitting(true);
-    try {
+    // Safe to clear the flag on the success path too: `success` swaps the
+    // button out for the banner, so there is nothing left to double-tap while
+    // the 1200ms hand-off to the club screen plays.
+    await runBusy(async () => {
       const form = new FormData();
       form.append('name', name.trim());
       if (description.trim()) form.append('description', description.trim());
@@ -386,7 +386,7 @@ export default function CreateClubScreen() {
           params: { id: res.data.id, fromCreate: '1' },
         } as any);
       }, 1200);
-    } catch (e: any) {
+    }, () => setSubmitting(false)).catch((e: any) => {
       if (e?.response?.status === 409) {
         // Moved between opening the picker and pressing create. Re-resolve so
         // the options describe where they are now, and let them look again.
@@ -395,12 +395,7 @@ export default function CreateClubScreen() {
       } else {
         Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create club. Try again.');
       }
-    }
-    // Reached on both paths — the `catch` handles every failure. Safe to clear
-    // on the success path too: `success` swaps the button out for the banner,
-    // so there is nothing left to double-tap while the 1200ms hand-off to the
-    // club screen plays.
-    setSubmitting(false);
+    });
   }
 
   return (

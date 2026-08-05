@@ -41,6 +41,7 @@ import { fonts, radius, type } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import {
   saveStory,
   unsaveStories,
@@ -193,7 +194,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     const trimmed = replyText.trim();
     if (!trimmed || !replyTo || sendingReply) return;
     setSendingReply(true);
-    try {
+    await runBusy(async () => {
       const context = story.content ?? story.text;
       const content = encodeStoryReply({
         image: story.image,
@@ -208,12 +209,10 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
       Keyboard.dismiss();
       setReplySent(true);
       setTimeout(() => setReplySent(false), 1600);
-    } catch (e: any) {
+    }, () => setSendingReply(false)).catch((e: any) => {
       console.log('[Story reply] error:', e?.response?.status, JSON.stringify(e?.response?.data));
       Alert.alert('Could not send', 'Please try again.');
-    }
-    // Reached on both paths: the `catch` logs, alerts and stops there.
-    setSendingReply(false);
+    });
   }
 
   return (

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { TrimSlider } from '@/components/TrimSlider';
 import { ZonePlayer } from '@/components/ZonePlayer';
 import { fonts, radius, type } from '@/constants/theme';
@@ -91,7 +92,7 @@ export default function ZoneTrimScreen() {
 
   async function save() {
     setSaving(true);
-    try {
+    await runBusy(async () => {
       const r = await api.patch<ZoneState>('/api/users/zone/', {
         zone_track_start_ms: Math.round(start),
         // A window covering the whole track is stored as "no window" — that is
@@ -108,17 +109,14 @@ export default function ZoneTrimScreen() {
         end: r.data.zone_track_end_ms ?? null,
       });
       router.back();
-    } catch (e: any) {
+    }, () => setSaving(false)).catch((e: any) =>
       Alert.alert(
         'Could not save the loop',
         e?.response?.data?.zone_track_end_ms?.[0] ??
         e?.response?.data?.detail ??
         'Please try again.',
-      );
-    }
-    // Reached on both paths: the `catch` alerts and stops there. Not a
-    // `finally` — React Compiler bails on any component containing one.
-    setSaving(false);
+      ),
+    );
   }
 
   function reset() {

@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { ZonePlayer } from '@/components/ZonePlayer';
 import { IconClose, IconInfo, IconLock, IconMusic, IconUpload } from '@/components/ui/icons';
@@ -528,16 +529,13 @@ export default function ZoneScreen() {
     const previous = zone;
     if (optimistic) setZone({ ...zone, ...optimistic });
     setSaving(true);
-    try {
+    await runBusy(async () => {
       const r = await api.patch<ZoneState>('/api/users/zone/', body);
       setZone(r.data);
-    } catch (e: any) {
+    }, () => setSaving(false)).catch((e: any) => {
       setZone(previous);
       Alert.alert('Could not save', e?.response?.data?.detail ?? 'Please try again.');
-    }
-    // Reached on both paths: the `catch` rolls back, alerts and stops there.
-    // Not a `finally` — React Compiler bails on any component containing one.
-    setSaving(false);
+    });
   }
 
   function setMusicSeparate(separate: boolean) {
@@ -624,16 +622,15 @@ export default function ZoneScreen() {
           style: 'destructive',
           onPress: async () => {
             setSaving(true);
-            try {
-              setZone(await clearAppleZoneTrack<ZoneState>());
-            } catch (e: unknown) {
+            await runBusy(
+              async () => setZone(await clearAppleZoneTrack<ZoneState>()),
+              () => setSaving(false),
+            ).catch((e: unknown) =>
               Alert.alert(
                 'Could not remove it',
                 e instanceof AppleMusicError ? e.message : 'Please try again.',
-              );
-            }
-            // Reached on both paths: the `catch` alerts and stops there.
-            setSaving(false);
+              ),
+            );
           },
         },
       ],

@@ -21,6 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -289,7 +290,7 @@ export default function EditProfileScreen() {
 
   async function uploadProfilePicture(uri: string) {
     setUploading(true);
-    try {
+    await runBusy(async () => {
       const filename = uri.split('/').pop() ?? 'photo.jpg';
       const ext = /\.(\w+)$/.exec(filename)?.[1]?.toLowerCase() ?? 'jpeg';
       const type = ext === 'png' ? 'image/png' : 'image/jpeg';
@@ -299,18 +300,15 @@ export default function EditProfileScreen() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setProfile(data);
-    } catch (e: any) {
-      Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.');
-    }
-    // Reached on both paths: the `catch` alerts and stops there. Not a
-    // `finally` — React Compiler bails on any component containing one.
-    setUploading(false);
+    }, () => setUploading(false)).catch((e: any) =>
+      Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.'),
+    );
   }
 
   async function save() {
     if (!username.trim() || saving) return;
     setSaving(true);
-    try {
+    await runBusy(async () => {
       const payload: Record<string, any> = {
         username: username.trim(),
         bio: bio.trim(),
@@ -332,12 +330,10 @@ export default function EditProfileScreen() {
       origProfession.current  = savedProf;
       origNationality.current = savedNat;
       router.back();
-    } catch (e: any) {
+    }, () => setSaving(false)).catch((e: any) => {
       const msg = e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.';
       Alert.alert('Error', msg);
-    }
-    // Reached on both paths: the `catch` alerts and stops there.
-    setSaving(false);
+    });
   }
 
   // ── Derived display values ─────────────────────────────────────────────────

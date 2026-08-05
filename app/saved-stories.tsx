@@ -20,6 +20,7 @@ import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import {
   clearArchive,
   deleteOwnStories,
@@ -332,19 +333,17 @@ export default function SavedStoriesScreen() {
 
   async function runDelete(ids: number[]) {
     setDeleting(true);
-    try {
+    await runBusy(async () => {
       // Optimistic in the store: items vanish now, roll back if the API fails.
       if (activeTab === 'mine') await deleteOwnStories(ids);
       else await unsaveStories(ids);
       exitSelectMode();
-    } catch {
+    }, () => setDeleting(false)).catch(() =>
       Alert.alert(
         activeTab === 'mine' ? 'Could not delete' : 'Could not remove',
         'Something went wrong and nothing was removed. Please try again.',
-      );
-    }
-    // Reached on both paths: the `catch` alerts and stops there.
-    setDeleting(false);
+      ),
+    );
   }
 
   function confirmDeleteSelected() {
@@ -376,14 +375,12 @@ export default function SavedStoriesScreen() {
     if (n === 0) return;
     const clear = async () => {
       setDeleting(true);
-      try {
+      await runBusy(async () => {
         await clearArchive(activeTab);
         exitSelectMode();
-      } catch {
-        Alert.alert('Could not clear', 'Something went wrong and nothing was removed. Please try again.');
-      }
-      // Reached on both paths: the `catch` alerts and stops there.
-      setDeleting(false);
+      }, () => setDeleting(false)).catch(() =>
+        Alert.alert('Could not clear', 'Something went wrong and nothing was removed. Please try again.'),
+      );
     };
     if (activeTab === 'mine') {
       Alert.alert(

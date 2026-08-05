@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -253,7 +253,7 @@ function SelectionBar({ activeTab, selectedCount, deleting, canClear, bottom, on
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SavedStoriesScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const archive = useStoryArchive();
 
@@ -309,7 +309,7 @@ export default function SavedStoriesScreen() {
     setSelected(allSelected ? new Set() : new Set(loaded.map((s) => s.id)));
   }
 
-  const onRefresh = useCallback(async () => {
+  async function onRefresh() {
     setRefreshing(true);
     try {
       await (activeTab === 'mine' ? refreshMine() : refreshSaved());
@@ -319,9 +319,9 @@ export default function SavedStoriesScreen() {
     // The `catch` swallows everything, so this always runs. Deliberately not a
     // `finally` — React Compiler bails on any component containing one.
     setRefreshing(false);
-  }, [activeTab]);
+  }
 
-  const onEndReached = useCallback(async () => {
+  async function onEndReached() {
     if (loadingMore || !list || total === null || list.length >= total) return;
     setLoadingMore(true);
     try {
@@ -329,7 +329,7 @@ export default function SavedStoriesScreen() {
     } catch {}
     // The `catch` swallows everything, so this always runs.
     setLoadingMore(false);
-  }, [activeTab, list, total, loadingMore]);
+  }
 
   async function runDelete(ids: number[]) {
     setDeleting(true);

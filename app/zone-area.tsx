@@ -541,15 +541,16 @@ function useZonePreview({ mapRef, coords, outline, mode, region, radiusM }: {
   region: RegionSummary | null;
   radiusM: number;
 }) {
+  // Memoized by hand rather than left to the compiler: both of these are read
+  // from the dependency array of the re-framing effect below, so their identity
+  // is what decides whether the map animates. That guarantee has to hold even
+  // if the compiler ever bails on this hook.
   const previewCoords = useMemo(
     () => (coords ? wgs84ToGcj02(coords.latitude, coords.longitude) : null),
     [coords],
   );
   /** The outline, split at the antimeridian and shifted for the basemap. */
-  const previewRings = useMemo(
-    () => (outline ? ringsForDisplay(outline, shiftForDisplay) : []),
-    [outline],
-  );
+  const previewRings = outline ? ringsForDisplay(outline, shiftForDisplay) : [];
   const previewViewport = useCallback((target: RegionSummary) => {
     const box = regionViewport(target);
     return { ...box, ...wgs84ToGcj02(box.latitude, box.longitude) };
@@ -631,7 +632,7 @@ function useRegionSearch(query: string) {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneAreaScreen() {
   const { colors, themeMode } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
@@ -703,7 +704,7 @@ export default function ZoneAreaScreen() {
 
   // ── Save ───────────────────────────────────────────────────────────────────
   // Everything saves as you touch it, matching the zone-music screen next door.
-  const save = useCallback(async (patch: Partial<ZoneState>, revert: () => void) => {
+  async function save(patch: Partial<ZoneState>, revert: () => void) {
     setSaving(true);
     await runBusy(
       () => api.patch('/api/users/zone/', patch),
@@ -718,15 +719,15 @@ export default function ZoneAreaScreen() {
         'Please try again.',
       );
     });
-  }, []);
+  }
 
-  const commitRadius = useCallback((next: number) => {
+  function commitRadius(next: number) {
     const previous = radiusM;
     setRadiusM(next);
     save({ zone_radius: next }, () => setRadiusM(previous));
-  }, [radiusM, save]);
+  }
 
-  const commitMode = useCallback((next: ZoneMode) => {
+  function commitMode(next: ZoneMode) {
     if (next === mode) return;
     // Switching to region without one picked would be rejected by the server,
     // so the tab moves the UI but only persists once a place exists.
@@ -740,13 +741,13 @@ export default function ZoneAreaScreen() {
       next === 'region' ? { zone_mode: next, zone_region: region!.id } : { zone_mode: next },
       () => setMode(previous),
     );
-  }, [mode, region, save]);
+  }
 
   /** The one way a region is adopted, whether it was traced or searched for.
    *
    * Both routes land here so the save, the mode switch, the revert-on-failure
    * and the cleared error state cannot drift apart between them. */
-  const commitRegion = useCallback((next: RegionSummary) => {
+  function commitRegion(next: RegionSummary) {
     const previous = region;
     setRegion(next);
     setMode('region');
@@ -760,9 +761,9 @@ export default function ZoneAreaScreen() {
       setRegion(previous);
       if (!previous) setMode('radius');
     });
-  }, [region, save]);
+  }
 
-  const clearRegion = useCallback(() => {
+  function clearRegion() {
     const previous = region;
     if (!previous) return;
     // The outline follows the region — it is matched against it, not stored
@@ -776,7 +777,7 @@ export default function ZoneAreaScreen() {
       setRegion(previous);
       setMode('region');
     });
-  }, [region, save]);
+  }
 
   // ── Lookup ───────────────────────────────────────────────────────────────
   /** Trace the place the user is standing in, at one of the two sizes.

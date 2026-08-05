@@ -7,6 +7,7 @@ import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
 import { resetOwnMotion } from './ownMotion';
 import { resetPrivacy } from './privacy';
+import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
 import { resetRegionCache } from './zoneArea';
 
@@ -114,6 +115,12 @@ export async function performSignOut(): Promise<void> {
   await stopBackgroundLocationUpdates().catch(() => {});
 
   await AsyncStorage.multiRemove(ACCOUNT_SCOPED_KEYS).catch(() => {});
+
+  // The Google SDK keeps its own idea of who is signed in, on the far side of
+  // AsyncStorage. Left alone, the next tap on the Google button re-signs the
+  // same account in with no chooser — which reads as the sign-out having
+  // failed, and makes a shared phone impossible to switch accounts on.
+  await clearGoogleSession();
 
   // In-memory stores. These survive navigation, so without this the next
   // account inherits the previous user's privacy settings, block list and

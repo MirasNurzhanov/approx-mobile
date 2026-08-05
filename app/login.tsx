@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -6,6 +6,7 @@ import {
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 
+import SocialAuthButtons from '@/components/SocialAuthButtons';
 import { useAuth } from '@/context/AuthContext';
 import { runBusy } from '@/services/busy';
 import { lightColors as L } from '@/constants/theme';
@@ -24,6 +26,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [focused, setFocused]   = useState<'email' | 'password' | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const passwordRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) router.replace('/(tabs)/map');
@@ -45,63 +48,105 @@ export default function LoginScreen() {
       <View style={s.blobBR} />
 
       <KeyboardAvoidingView
-        style={s.inner}
+        style={s.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Header */}
-        <View style={s.header}>
-          <Text style={s.wordmark}>AURA</Text>
-          <Text style={s.tagline}>Find your people nearby</Text>
-        </View>
+        {/* Scrolls rather than centring in a fixed box: with the provider
+            buttons the column is tall enough to run off a small phone once the
+            keyboard is up, and content that cannot be reached is worse than
+            content that is not perfectly centred. `flexGrow` keeps it centred
+            on every screen that does have the room. */}
+        <ScrollView
+          contentContainerStyle={s.inner}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={s.header}>
+            <Text style={s.wordmark}>AURA</Text>
+            <Text style={s.tagline}>Find your people nearby</Text>
+          </View>
 
-        {/* Form */}
-        <View style={s.form}>
-          <TextInput
-            style={[s.input, focused === 'email' && s.inputFocused]}
-            placeholder="Email"
-            placeholderTextColor={L.t3}
-            selectionColor={L.teal}
-            value={email}
-            onChangeText={setEmail}
-            onFocus={() => setFocused('email')}
-            onBlur={() => setFocused(null)}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TextInput
-            style={[s.input, focused === 'password' && s.inputFocused]}
-            placeholder="Password"
-            placeholderTextColor={L.t3}
-            selectionColor={L.teal}
-            value={password}
-            onChangeText={setPassword}
-            onFocus={() => setFocused('password')}
-            onBlur={() => setFocused(null)}
-            secureTextEntry
-          />
+          {/* Form
+              The autofill props below are what make the phone's own password
+              manager offer to fill and to save — iCloud Keychain on iOS, the
+              Android autofill service (Google Password Manager, 1Password,
+              Bitwarden, whichever is set) on Android. It takes both attributes,
+              not either: `autoComplete` is the cross-platform hint Android
+              reads, `textContentType` is the iOS one, and a field with only one
+              of them is filled on one operating system and ignored on the other.
 
-          <Pressable
-            style={({ pressed }) => [s.btn, (pressed || submitting) && s.btnDimmed]}
-            onPress={handleLogin}
-            disabled={submitting}
-            accessibilityRole="button"
-            accessibilityLabel="Sign in"
-          >
-            {submitting
-              ? <ActivityIndicator color={L.bg} size="small" />
-              : <Text style={s.btnLabel}>Sign in</Text>
-            }
-          </Pressable>
-        </View>
+              `username`/`password` — not `newPassword` — is the pairing that
+              makes iOS *offer to save* after a successful sign-in, so the
+              password box has to be a sibling of a field iOS considers the
+              account name. That is why the email field is marked `username`
+              rather than `emailAddress`. */}
+          <View style={s.form}>
+            <TextInput
+              style={[s.input, focused === 'email' && s.inputFocused]}
+              placeholder="Email"
+              placeholderTextColor={L.t3}
+              selectionColor={L.teal}
+              value={email}
+              onChangeText={setEmail}
+              onFocus={() => setFocused('email')}
+              onBlur={() => setFocused(null)}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="username"
+              importantForAutofill="yes"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              submitBehavior="submit"
+            />
+            <TextInput
+              ref={passwordRef}
+              style={[s.input, focused === 'password' && s.inputFocused]}
+              placeholder="Password"
+              placeholderTextColor={L.t3}
+              selectionColor={L.teal}
+              value={password}
+              onChangeText={setPassword}
+              onFocus={() => setFocused('password')}
+              onBlur={() => setFocused(null)}
+              secureTextEntry
+              autoComplete="current-password"
+              textContentType="password"
+              importantForAutofill="yes"
+              returnKeyType="go"
+              // Submitting from the keyboard rather than only from the button is
+              // half of why the save prompt appears: both platforms treat "the
+              // password field was submitted" as the signal that a login just
+              // happened and is worth offering to remember.
+              onSubmitEditing={handleLogin}
+            />
 
-        {/* Footer link */}
-        <View style={s.footer}>
-          <Text style={s.footerText}>Don't have an account? </Text>
-          <Pressable onPress={() => router.push('/register')} hitSlop={8}>
-            <Text style={s.footerLink}>Register</Text>
-          </Pressable>
-        </View>
+            <Pressable
+              style={({ pressed }) => [s.btn, (pressed || submitting) && s.btnDimmed]}
+              onPress={handleLogin}
+              disabled={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="Sign in"
+            >
+              {submitting
+                ? <ActivityIndicator color={L.bg} size="small" />
+                : <Text style={s.btnLabel}>Sign in</Text>
+              }
+            </Pressable>
+
+            <SocialAuthButtons disabled={submitting} />
+          </View>
+
+          {/* Footer link */}
+          <View style={s.footer}>
+            <Text style={s.footerText}>Don't have an account? </Text>
+            <Pressable onPress={() => router.push('/register')} hitSlop={8}>
+              <Text style={s.footerLink}>Register</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -135,9 +180,12 @@ const s = StyleSheet.create({
     backgroundColor: '#E8E4F5',    // violet tint — not in palette
   },
 
+  flex: { flex: 1 },
+
   inner: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 28,
+    paddingVertical: 32,
     justifyContent: 'center',
     gap: 32,
   },

@@ -650,10 +650,10 @@ function useClubsTab(visible: boolean) {
   }, []);
 
   /** Show the spinner, then fetch. For pull-to-refresh and the tab press. */
-  const reload = useCallback(() => {
+  function reload() {
     setLoadingClubs(true);
     fetchClubs();
-  }, [fetchClubs]);
+  }
 
   // One fetch, gated on both conditions. There used to be a plain mount effect
   // beside this that fetched whenever `visible` turned true — and because
@@ -844,7 +844,7 @@ function useChatSearch(
 
 export default function ChatScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
@@ -935,13 +935,13 @@ export default function ChatScreen() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchAll, fetchUnreadBreakdown]));
 
-  const onRefresh = useCallback(async () => {
+  async function onRefresh() {
     setRefreshing(true);
     // Promise `.finally` rather than a `try/finally` block: it stops the spinner
     // on rejection just the same, but React Compiler can compile it, and a
     // `finally` statement makes it bail on this whole screen.
     await fetchAll().finally(() => setRefreshing(false));
-  }, [fetchAll]);
+  }
 
   const friendIds = new Set(friendList.friends.map((f) => f.id));
   const connections = friendList.connections.filter((c) => !friendIds.has(c.id));

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -249,7 +249,7 @@ function MessagesInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MessagesScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { id, username } = useLocalSearchParams<{ id: string; username: string }>();
   const { top, bottom } = useSafeAreaInsets();

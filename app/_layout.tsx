@@ -85,6 +85,10 @@ function AppShell() {
       <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding"      options={{ headerShown: false }} />
       <Stack.Screen name="register"        options={{ headerShown: false }} />
+      {/* Google/Apple sign-ups land here for the one thing neither provider
+          shares. `gestureEnabled: false` because it is the age gate — swiping
+          back out of it would land on a login screen the user is already past. */}
+      <Stack.Screen name="social-birthday" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="interests-setup"         options={{ headerShown: false }} />
       <Stack.Screen name="onboarding-profession"   options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding-nationality"  options={{ headerShown: false, animation: 'slide_from_right' }} />

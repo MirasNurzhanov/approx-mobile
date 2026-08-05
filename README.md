@@ -2,6 +2,62 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Sign in with Google / Apple
+
+The buttons are on `app/login.tsx` and `app/register.tsx`; the flow lives in
+`services/socialAuth.ts` and the server half in `users/socialauth.py` in the
+backend repo. Neither library runs in Expo Go — **you need a dev build**, and a
+new one after any of the config below changes.
+
+A button whose credentials are missing is not rendered, so nothing breaks
+before this is done — the buttons simply are not there.
+
+### Google
+
+1. In the Firebase console for `aura-96d48`, add OAuth clients for **Android**
+   (needs the release *and* debug SHA-1 from `eas credentials`) and **iOS**,
+   then re-download `google-services.json` into the repo root and
+   `GoogleService-Info.plist` next to it.
+2. Add `"googleServicesFile": "./GoogleService-Info.plist"` under `ios` in
+   `app.json`. Android's is already wired.
+3. Copy the **Web** client id from Google Cloud → Credentials into
+   `expo.extra.googleAuth.webClientId` in `app.json`. This one is not optional
+   on any platform: without it Google signs the user in and returns
+   `idToken: null`, and the app reports "Google did not return a sign-in
+   token".
+4. Backend: set `GOOGLE_OAUTH_CLIENT_IDS` to all three ids, comma-separated.
+
+### Apple
+
+1. Enable the **Sign in with Apple** capability on the App ID in the Apple
+   Developer portal. `app.json` already carries `ios.usesAppleSignIn` and the
+   `expo-apple-authentication` plugin.
+2. Backend: set `APPLE_SIGN_IN_CLIENT_IDS=com.arcanix.aura`.
+
+iOS only, by design — Sign in with Apple on Android is a hosted web redirect
+needing a Services ID, which is infrastructure rather than a flag.
+
+### After a social sign-up
+
+Neither provider shares a date of birth, so a newly created account is sent to
+`app/social-birthday.tsx` before anything else. The 13+ floor is enforced
+server-side on both routes into that field (register and profile PATCH).
+
+## Saved passwords
+
+The login and register fields carry both autofill contracts — `autoComplete`
+(Android) and `textContentType` (iOS) — so the phone's own password manager
+fills them and offers to save after a sign-in. Nothing needs configuring: this
+works out of the box on both platforms, with iCloud Keychain, Google Password
+Manager, or any third-party manager the user has set as the autofill service.
+
+Passwords saved this way are scoped to the app. To have them shared with a
+website of the same account, iOS additionally needs
+`ios.associatedDomains: ["webcredentials:<domain>"]` and the matching
+`apple-app-site-association` file served from that domain, and Android needs a
+`assetlinks.json` with the app's signing fingerprint. Neither is set up,
+because Aura has no web login to share credentials with yet.
+
 ## Hobby catalog (interests "Other" flow)
 
 The "Other" option on the interest screens autocompletes against a bundled

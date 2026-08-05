@@ -655,13 +655,16 @@ function useClubsTab(visible: boolean) {
     fetchClubs();
   }, [fetchClubs]);
 
-  useEffect(() => {
-    if (visible) fetchClubs();
-  }, [visible, fetchClubs]);
-
+  // One fetch, gated on both conditions. There used to be a plain mount effect
+  // beside this that fetched whenever `visible` turned true — and because
+  // `useFocusEffect` already fires on the screen's first focus, opening the tab
+  // sent the same three requests twice. Folding `visible` into this callback
+  // keeps the "switched to Clubs while already on screen" case (the identity
+  // changes, so the effect re-runs) without the duplicate on mount, and stops
+  // us fetching clubs for a tab that isn't being looked at.
   useFocusEffect(useCallback(() => {
-    fetchClubs();
-  }, [fetchClubs]));
+    if (visible) fetchClubs();
+  }, [visible, fetchClubs]));
 
   /** Ask the server to work out where we are properly, upstream and all.
    *  The cheap lookup on every load answers from stored boundaries; this is the

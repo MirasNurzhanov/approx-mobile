@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -49,7 +49,7 @@ interface ZoneState {
 
 export default function ZoneTrimScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
@@ -82,10 +82,10 @@ export default function ZoneTrimScreen() {
 
   // Until the file reports its length there is no scale to draw handles on, so
   // the end defaults to "the whole thing" the moment one arrives.
-  const onDuration = useCallback((ms: number) => {
+  const onDuration = (ms: number) => {
     setDuration((current) => current ?? ms);
     setEnd((current) => current ?? ms);
-  }, []);
+  };
 
   const effectiveEnd = end ?? duration ?? 0;
   const dirty = start !== saved.start || (end ?? null) !== saved.end;

@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -871,8 +871,9 @@ export default function ClubChatScreen() {
     } catch {}
   }, [clubId]);
 
-  useEffect(() => { fetchRole(); }, [fetchRole]);
-
+  // `useFocusEffect` runs on the screen's first focus as well as every later
+  // one, so the mount effect that used to sit above this was a second, identical
+  // request for the same club on every open.
   useFocusEffect(useCallback(() => { fetchRole(); }, [fetchRole]));
 
   // ── Delete proposal ───────────────────────────────────────────────────────

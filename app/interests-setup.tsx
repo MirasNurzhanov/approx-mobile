@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   ActivityIndicator,
@@ -244,7 +244,7 @@ export default function InterestsSetupScreen() {
   // Group interests by the category the server gave them. Anything without one
   // — a custom entry from the retired "Other" flow — collects under "More",
   // which is only shown when it has something in it.
-  const byCategory = useMemo(() => {
+  const byCategory = (() => {
     const map = new Map<string, Interest[]>();
     for (const cat of CATEGORIES) map.set(cat.key, []);
     map.set(UNGROUPED.key, []);
@@ -253,25 +253,23 @@ export default function InterestsSetupScreen() {
       (map.get(key) ?? map.get(UNGROUPED.key)!).push(item);
     }
     return map;
-  }, [interests]);
+  })();
 
   /** The bubbles to draw: the nine, plus "More" only if it is not empty. */
-  const bubbles = useMemo<Category[]>(() => {
-    const ungrouped = byCategory.get(UNGROUPED.key) ?? [];
-    if (!ungrouped.length) return CATEGORIES;
+  const bubbles: Category[] = (byCategory.get(UNGROUPED.key) ?? []).length
     // Tucked into the gap at the top right rather than given a slot in the
     // layout, because whether it exists at all depends on the data.
-    return [...CATEGORIES, { ...UNGROUPED, x: 262, y: 6, size: 84 }];
-  }, [byCategory]);
+    ? [...CATEGORIES, { ...UNGROUPED, x: 262, y: 6, size: 84 }]
+    : CATEGORIES;
 
   // Selected count per category
-  const pickedPerCategory = useMemo(() => {
+  const pickedPerCategory = (() => {
     const map = new Map<string, number>();
     for (const [key, items] of byCategory) {
       map.set(key, items.filter(i => selected.has(i.id)).length);
     }
     return map;
-  }, [byCategory, selected]);
+  })();
 
   // ── Screen 2: drill-in ───────────────────────────────────────────────────
   if (step === 'interests') {

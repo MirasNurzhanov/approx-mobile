@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -31,7 +31,7 @@ import {
 
 export default function BlockedUsersScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const { list } = useBlockedUsers();
   const [refreshing, setRefreshing] = useState(false);
@@ -40,7 +40,7 @@ export default function BlockedUsersScreen() {
     refreshBlocked().catch(() => {});
   }, []);
 
-  const onRefresh = useCallback(async () => {
+  const onRefresh = async () => {
     setRefreshing(true);
     try {
       await refreshBlocked();
@@ -48,7 +48,7 @@ export default function BlockedUsersScreen() {
     // The `catch` swallows everything, so this always runs. Deliberately not a
     // `finally` — React Compiler bails on any component containing one.
     setRefreshing(false);
-  }, []);
+  };
 
   function handleUnblock(user: BlockedUserSummary) {
     Alert.alert(

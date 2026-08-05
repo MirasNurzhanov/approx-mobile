@@ -9,11 +9,11 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -64,7 +64,11 @@ function AvatarPicker({ pictureUrl, initial, bgColor, uploading, onPick }: {
   const styles = makeStyles(colors);
   return (
     <>
-      <TouchableOpacity style={styles.avatarWrap} onPress={onPick} activeOpacity={0.85} disabled={uploading}>
+      <Pressable
+        style={({ pressed }) => [styles.avatarWrap, pressed && { opacity: 0.85 }]}
+        onPress={onPick}
+        disabled={uploading}
+      >
         <View style={[styles.avatarRing, { borderColor: bgColor + '55' }]}>
           <View style={[styles.avatar, { backgroundColor: bgColor }]}>
             {pictureUrl
@@ -81,7 +85,7 @@ function AvatarPicker({ pictureUrl, initial, bgColor, uploading, onPick }: {
         <View style={styles.cameraBadge}>
           <Ionicons name="camera" size={12} color="#fff" />
         </View>
-      </TouchableOpacity>
+      </Pressable>
       <Text style={styles.avatarHint}>Tap to change photo</Text>
     </>
   );
@@ -106,13 +110,21 @@ function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone
       <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
         <View style={styles.modalHandle} />
         <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+          <Pressable
+            onPress={onCancel}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalCancel}>Cancel</Text>
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.modalTitle}>Profession</Text>
-          <TouchableOpacity onPress={onDone} hitSlop={10}>
+          <Pressable
+            onPress={onDone}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalDone}>Done</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         <FlatList
@@ -128,10 +140,14 @@ function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone
           renderItem={({ item }) => {
             const sel = draft === item.key;
             return (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => onDraftChange(sel ? null : item.key)}
-                style={[styles.profCard, { width: CARD_W }, sel && styles.profCardSel]}
-                activeOpacity={0.75}
+                style={({ pressed }) => [
+                  styles.profCard,
+                  { width: CARD_W },
+                  sel && styles.profCardSel,
+                  pressed && { opacity: 0.75 },
+                ]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: sel }}
                 accessibilityLabel={item.label}
@@ -140,7 +156,7 @@ function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone
                 <Text style={[styles.profCardLabel, sel && styles.profCardLabelSel]} numberOfLines={2}>
                   {item.label}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             );
           }}
         />
@@ -171,13 +187,21 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
       <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
         <View style={styles.modalHandle} />
         <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+          <Pressable
+            onPress={onCancel}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalCancel}>Cancel</Text>
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.modalTitle}>Nationality</Text>
-          <TouchableOpacity onPress={onDone} hitSlop={10}>
+          <Pressable
+            onPress={onDone}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalDone}>Done</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         <View style={styles.searchBar}>
@@ -194,9 +218,13 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
             returnKeyType="search"
           />
           {query.length > 0 && (
-            <TouchableOpacity onPress={() => onQueryChange('')} hitSlop={10}>
+            <Pressable
+              onPress={() => onQueryChange('')}
+              hitSlop={10}
+              style={({ pressed }) => pressed && { opacity: 0.2 }}
+            >
               <Ionicons name="close-circle" size={18} color={colors.t3} />
-            </TouchableOpacity>
+            </Pressable>
           )}
         </View>
 
@@ -211,10 +239,9 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
           renderItem={({ item }) => {
             const sel = draft === item.code;
             return (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => onDraftChange(sel ? null : item.code)}
-                style={[styles.natRow, sel && styles.natRowSel]}
-                activeOpacity={0.7}
+                style={({ pressed }) => [styles.natRow, sel && styles.natRowSel, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: sel }}
                 accessibilityLabel={item.name}
@@ -222,7 +249,7 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
                 <Text style={styles.natFlag}>{flagEmoji(item.code)}</Text>
                 <Text style={[styles.natName, sel && styles.natNameSel]}>{item.name}</Text>
                 {sel && <Ionicons name="checkmark" size={18} color={colors.teal} />}
-              </TouchableOpacity>
+              </Pressable>
             );
           }}
           ItemSeparatorComponent={() => <View style={styles.natSep} />}
@@ -352,16 +379,25 @@ export default function EditProfileScreen() {
 
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.2 }]}
+        >
           <Ionicons name="chevron-back" size={26} color={colors.teal} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={styles.headerTitle}>Edit Profile</Text>
-        <TouchableOpacity onPress={save} disabled={saving || !username.trim()} hitSlop={12} style={styles.saveBtn}>
+        <Pressable
+          onPress={save}
+          disabled={saving || !username.trim()}
+          hitSlop={12}
+          style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.2 }]}
+        >
           {saving
             ? <ActivityIndicator color={colors.teal} size="small" />
             : <Text style={[styles.saveText, !username.trim() && { opacity: 0.4 }]}>Save</Text>
           }
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {loading ? (
@@ -414,10 +450,9 @@ export default function EditProfileScreen() {
 
             {/* ── Profession ── */}
             <Text style={styles.fieldLabel}>Profession</Text>
-            <TouchableOpacity
-              style={[styles.fieldInput, styles.fieldRow]}
+            <Pressable
+              style={({ pressed }) => [styles.fieldInput, styles.fieldRow, pressed && { opacity: 0.7 }]}
               onPress={() => { setDraftProf(profession); setShowProfPicker(true); }}
-              activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel={professionLabel ?? 'Not set — tap to choose'}
             >
@@ -425,7 +460,7 @@ export default function EditProfileScreen() {
                 {professionLabel ?? 'Not set'}
               </Text>
               <Ionicons name="chevron-forward" size={18} color={colors.t3} />
-            </TouchableOpacity>
+            </Pressable>
 
             {/* ── Nationality ── */}
             <Text style={styles.fieldLabel}>Nationality</Text>
@@ -442,10 +477,9 @@ export default function EditProfileScreen() {
                 </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={[styles.fieldInput, styles.fieldRow]}
+              <Pressable
+                style={({ pressed }) => [styles.fieldInput, styles.fieldRow, pressed && { opacity: 0.7 }]}
                 onPress={() => { setDraftNat(nationality); setNatQuery(''); setShowNatPicker(true); }}
-                activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel={nationalityCountry ? nationalityCountry.name : 'Not set — tap to choose'}
               >
@@ -455,7 +489,7 @@ export default function EditProfileScreen() {
                     : 'Not set'}
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color={colors.t3} />
-              </TouchableOpacity>
+              </Pressable>
             )}
           </ScrollView>
         </KeyboardAvoidingView>

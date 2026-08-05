@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -457,7 +457,7 @@ function UploadSection({ isUpload, uploading, uploadPct, title, onPick, onRemove
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 

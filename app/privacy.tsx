@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -166,7 +166,7 @@ function ToggleRow({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function PrivacyScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);

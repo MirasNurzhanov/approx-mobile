@@ -11,7 +11,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -232,16 +231,14 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
             old 30/30 split left a dead 40% down the middle where a tap did
             nothing at all. Everything interactive renders after these and so
             takes precedence. */}
-        <TouchableOpacity
+        <Pressable
           style={styles.svNavLeft}
-          activeOpacity={1}
           onPress={() => goTo(index - 1)}
           accessibilityRole="button"
           accessibilityLabel="Previous story"
         />
-        <TouchableOpacity
+        <Pressable
           style={styles.svNavRight}
-          activeOpacity={1}
           onPress={() => goTo(index + 1)}
           accessibilityRole="button"
           accessibilityLabel="Next story"
@@ -276,26 +273,30 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
             </Text>
           </View>
           {canSave && (
-            <TouchableOpacity
+            <Pressable
               onPress={toggleSave}
               hitSlop={12}
-              style={[styles.svGlassBtn, isSaved && styles.svGlassBtnActive]}
+              style={({ pressed }) => [
+                styles.svGlassBtn,
+                isSaved && styles.svGlassBtnActive,
+                pressed && { opacity: 0.7 },
+              ]}
               accessibilityRole="button"
               accessibilityLabel={isSaved ? 'Remove from saved' : 'Save story'}
               accessibilityState={{ selected: isSaved, disabled: togglingSave }}
             >
               <IconBookmark size={16} color={isSaved ? colors.teal : colors.t1} filled={isSaved} />
-            </TouchableOpacity>
+            </Pressable>
           )}
-          <TouchableOpacity
+          <Pressable
             onPress={onClose}
             hitSlop={12}
-            style={styles.svGlassBtn}
+            style={({ pressed }) => [styles.svGlassBtn, pressed && { opacity: 0.7 }]}
             accessibilityRole="button"
             accessibilityLabel="Close stories"
           >
             <IconClose size={17} color={colors.t1} />
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         {/* Story text. Legible now because the bottom scrim runs underneath
@@ -327,18 +328,21 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
               onSubmitEditing={sendReply}
               returnKeyType="send"
             />
-            <TouchableOpacity
-              style={[styles.svReplySend, replyText.trim().length > 0 && styles.svReplySendActive]}
+            <Pressable
+              style={({ pressed }) => [
+                styles.svReplySend,
+                replyText.trim().length > 0 && styles.svReplySendActive,
+                pressed && { opacity: 0.8 },
+              ]}
               onPress={sendReply}
               disabled={replyText.trim().length === 0 || sendingReply}
-              activeOpacity={0.8}
             >
               {sendingReply ? (
                 <ActivityIndicator size="small" color={colors.bg} />
               ) : (
                 <IconChevron size={16} color={replyText.trim() ? colors.bg : colors.t3} />
               )}
-            </TouchableOpacity>
+            </Pressable>
           </View>
         )}
 

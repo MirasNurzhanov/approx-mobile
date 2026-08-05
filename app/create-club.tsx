@@ -10,7 +10,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -56,7 +55,10 @@ function EmblemPicker({ emblemUri, onPick }: { emblemUri: string | null; onPick:
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
-    <TouchableOpacity style={styles.emblemWrap} onPress={onPick} activeOpacity={0.8}>
+    <Pressable
+      style={({ pressed }) => [styles.emblemWrap, pressed && { opacity: 0.8 }]}
+      onPress={onPick}
+    >
       {emblemUri ? (
         <Image source={{ uri: emblemUri }} style={styles.emblemImage} />
       ) : (
@@ -68,7 +70,7 @@ function EmblemPicker({ emblemUri, onPick }: { emblemUri: string | null; onPick:
       <View style={styles.emblemBadge}>
         <Ionicons name="camera" size={13} color={colors.bg} />
       </View>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 

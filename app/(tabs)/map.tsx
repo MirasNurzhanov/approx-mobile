@@ -15,7 +15,6 @@ import {
     StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
     View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -576,7 +575,7 @@ function AvatarMarker({
   onPress,
 }: AvatarMarkerProps) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   // Markers rasterize their children: keep tracking until the remote image is
   // drawn, and re-arm briefly when the ring color changes (friend data arrives
   // after the first nearby fetch).
@@ -692,7 +691,7 @@ function SelfMarker({ coordinate, uri, username }: {
   username: string;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   // Same shape as AvatarMarker: the load state carries the uri it belongs to,
   // so changing your own picture is not a reset an effect has to perform.
   const [load, setLoad] = useState<{ uri?: string; ready: boolean; failed: boolean }>(
@@ -761,7 +760,7 @@ function MusicZoneBadge({ center, radius, mine, label, color }: {
   color: string;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   // Same reason as ClusterMarker: let it draw, then freeze the raster — and
   // re-arm on every input that changes what the chip says, or a zone resized or
   // recoloured mid-session keeps drawing the label it first froze.
@@ -799,7 +798,7 @@ function ClusterMarker({ coordinate, count, parked, onPress }: {
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   // Same reason as DotMarker: freeze the raster, but not before it has drawn.
   //
   // Re-arming is the point. Without it the badge froze its first bitmap for
@@ -961,12 +960,16 @@ function LocateButton({
   const tint = following ? colors.teal : state === 'unavailable' ? colors.t3 : colors.t2;
 
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
-      activeOpacity={0.75}
       disabled={state === 'locating'}
       hitSlop={8}
-      style={[styles.locateBtn, following && styles.locateBtnActive, { bottom }]}
+      style={({ pressed }) => [
+        styles.locateBtn,
+        following && styles.locateBtnActive,
+        { bottom },
+        pressed && { opacity: 0.75 },
+      ]}
       accessibilityRole="button"
       accessibilityLabel={LOCATE_LABEL[state]}
       accessibilityHint={LOCATE_HINT[state]}
@@ -980,7 +983,7 @@ function LocateButton({
       ) : (
         <Icon size={22} color={tint} />
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -1020,43 +1023,40 @@ function TopBar({
 
       {/* Markers on a map cannot be focused or read. This is the same data as
           a linear list — the non-visual equivalent of the map itself. */}
-      <TouchableOpacity
+      <Pressable
         onPress={onList}
-        activeOpacity={0.7}
-        style={styles.iconBtn}
+        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel="People nearby, list view"
         accessibilityHint="Opens a readable list of everyone shown on the map"
       >
         <IconList size={20} color={colors.t2} />
-      </TouchableOpacity>
+      </Pressable>
 
-      <TouchableOpacity
+      <Pressable
         onPress={onSearch}
-        activeOpacity={0.7}
-        style={styles.iconBtn}
+        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel="Search for people"
       >
         <IconSearch size={20} color={colors.t2} />
-      </TouchableOpacity>
+      </Pressable>
 
       {/* A shield used to sit here, labelled "privacy and safety", and it
           opened Zone Music. The icon promised one screen and the tap gave
           another; the note is what is actually behind it. */}
-      <TouchableOpacity
+      <Pressable
         onPress={onZoneMusic}
-        activeOpacity={0.7}
-        style={styles.iconBtn}
+        style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel="Zone music"
         accessibilityHint="Choose what plays in your zone and how far it carries"
       >
         <IconMusic size={20} color={colors.t2} />
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }
@@ -1076,7 +1076,7 @@ interface CreateStoryModalProps {
 
 function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -1125,14 +1125,15 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
           <View style={styles.sheetHandle} />
           <View style={styles.createModalHeader}>
             <Text style={styles.createModalTitle}>Drop a Story</Text>
-            <TouchableOpacity
+            <Pressable
               onPress={onClose}
               hitSlop={12}
+              style={({ pressed }) => pressed && { opacity: 0.2 }}
               accessibilityRole="button"
               accessibilityLabel="Close"
             >
               <IconClose size={20} color={colors.t3} />
-            </TouchableOpacity>
+            </Pressable>
           </View>
           {primer}
           <TextInput
@@ -1149,36 +1150,41 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
           {photoUri ? (
             <View style={styles.photoPreviewContainer}>
               <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" />
-              <TouchableOpacity style={styles.removePhotoBtn} onPress={() => setPhotoUri(null)} hitSlop={8}>
+              <Pressable
+                style={({ pressed }) => [styles.removePhotoBtn, pressed && { opacity: 0.2 }]}
+                onPress={() => setPhotoUri(null)}
+                hitSlop={8}
+              >
                 <IconClose size={14} color={colors.t1} />
-              </TouchableOpacity>
+              </Pressable>
             </View>
           ) : null}
           <View style={styles.createModalActions}>
-            <TouchableOpacity
-              style={styles.photoPickBtn}
+            <Pressable
+              style={({ pressed }) => [styles.photoPickBtn, pressed && { opacity: 0.75 }]}
               onPress={takePhoto}
-              activeOpacity={0.75}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Take a photo"
             >
               <IconCamera size={20} color={colors.t2} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.photoPickBtn}
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.photoPickBtn, pressed && { opacity: 0.75 }]}
               onPress={pickPhoto}
-              activeOpacity={0.75}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Choose a photo from your library"
             >
               <IconImage size={20} color={colors.t2} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.postBtn, (!text.trim() || posting) && { opacity: 0.5 }]}
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.postBtn,
+                (!text.trim() || posting) && { opacity: 0.5 },
+                pressed && { opacity: 0.8 },
+              ]}
               onPress={handlePost}
-              activeOpacity={0.8}
               disabled={!text.trim() || posting}
             >
               {posting ? (
@@ -1186,7 +1192,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
               ) : (
                 <Text style={styles.postBtnText}>Post Story</Text>
               )}
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -1313,7 +1319,7 @@ function UserSheet({
   user, sheetY, onDismiss, onFriendChange, viewerCoords, zoneRegion,
 }: SheetProps) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({

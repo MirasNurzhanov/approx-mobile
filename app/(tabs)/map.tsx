@@ -364,8 +364,18 @@ function zoomBucket(latitudeDelta: number): number {
   return 2 ** (Math.round(Math.log2(clamped) * 2) / 2);
 }
 
-/** Refuse to hand the native map a coordinate it can crash on. */
-function isDrawable(p?: GeoPoint | null): p is GeoPoint {
+/** Refuse to hand the native map a coordinate it can crash on.
+ *
+ * `Number.isFinite` does not coerce, so this also rejects the string
+ * coordinates DRF sends for stories and meetups — which is precisely why
+ * people's markers survived the New Architecture and those two did not. The
+ * coercion in services/coords.ts is the real fix; this stays as the last gate
+ * in front of the native view, and additionally rejects the polar latitudes
+ * Mercator cannot project even though they are perfectly real places.
+ *
+ * Generic so `.filter(isDrawable)` narrows to the caller's own row type rather
+ * than flattening it to a bare point. */
+function isDrawable<T extends GeoPoint>(p?: T | null): p is T {
   return (
     !!p &&
     Number.isFinite(p.latitude) &&
@@ -2786,18 +2796,26 @@ export default function MapScreen() {
             username={selfProfile?.username ?? ''}
           />
 
-          {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => (
-            // Keyed by author *and* newest story, so a fresh story remounts
-            // the marker rather than reusing a stale frozen snapshot.
-            <StoryMarker
-              key={`story-author-${authorId}-${authorStories[0].id}`}
-              stories={authorStories}
-              onPress={() => openStoryViewer(authorStories)}
-            />
-          ))}
+          {/* `isDrawable` as well as the numeric coercion at the boundary: the
+              two answer different questions. services/coords.ts guarantees a
+              real coordinate; this guarantees one Google's Mercator projection
+              can actually place, which stops above ±85°. People's markers have
+              always been filtered this way — stories and meetups were not, and
+              were the two that could reach the native map unchecked. */}
+          {Array.from(storiesByAuthor.entries())
+            .filter(([, authorStories]) => isDrawable(authorStories[0]))
+            .map(([authorId, authorStories]) => (
+              // Keyed by author *and* newest story, so a fresh story remounts
+              // the marker rather than reusing a stale frozen snapshot.
+              <StoryMarker
+                key={`story-author-${authorId}-${authorStories[0].id}`}
+                stories={authorStories}
+                onPress={() => openStoryViewer(authorStories)}
+              />
+            ))}
 
           {/* Approved club meetup pins — one per event, above story bubbles. */}
-          {clubMeetups.map((meetup) => (
+          {clubMeetups.filter(isDrawable).map((meetup) => (
             <MeetupMarker
               key={`meetup-${meetup.id}`}
               meetup={meetup}

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,10 +13,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { decodeStoryReply } from '@/services/storyReply';
 import { announce } from '@/hooks/useReduceMotion';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -91,6 +92,160 @@ function normalise(raw: RawMessage, fallbackId?: string): Message {
   };
 }
 
+// ─── Chat pieces ──────────────────────────────────────────────────────────────
+
+function MessagesHeader({ username, otherUserPicture, presence, wsReady, top, onBack, onOpenProfile }: {
+  username?: string;
+  otherUserPicture?: string | null;
+  presence?: Presence | null;
+  wsReady: boolean;
+  top: number;
+  onBack: () => void;
+  onOpenProfile: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={[styles.header, { paddingTop: top + 6 }]}>
+      <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+        <Ionicons name="chevron-back" size={24} color={colors.t1} />
+      </Pressable>
+
+      <Pressable
+        style={({ pressed }) => [styles.headerProfile, pressed && { opacity: 0.7 }]}
+        onPress={onOpenProfile}
+        accessibilityRole="button"
+        accessibilityLabel={`View ${username ?? 'user'}'s profile`}
+      >
+        <Avatar
+          uri={otherUserPicture}
+          name={username ?? 'C'}
+          size="sm"
+          ringColor={colors.t3}
+          presence={presence}
+        />
+
+        <View style={styles.headerInfo}>
+          <View style={styles.headerNameRow}>
+            <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
+          </View>
+          {/* Two different facts, previously conflated: this line is the other
+              person's presence, and the one below is our own socket. The old
+              green dot was driven by `wsReady` — it lit up when *we* connected,
+              regardless of whether they were anywhere near the app. */}
+          {presence ? (
+            <PresenceDot presence={presence} size={7} withText />
+          ) : null}
+          {!wsReady && (
+            <Text style={styles.statusText}>Reconnecting…</Text>
+          )}
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+/** One bubble: a story reply, a photo, or plain text. */
+function MessageBubble({ item, isMine }: { item: Message; isMine: boolean }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const storyReply = decodeStoryReply(item.text);
+  return (
+    <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
+      <View
+        style={[
+          styles.bubble,
+          isMine ? styles.bubbleMine : styles.bubbleTheirs,
+          item.pending && styles.bubblePending,
+        ]}
+      >
+        {storyReply ? (
+          <>
+            <Text style={isMine ? styles.storyReplyLabelMine : styles.storyReplyLabelTheirs}>
+              {isMine ? 'You replied to their story' : 'Replied to your story'}
+            </Text>
+            {storyReply.image ? (
+              <Image
+                source={{ uri: storyReply.image }}
+                style={styles.storyReplyImage}
+                contentFit="cover"
+              />
+            ) : null}
+            {storyReply.excerpt ? (
+              <View style={[styles.storyReplyQuote, isMine ? styles.storyReplyQuoteMine : styles.storyReplyQuoteTheirs]}>
+                <Text
+                  style={isMine ? styles.storyReplyQuoteTextMine : styles.storyReplyQuoteTextTheirs}
+                  numberOfLines={2}
+                >
+                  “{storyReply.excerpt}”
+                </Text>
+              </View>
+            ) : null}
+            <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
+              {storyReply.comment}
+            </Text>
+          </>
+        ) : item.image ? (
+          <Image source={{ uri: item.image }} style={styles.bubbleImage} contentFit="cover" />
+        ) : (
+          <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
+            {item.text}
+          </Text>
+        )}
+        <Text style={[styles.bubbleTime, isMine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs]}>
+          {fmtTime(item.created_at)}{item.pending ? ' ·' : ''}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function MessagesInput({ text, canSend, bottom, onChangeText, onSend, onCamera, onAttach }: {
+  text: string;
+  canSend: boolean;
+  bottom: number;
+  onChangeText: (t: string) => void;
+  onSend: () => void;
+  onCamera: () => void;
+  onAttach: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
+      <Pressable style={styles.attachBtn} onPress={onCamera} hitSlop={4}>
+        <Ionicons name="camera-outline" size={20} color={colors.t3} />
+      </Pressable>
+
+      <Pressable style={styles.attachBtn} onPress={onAttach} hitSlop={4}>
+        <Ionicons name="image-outline" size={20} color={colors.t3} />
+      </Pressable>
+
+      <TextInput
+        style={styles.input}
+        value={text}
+        onChangeText={onChangeText}
+        placeholder="Message…"
+        placeholderTextColor={colors.t3}
+        multiline
+        maxLength={2000}
+      />
+
+      <Pressable
+        style={[styles.sendBtn, canSend && styles.sendBtnActive]}
+        onPress={onSend}
+        disabled={!canSend}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Send message"
+        accessibilityState={{ disabled: !canSend }}
+      >
+        <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
+      </Pressable>
+    </View>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MessagesScreen() {
   const { colors } = useTheme();
@@ -114,9 +269,8 @@ export default function MessagesScreen() {
 
 
   useEffect(() => {
-    console.log("[Messages] fetching current user profile..")
     api.get<{ id: number | string }>('/api/users/profile/')
-      .then((r) => {console.log("[Messages] User's current id:" , r.data.id) ,  currentUserIdRef.current = Number(r.data.id); })
+      .then((r) => { currentUserIdRef.current = Number(r.data.id); })
       .catch(() => {});
 
     // Presence rides the profile fetch this screen already makes. Refreshed on
@@ -245,9 +399,11 @@ export default function MessagesScreen() {
       { id: tempId, image: asset.uri, sender_id: currentUserIdRef.current ?? -1, created_at: new Date().toISOString(), pending: true },
     ]);
 
-    const formData = new FormData();
-    formData.append('image', { uri: asset.uri, type: asset.mimeType ?? 'image/jpeg', name: 'attachment.jpg' } as any);
-    api.post(`/api/friends/messages/${id}/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
+    // Straight to Cloudinary, then only the URL to Django — the server
+    // broadcasts it over the socket to both ends like any other message.
+    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
+      .then((imageUrl) => api.post(`/api/friends/messages/${id}/`, { image_url: imageUrl }))
+      .catch(() => {});
   }
 
   async function handleAttach() {
@@ -285,43 +441,15 @@ export default function MessagesScreen() {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [styles.headerProfile, pressed && { opacity: 0.7 }]}
-          onPress={() => router.push({ pathname: '/profile/[id]', params: { id, username: username ?? '' } })}
-          accessibilityRole="button"
-          accessibilityLabel={`View ${username ?? 'user'}'s profile`}
-        >
-          <Avatar
-            uri={otherUserPicture}
-            name={username ?? 'C'}
-            size="sm"
-            ringColor={colors.t3}
-            presence={presence}
-          />
-
-          <View style={styles.headerInfo}>
-            <View style={styles.headerNameRow}>
-              <Text style={styles.headerName} numberOfLines={1}>{username ?? 'Chat'}</Text>
-            </View>
-          {/* Two different facts, previously conflated: this line is the other
-              person's presence, and the one below is our own socket. The old
-              green dot was driven by `wsReady` — it lit up when *we* connected,
-              regardless of whether they were anywhere near the app. */}
-          {presence ? (
-            <PresenceDot presence={presence} size={7} withText />
-          ) : null}
-          {!wsReady && (
-            <Text style={styles.statusText}>Reconnecting…</Text>
-          )}
-          </View>
-        </Pressable>
-      </View>
+      <MessagesHeader
+        username={username}
+        otherUserPicture={otherUserPicture}
+        presence={presence}
+        wsReady={wsReady}
+        top={top}
+        onBack={() => router.back()}
+        onOpenProfile={() => router.push({ pathname: '/profile/[id]', params: { id, username: username ?? '' } })}
+      />
 
       {/* Messages */}
       {loading ? (
@@ -335,98 +463,29 @@ export default function MessagesScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={5}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyText}>No messages yet — say hello!</Text>
             </View>
           }
-          renderItem={({ item }) => {
-            const isMine = item.sender_id === currentUserIdRef.current;
-            const storyReply = decodeStoryReply(item.text);
-            return (
-              <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
-                <View
-                  style={[
-                    styles.bubble,
-                    isMine ? styles.bubbleMine : styles.bubbleTheirs,
-                    item.pending && styles.bubblePending,
-                  ]}
-                >
-                  {storyReply ? (
-                    <>
-                      <Text style={isMine ? styles.storyReplyLabelMine : styles.storyReplyLabelTheirs}>
-                        {isMine ? 'You replied to their story' : 'Replied to your story'}
-                      </Text>
-                      {storyReply.image ? (
-                        <Image
-                          source={{ uri: storyReply.image }}
-                          style={styles.storyReplyImage}
-                          resizeMode="cover"
-                        />
-                      ) : null}
-                      {storyReply.excerpt ? (
-                        <View style={[styles.storyReplyQuote, isMine ? styles.storyReplyQuoteMine : styles.storyReplyQuoteTheirs]}>
-                          <Text
-                            style={isMine ? styles.storyReplyQuoteTextMine : styles.storyReplyQuoteTextTheirs}
-                            numberOfLines={2}
-                          >
-                            “{storyReply.excerpt}”
-                          </Text>
-                        </View>
-                      ) : null}
-                      <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
-                        {storyReply.comment}
-                      </Text>
-                    </>
-                  ) : item.image ? (
-                    <Image source={{ uri: item.image }} style={styles.bubbleImage} resizeMode="cover" />
-                  ) : (
-                    <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>
-                      {item.text}
-                    </Text>
-                  )}
-                  <Text style={[styles.bubbleTime, isMine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs]}>
-                    {fmtTime(item.created_at)}{item.pending ? ' ·' : ''}
-                  </Text>
-                </View>
-              </View>
-            );
-          }}
+          renderItem={({ item }) => (
+            <MessageBubble item={item} isMine={item.sender_id === currentUserIdRef.current} />
+          )}
         />
       )}
 
-      {/* Input bar */}
-      <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
-        <Pressable style={styles.attachBtn} onPress={handleCamera} hitSlop={4}>
-          <Ionicons name="camera-outline" size={20} color={colors.t3} />
-        </Pressable>
-
-        <Pressable style={styles.attachBtn} onPress={handleAttach} hitSlop={4}>
-          <Ionicons name="image-outline" size={20} color={colors.t3} />
-        </Pressable>
-
-        <TextInput
-          style={styles.input}
-          value={text}
-          onChangeText={setText}
-          placeholder="Message…"
-          placeholderTextColor={colors.t3}
-          multiline
-          maxLength={2000}
-        />
-
-        <Pressable
-          style={[styles.sendBtn, canSend && styles.sendBtnActive]}
-          onPress={sendText}
-          disabled={!canSend}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Send message"
-          accessibilityState={{ disabled: !canSend }}
-        >
-          <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
-        </Pressable>
-      </View>
+      <MessagesInput
+        text={text}
+        canSend={canSend}
+        bottom={bottom}
+        onChangeText={setText}
+        onSend={sendText}
+        onCamera={handleCamera}
+        onAttach={handleAttach}
+      />
       {primer}
     </KeyboardAvoidingView>
   );

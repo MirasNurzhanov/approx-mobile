@@ -61,7 +61,7 @@ function ActionBtn({
   onMessage: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   if (rel !== 'stranger') {
     return (
       <Pressable
@@ -108,7 +108,7 @@ function UserCard({
   onPress: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const rel = user.relationship ?? 'stranger';
   const count = sharedCount(user);
 
@@ -160,6 +160,23 @@ export default function SearchScreen() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
 
+  // Declared before `handleChange`, which captures it in the debounce timer.
+  // Hoisting would let it sit below, but React Compiler cannot rewrite a
+  // reference to a function hoisted from further down and gives up on the whole
+  // screen, so the definition order is load-bearing here.
+  async function doSearch(q: string) {
+    setLoading(true);
+    setSearched(true);
+    try {
+      const { data } = await api.get<SearchUser[]>(`/api/users/search/?q=${encodeURIComponent(q)}`);
+      setResults(Array.isArray(data) ? data : []);
+    } catch {
+      setResults([]);
+    }
+    // Reached on both paths: the `catch` empties the list and stops there.
+    setLoading(false);
+  }
+
   function handleChange(text: string) {
     setQuery(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -170,19 +187,6 @@ export default function SearchScreen() {
       return;
     }
     debounceRef.current = setTimeout(() => doSearch(trimmed), 400);
-  }
-
-  async function doSearch(q: string) {
-    setLoading(true);
-    setSearched(true);
-    try {
-      const { data } = await api.get<SearchUser[]>(`/api/users/search/?q=${encodeURIComponent(q)}`);
-      setResults(Array.isArray(data) ? data : []);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
   }
 
   function clear() {
@@ -240,6 +244,8 @@ export default function SearchScreen() {
       <FlatList
         data={results}
         keyExtractor={(item) => String(item.id)}
+        windowSize={5}
+        initialNumToRender={8}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

@@ -18,6 +18,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { loginRequest } from '@/services/auth';
+import { runBusy } from '@/services/busy';
 import { BASE_URL } from '@/services/api';
 import { fonts, lightColors as L, radius } from '@/constants/theme';
 
@@ -289,7 +290,7 @@ export default function RegisterScreen() {
       return;
     }
     setSubmitting(true);
-    try {
+    await runBusy(async () => {
       await axios.post(`${BASE_URL}/api/users/register/`, {
         username,
         email,
@@ -299,7 +300,7 @@ export default function RegisterScreen() {
       });
       await loginRequest(email, password);
       router.replace('/interests-setup');
-    } catch (err) {
+    }, () => setSubmitting(false)).catch((err) => {
       if (axios.isAxiosError(err) && err.response?.data) {
         const data = err.response.data;
         if (typeof data === 'object' && !Array.isArray(data)) {
@@ -310,9 +311,7 @@ export default function RegisterScreen() {
       } else {
         setErrors({ non_field_errors: ['Registration failed. Please try again.'] });
       }
-    } finally {
-      setSubmitting(false);
-    }
+    });
   }
 
   const fe = (field: string) => errors[field]?.[0];

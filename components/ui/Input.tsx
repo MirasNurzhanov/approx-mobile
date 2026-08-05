@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   TextInput,
   View,
@@ -52,7 +52,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function Input({ label, error, hint, prefix, suffix, style, ...rest }: InputProps) {
   const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
+  const styles = makeStyles(colors)
   const [focused, setFocused] = useState(false)
 
   return (

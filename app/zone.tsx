@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,10 +11,12 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { ZonePlayer } from '@/components/ZonePlayer';
 import { IconClose, IconInfo, IconLock, IconMusic, IconUpload } from '@/components/ui/icons';
@@ -26,11 +26,10 @@ import { useTheme } from '@/context/ThemeContext';
 import { AppleMusicError, clearAppleZoneTrack } from '@/services/appleMusic';
 import {
   refreshPrivacy,
-  updatePrivacy,
   usePrivacySettings,
   type Audience,
 } from '@/services/privacy';
-import { fmtRadius, fmtTime, loadZonePresets, trackTitle, type ZonePreset } from '@/services/zoneAudio';
+import { fmtRadius, fmtTime, trackTitle } from '@/services/zoneAudio';
 import { RADIUS_MAX_M, RADIUS_MIN_M } from '@/services/zoneArea';
 
 // The music your zone carries: what plays, who is allowed to hear it, and a way
@@ -49,19 +48,14 @@ import { RADIUS_MAX_M, RADIUS_MIN_M } from '@/services/zoneArea';
 // hears it. One number could not serve both, so there are two, and the second
 // one stays invisible until someone switches it on.
 //
-// Three things can fill the one audio slot — an Apple Music track, an upload, a
-// preset — and the last one picked wins. A zone plays one thing.
+// Two things can fill the one audio slot — an Apple Music track or an upload —
+// and the last one picked wins. A zone plays one thing.
 //
-// Everything saves as you touch it. The old screen collected a preset, a file
-// and a switch and then asked you to press Save, which meant the preset (which
-// saved immediately) and the switch (which did not) disagreed about what was
-// live.
+// Everything saves as you touch it — there is no separate Save step to leave
+// a choice half-committed.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
-
 interface ZoneState {
-  zone_preset?: string;
   zone_active?: boolean;
   /** Read here, never written: the size of your zone is not something this
    *  screen sets. Listed so the server's echo round-trips intact. */
@@ -94,23 +88,371 @@ interface ZoneState {
   zone_track_end_ms?: number | null;
 }
 
-// ─── Preset icon mapping ──────────────────────────────────────────────────────
-const PRESET_ICONS: Record<string, IoniconsName> = {
-  rain:      'rainy-outline',
-  cafe:      'cafe-outline',
-  forest:    'leaf-outline',
-  ocean:     'water-outline',
-  fireplace: 'flame-outline',
-  lofi:      'musical-notes-outline',
-};
-
 /** Decorative level meter on the upload tile. Fixed shape: it stands for
  *  "audio goes here", it is not a reading of anything. */
 const WAVE = [7, 13, 22, 15, 28, 20, 34, 24, 16, 27, 11, 20, 31, 18, 9, 15, 24, 13, 7, 17];
 
-// ─── Card width for 2-column grid ────────────────────────────────────────────
-const SCREEN_W = Dimensions.get('window').width;
-const CARD_W = (SCREEN_W - 40 - 10) / 2; // 20px side padding each side, 10px gap
+// ─── Sections ─────────────────────────────────────────────────────────────────
+// One component per band of the screen. The screen owns the zone state and the
+// PATCHes; these only render it.
+
+/** The track itself, the loop window, and who can hear it. */
+function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, trimmed, audience, onEditLoop }: {
+  zone: ZoneState;
+  audioUrl: string | null;
+  title: string | null;
+  earshot: number;
+  inheritsRegion: boolean;
+  trimmed: boolean;
+  audience: Audience;
+  onEditLoop: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>PLAYING IN YOUR ZONE</Text>
+
+      {audioUrl ? (
+        <ZonePlayer
+          // Remounts when the track changes, so switching between an
+          // upload and an Apple track can never leave the previous one
+          // loaded.
+          key={audioUrl}
+          url={audioUrl}
+          title={title ?? 'Zone audio'}
+          artwork={zone.zone_apple_artwork}
+          subtitle={
+            inheritsRegion
+              ? 'Loops for anyone inside your zone'
+              : `Loops for anyone within ${fmtRadius(earshot)}`
+          }
+          startMs={zone.zone_track_start_ms ?? 0}
+          endMs={zone.zone_track_end_ms ?? null}
+          accessibilityName="your zone track"
+        />
+      ) : (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyText}>
+            Nothing is playing in your zone yet. Pick a song from Apple Music
+            or upload your own track below — anyone who walks into earshot
+            can then choose to play it.
+          </Text>
+        </View>
+      )}
+
+      {/* Which slice repeats. Only offered when there is something to trim,
+          and it says what the loop currently *is* rather than "Trim" — the
+          current state is the useful half, and it is otherwise invisible
+          until you press play and wait for the seam. */}
+      {audioUrl && (
+        <Pressable
+          onPress={onEditLoop}
+          style={({ pressed }) => [styles.loopRow, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={
+            trimmed
+              ? `Loop is ${fmtTime(zone.zone_track_start_ms ?? 0)} to ${fmtTime(zone.zone_track_end_ms ?? 0)}. Edit it.`
+              : 'Trim which part of the track loops'
+          }
+        >
+          <Ionicons name="repeat" size={17} color={colors.teal} />
+          <Text style={styles.loopText}>
+            {trimmed
+              ? `Loops ${fmtTime(zone.zone_track_start_ms ?? 0)} – ${fmtTime(zone.zone_track_end_ms ?? 0)}`
+              : 'Loops the whole track'}
+          </Text>
+          <Text style={styles.loopAction}>{trimmed ? 'Edit' : 'Trim'}</Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.t3} />
+        </Pressable>
+      )}
+
+      {/* Who can hear it. Not a toggle: a music zone is never audible or
+          visible to a stranger, whatever this says — only "hidden from
+          everyone" (set in Privacy & safety) changes anything here. */}
+      <View style={styles.controlRow}>
+        <IconLock size={18} color={colors.t2} />
+        <View style={styles.controlText}>
+          <Text style={styles.controlLabel}>Audible to connections & friends</Text>
+          <Text style={styles.controlHint}>
+            {audience === 'nobody'
+              ? 'Zone audio is hidden from everyone in Privacy & safety.'
+              : 'Strangers never see or hear this zone.'}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * How far the sound carries.
+ *
+ * A zone is a radar and a music zone is a speaker, and they were one number.
+ * Widening your zone to be found by more people also handed all of them your
+ * track; narrowing it so only the next table hears the music also took you off
+ * everyone else's map. Two dials now, and the second one only exists once you
+ * ask for it — while the switch is off earshot is still the zone, exactly as it
+ * always was.
+ */
+function EarshotSection({ musicSeparate, musicRadius, earshot, inheritsRegion, musicAlerts, saving, onToggleSeparate, onRadiusChange, onRadiusCommit, onToggleAlerts }: {
+  musicSeparate: boolean;
+  musicRadius: number;
+  earshot: number;
+  inheritsRegion: boolean;
+  musicAlerts: boolean;
+  saving: boolean;
+  onToggleSeparate: (v: boolean) => void;
+  onRadiusChange: (next: number) => void;
+  onRadiusCommit: (next: number) => void;
+  onToggleAlerts: (v: boolean) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>HOW FAR IT CARRIES</Text>
+
+      <View style={styles.controlRow}>
+        <IconMusic size={18} color={colors.t2} />
+        <View style={styles.controlText}>
+          <Text style={styles.controlLabel}>A separate zone for music</Text>
+          <Text style={styles.controlHint}>
+            {musicSeparate
+              ? `People hear you within ${fmtRadius(earshot)}, whatever size your zone is.`
+              : inheritsRegion
+                ? 'Off — the music reaches everyone inside the place your zone covers.'
+                : `Off — the music reaches as far as your zone does (${fmtRadius(earshot)}).`}
+          </Text>
+        </View>
+        <Switch
+          value={musicSeparate}
+          onValueChange={onToggleSeparate}
+          trackColor={{ false: colors.surface2, true: colors.teal }}
+          thumbColor={colors.t1}
+          ios_backgroundColor={colors.surface2}
+        />
+      </View>
+
+      {musicSeparate && (
+        <View style={styles.dialCard}>
+          <View style={styles.readoutRow}>
+            <Text style={styles.readoutLabel}>Earshot</Text>
+            <Text style={styles.readout}>{fmtRadius(musicRadius)}</Text>
+          </View>
+          <RadiusSlider
+            value={musicRadius}
+            min={RADIUS_MIN_M}
+            max={RADIUS_MAX_M}
+            onChange={onRadiusChange}
+            onCommit={onRadiusCommit}
+            format={fmtRadius}
+            label="Music zone radius"
+            disabled={saving}
+          />
+        </View>
+      )}
+
+      <View style={styles.controlRow}>
+        <Ionicons name="notifications-outline" size={18} color={colors.t2} />
+        <View style={styles.controlText}>
+          <Text style={styles.controlLabel}>Tell me about music zones</Text>
+          <Text style={styles.controlHint}>
+            {musicAlerts
+              ? 'When a friend walks into earshot of your track — and when you walk into theirs.'
+              : 'Off. Zones still work; nobody is told about them.'}
+          </Text>
+        </View>
+        <Switch
+          value={musicAlerts}
+          onValueChange={onToggleAlerts}
+          trackColor={{ false: colors.surface2, true: colors.teal }}
+          thumbColor={colors.t1}
+          ios_backgroundColor={colors.surface2}
+        />
+      </View>
+    </View>
+  );
+}
+
+function AppleMusicSection({ zone, isApple, appleTitle, onBrowse, onRemove }: {
+  zone: ZoneState;
+  isApple: boolean;
+  appleTitle: string | null;
+  onBrowse: () => void;
+  onRemove: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>FROM APPLE MUSIC</Text>
+
+      {isApple ? (
+        <View style={styles.fileCard}>
+          {zone.zone_apple_artwork ? (
+            <Image source={{ uri: zone.zone_apple_artwork }} style={styles.appleArt} />
+          ) : (
+            <View style={styles.fileIcon}>
+              <IconMusic size={20} color={colors.teal} />
+            </View>
+          )}
+          <View style={styles.fileText}>
+            <Text style={styles.fileName} numberOfLines={1}>{appleTitle}</Text>
+            <Text style={styles.fileHint} numberOfLines={1}>
+              {zone.zone_apple_artist
+                ? `${zone.zone_apple_artist} · 30-second preview`
+                : '30-second preview'}
+            </Text>
+          </View>
+          <Pressable
+            onPress={onBrowse}
+            hitSlop={8}
+            style={({ pressed }) => [styles.fileAction, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Pick a different Apple Music track"
+          >
+            <Text style={styles.fileActionText}>Change</Text>
+          </Pressable>
+          <Pressable
+            onPress={onRemove}
+            hitSlop={8}
+            style={({ pressed }) => [styles.fileRemove, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Remove this Apple Music track"
+          >
+            <IconClose size={16} color={colors.t3} />
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable
+          onPress={onBrowse}
+          style={({ pressed }) => [styles.appleTile, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Search Apple Music"
+          accessibilityHint="Opens the catalogue to pick a song for your zone"
+        >
+          <View style={styles.appleRing}>
+            <IconMusic size={22} color={colors.teal} />
+          </View>
+          <View style={styles.appleTileText}>
+            <Text style={styles.uploadTitle}>Search the catalogue</Text>
+            <Text style={styles.appleTileHint}>
+              Pick any song on Apple Music. Zones play the 30-second preview —
+              full tracks need each listener&rsquo;s own subscription.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.t3} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function UploadSection({ isUpload, uploading, uploadPct, title, onPick, onRemove }: {
+  isUpload: boolean;
+  uploading: boolean;
+  uploadPct: number | null;
+  title: string | null;
+  onPick: () => void;
+  onRemove: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>YOUR TRACK</Text>
+
+      {isUpload && !uploading ? (
+        <View style={styles.fileCard}>
+          <View style={styles.fileIcon}>
+            <Ionicons name="musical-notes" size={20} color={colors.teal} />
+          </View>
+          <View style={styles.fileText}>
+            <Text style={styles.fileName} numberOfLines={1}>{title}</Text>
+            <Text style={styles.fileHint}>Your upload · loops in your zone</Text>
+          </View>
+          <Pressable
+            onPress={onPick}
+            hitSlop={8}
+            style={({ pressed }) => [styles.fileAction, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Replace your zone track"
+          >
+            <Text style={styles.fileActionText}>Replace</Text>
+          </Pressable>
+          <Pressable
+            onPress={onRemove}
+            hitSlop={8}
+            style={({ pressed }) => [styles.fileRemove, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Remove your zone track"
+          >
+            <IconClose size={16} color={colors.t3} />
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable
+          onPress={onPick}
+          disabled={uploading}
+          style={({ pressed }) => [styles.uploadTile, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Upload a track for your zone"
+          accessibilityHint="Opens your files. MP3, M4A or WAV."
+        >
+          <View style={styles.uploadRing}>
+            {uploading ? (
+              <ActivityIndicator color={colors.teal} />
+            ) : (
+              <IconUpload size={26} color={colors.teal} />
+            )}
+          </View>
+
+          <Text style={styles.uploadTitle}>
+            {uploading ? 'Uploading your track…' : 'Upload your own track'}
+          </Text>
+          <Text style={styles.uploadHint}>
+            {uploading
+              ? 'Keep this screen open until it finishes'
+              : 'MP3, M4A or WAV — it loops while people are inside your zone'}
+          </Text>
+
+          {/* Decorative while idle; while uploading the same bars fill left
+              to right, so the tile becomes its own progress meter. */}
+          <View style={styles.wave}>
+            {WAVE.map((h, i) => {
+              const reached = uploading && (i / WAVE.length) * 100 <= (uploadPct ?? 0);
+              return (
+                <View
+                  key={i}
+                  style={[
+                    styles.waveBar,
+                    { height: h },
+                    uploading && (reached ? styles.waveBarOn : styles.waveBarOff),
+                  ]}
+                />
+              );
+            })}
+          </View>
+
+          {uploading ? (
+            <Text style={styles.uploadPct}>{uploadPct}%</Text>
+          ) : (
+            <View style={styles.uploadCta}>
+              <Text style={styles.uploadCtaText}>Choose a file</Text>
+            </View>
+          )}
+        </Pressable>
+      )}
+
+      <Text style={styles.footnote}>
+        A zone plays one thing at a time, so whichever of the two you pick
+        last — a song or your own file — replaces the other. Changes save
+        as you make them.
+      </Text>
+    </View>
+  );
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneScreen() {
@@ -119,7 +461,6 @@ export default function ZoneScreen() {
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
-  const [presets, setPresets] = useState<ZonePreset[]>([]);
   const [zone, setZone] = useState<ZoneState>({ zone_active: true, zone_radius: 500 });
   /** Name of the file this session uploaded — nicer than the URL it became. */
   const [uploadName, setUploadName] = useState<string | null>(null);
@@ -133,13 +474,8 @@ export default function ZoneScreen() {
 
   useEffect(() => {
     async function init() {
-      const [zoneRes, presetList] = await Promise.allSettled([
-        api.get<ZoneState>('/api/users/zone/'),
-        loadZonePresets(),
-      ]);
-
-      if (zoneRes.status === 'fulfilled') setZone(zoneRes.value.data);
-      if (presetList.status === 'fulfilled') setPresets(presetList.value);
+      const zoneRes = await api.get<ZoneState>('/api/users/zone/').catch(() => null);
+      if (zoneRes) setZone(zoneRes.data);
       // The friends-only switch mirrors the privacy store, which may not have
       // been fetched yet this session.
       refreshPrivacy().catch(() => {});
@@ -164,12 +500,11 @@ export default function ZoneScreen() {
   }, []));
 
   const audioUrl = zone.zone_audio_url ?? null;
-  const preset = zone.zone_preset || null;
   const active = zone.zone_active ?? false;
   const appleTitle = zone.zone_apple_title || null;
   const isApple = Boolean(zone.zone_apple_preview_url);
   const title = audioUrl
-    ? (appleTitle ?? uploadName ?? trackTitle(audioUrl, presets))
+    ? (appleTitle ?? uploadName ?? trackTitle(audioUrl))
     : null;
 
   const musicSeparate = zone.music_zone_separate ?? false;
@@ -186,23 +521,21 @@ export default function ZoneScreen() {
   const trimmed = zone.zone_track_end_ms != null;
 
   /**
-   * Optimistic PATCH. The response is authoritative — the server clears a
-   * preset when a file arrives and vice versa, so the state that lands here is
-   * the one it echoes back, not the one we sent.
+   * Optimistic PATCH. The response is authoritative — the server clears an
+   * Apple track when a file arrives and vice versa, so the state that lands
+   * here is the one it echoes back, not the one we sent.
    */
   async function patchZone(body: Record<string, unknown>, optimistic?: Partial<ZoneState>) {
     const previous = zone;
     if (optimistic) setZone({ ...zone, ...optimistic });
     setSaving(true);
-    try {
+    await runBusy(async () => {
       const r = await api.patch<ZoneState>('/api/users/zone/', body);
       setZone(r.data);
-    } catch (e: any) {
+    }, () => setSaving(false)).catch((e: any) => {
       setZone(previous);
       Alert.alert('Could not save', e?.response?.data?.detail ?? 'Please try again.');
-    } finally {
-      setSaving(false);
-    }
+    });
   }
 
   function setMusicSeparate(separate: boolean) {
@@ -223,15 +556,6 @@ export default function ZoneScreen() {
 
   function setMusicAlerts(on: boolean) {
     patchZone({ music_zone_alerts: on }, { music_zone_alerts: on });
-  }
-
-  function selectPreset(id: string) {
-    // Tapping the selected preset again clears it — the grid has no "None"
-    // tile any more, because the thing you actually want is "stop playing
-    // this", and that is the tile you are already looking at.
-    const next = preset === id ? '' : id;
-    setUploadName(null);
-    patchZone({ zone_preset: next }, { zone_preset: next });
   }
 
   async function pickAudio() {
@@ -264,15 +588,15 @@ export default function ZoneScreen() {
       setUploadName(asset.name.replace(/\.[a-z0-9]{2,4}$/i, ''));
     } catch (e: any) {
       Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload that file.');
-    } finally {
-      setUploadPct(null);
     }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setUploadPct(null);
   }
 
   function removeAudio() {
     Alert.alert(
       'Remove your track?',
-      'Your zone goes quiet until you upload another one or pick a preset.',
+      'Your zone goes quiet until you upload another one or pick a song.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -290,7 +614,7 @@ export default function ZoneScreen() {
   function removeAppleTrack() {
     Alert.alert(
       'Remove this track?',
-      'Your zone goes quiet until you pick another song, a preset, or upload a file.',
+      'Your zone goes quiet until you pick another song or upload a file.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -298,28 +622,19 @@ export default function ZoneScreen() {
           style: 'destructive',
           onPress: async () => {
             setSaving(true);
-            try {
-              setZone(await clearAppleZoneTrack<ZoneState>());
-            } catch (e: unknown) {
+            await runBusy(
+              async () => setZone(await clearAppleZoneTrack<ZoneState>()),
+              () => setSaving(false),
+            ).catch((e: unknown) =>
               Alert.alert(
                 'Could not remove it',
                 e instanceof AppleMusicError ? e.message : 'Please try again.',
-              );
-            } finally {
-              setSaving(false);
-            }
+              ),
+            );
           },
         },
       ],
     );
-  }
-
-  async function setFriendsOnly(friendsOnly: boolean) {
-    try {
-      await updatePrivacy({ visibility_zone_audio: friendsOnly ? 'friends' : 'everyone' });
-    } catch {
-      Alert.alert('Could not update', 'Your previous setting is still in effect.');
-    }
   }
 
   if (loading) {
@@ -331,10 +646,10 @@ export default function ZoneScreen() {
   }
 
   const uploading = uploadPct !== null;
-  // Three things can fill the one slot now, so "not a preset" is no longer the
-  // same as "an upload" — without the Apple test a chosen song would be drawn
-  // as a file the user never uploaded.
-  const isUpload = Boolean(zone.zone_audio) && !preset && !isApple;
+  // Two things can fill the one slot now, so "an upload" needs the Apple test
+  // too — without it a chosen song would be drawn as a file the user never
+  // uploaded.
+  const isUpload = Boolean(zone.zone_audio) && !isApple;
 
   return (
     <View style={styles.root}>
@@ -374,342 +689,46 @@ export default function ZoneScreen() {
           </View>
         )}
 
-        {/* ── The music the zone carries ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>PLAYING IN YOUR ZONE</Text>
+        <NowPlayingSection
+          zone={zone}
+          audioUrl={audioUrl}
+          title={title}
+          earshot={earshot}
+          inheritsRegion={inheritsRegion}
+          trimmed={trimmed}
+          audience={audience}
+          onEditLoop={() => router.push('/zone-trim')}
+        />
 
-          {audioUrl ? (
-            <ZonePlayer
-              // Remounts when the track changes, so switching presets can never
-              // leave the previous one loaded.
-              key={audioUrl}
-              url={audioUrl}
-              title={title ?? 'Zone audio'}
-              artwork={zone.zone_apple_artwork}
-              subtitle={
-                inheritsRegion
-                  ? 'Loops for anyone inside your zone'
-                  : `Loops for anyone within ${fmtRadius(earshot)}`
-              }
-              startMs={zone.zone_track_start_ms ?? 0}
-              endMs={zone.zone_track_end_ms ?? null}
-              accessibilityName="your zone track"
-            />
-          ) : (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>
-                Nothing is playing in your zone yet. Pick a song from Apple Music,
-                upload your own track, or choose a preset below — anyone who walks
-                into earshot can then choose to play it.
-              </Text>
-            </View>
-          )}
+        <EarshotSection
+          musicSeparate={musicSeparate}
+          musicRadius={musicRadius}
+          earshot={earshot}
+          inheritsRegion={inheritsRegion}
+          musicAlerts={musicAlerts}
+          saving={saving}
+          onToggleSeparate={setMusicSeparate}
+          onRadiusChange={(next) => setZone((z) => ({ ...z, music_zone_radius: next }))}
+          onRadiusCommit={commitMusicRadius}
+          onToggleAlerts={setMusicAlerts}
+        />
 
-          {/* Which slice repeats. Only offered when there is something to trim,
-              and it says what the loop currently *is* rather than "Trim" — the
-              current state is the useful half, and it is otherwise invisible
-              until you press play and wait for the seam. */}
-          {audioUrl && (
-            <Pressable
-              onPress={() => router.push('/zone-trim')}
-              style={({ pressed }) => [styles.loopRow, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={
-                trimmed
-                  ? `Loop is ${fmtTime(zone.zone_track_start_ms ?? 0)} to ${fmtTime(zone.zone_track_end_ms ?? 0)}. Edit it.`
-                  : 'Trim which part of the track loops'
-              }
-            >
-              <Ionicons name="repeat" size={17} color={colors.teal} />
-              <Text style={styles.loopText}>
-                {trimmed
-                  ? `Loops ${fmtTime(zone.zone_track_start_ms ?? 0)} – ${fmtTime(zone.zone_track_end_ms ?? 0)}`
-                  : 'Loops the whole track'}
-              </Text>
-              <Text style={styles.loopAction}>{trimmed ? 'Edit' : 'Trim'}</Text>
-              <Ionicons name="chevron-forward" size={14} color={colors.t3} />
-            </Pressable>
-          )}
+        <AppleMusicSection
+          zone={zone}
+          isApple={isApple}
+          appleTitle={appleTitle}
+          onBrowse={() => router.push('/zone-apple-music')}
+          onRemove={removeAppleTrack}
+        />
 
-          {/* Who can hear it. This is the same setting as Privacy → Zone audio,
-              phrased as the question people actually ask about their zone. */}
-          <View style={styles.controlRow}>
-            <IconLock size={18} color={colors.t2} />
-            <View style={styles.controlText}>
-              <Text style={styles.controlLabel}>Audible to friends only</Text>
-              <Text style={styles.controlHint}>
-                {audience === 'nobody'
-                  ? 'Zone audio is hidden from everyone in Privacy & safety.'
-                  : audience === 'friends'
-                    ? 'Strangers still see your zone on the map, they just hear nothing.'
-                    : 'Anyone who walks into your zone can play it.'}
-              </Text>
-            </View>
-            <Switch
-              value={audience !== 'everyone'}
-              onValueChange={setFriendsOnly}
-              disabled={audience === 'nobody'}
-              trackColor={{ false: colors.surface2, true: colors.teal }}
-              thumbColor={colors.t1}
-              ios_backgroundColor={colors.surface2}
-            />
-          </View>
-        </View>
-
-        {/* ── How far the sound carries ──
-            A zone is a radar and a music zone is a speaker, and they were one
-            number. Widening your zone to be found by more people also handed
-            all of them your track; narrowing it so only the next table hears
-            the music also took you off everyone else's map. Two dials now, and
-            the second one only exists once you ask for it — while the switch is
-            off earshot is still the zone, exactly as it always was. */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>HOW FAR IT CARRIES</Text>
-
-          <View style={styles.controlRow}>
-            <IconMusic size={18} color={colors.t2} />
-            <View style={styles.controlText}>
-              <Text style={styles.controlLabel}>A separate zone for music</Text>
-              <Text style={styles.controlHint}>
-                {musicSeparate
-                  ? `People hear you within ${fmtRadius(earshot)}, whatever size your zone is.`
-                  : inheritsRegion
-                    ? 'Off — the music reaches everyone inside the place your zone covers.'
-                    : `Off — the music reaches as far as your zone does (${fmtRadius(earshot)}).`}
-              </Text>
-            </View>
-            <Switch
-              value={musicSeparate}
-              onValueChange={setMusicSeparate}
-              trackColor={{ false: colors.surface2, true: colors.teal }}
-              thumbColor={colors.t1}
-              ios_backgroundColor={colors.surface2}
-            />
-          </View>
-
-          {musicSeparate && (
-            <View style={styles.dialCard}>
-              <View style={styles.readoutRow}>
-                <Text style={styles.readoutLabel}>Earshot</Text>
-                <Text style={styles.readout}>{fmtRadius(musicRadius)}</Text>
-              </View>
-              <RadiusSlider
-                value={musicRadius}
-                min={RADIUS_MIN_M}
-                max={RADIUS_MAX_M}
-                onChange={(next) => setZone((z) => ({ ...z, music_zone_radius: next }))}
-                onCommit={commitMusicRadius}
-                format={fmtRadius}
-                label="Music zone radius"
-                disabled={saving}
-              />
-            </View>
-          )}
-
-          <View style={styles.controlRow}>
-            <Ionicons name="notifications-outline" size={18} color={colors.t2} />
-            <View style={styles.controlText}>
-              <Text style={styles.controlLabel}>Tell me about music zones</Text>
-              <Text style={styles.controlHint}>
-                {musicAlerts
-                  ? 'When a friend walks into earshot of your track — and when you walk into theirs.'
-                  : 'Off. Zones still work; nobody is told about them.'}
-              </Text>
-            </View>
-            <Switch
-              value={musicAlerts}
-              onValueChange={setMusicAlerts}
-              trackColor={{ false: colors.surface2, true: colors.teal }}
-              thumbColor={colors.t1}
-              ios_backgroundColor={colors.surface2}
-            />
-          </View>
-        </View>
-
-        {/* ── Apple Music ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>FROM APPLE MUSIC</Text>
-
-          {isApple ? (
-            <View style={styles.fileCard}>
-              {zone.zone_apple_artwork ? (
-                <Image source={{ uri: zone.zone_apple_artwork }} style={styles.appleArt} />
-              ) : (
-                <View style={styles.fileIcon}>
-                  <IconMusic size={20} color={colors.teal} />
-                </View>
-              )}
-              <View style={styles.fileText}>
-                <Text style={styles.fileName} numberOfLines={1}>{appleTitle}</Text>
-                <Text style={styles.fileHint} numberOfLines={1}>
-                  {zone.zone_apple_artist
-                    ? `${zone.zone_apple_artist} · 30-second preview`
-                    : '30-second preview'}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => router.push('/zone-apple-music')}
-                hitSlop={8}
-                style={({ pressed }) => [styles.fileAction, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Pick a different Apple Music track"
-              >
-                <Text style={styles.fileActionText}>Change</Text>
-              </Pressable>
-              <Pressable
-                onPress={removeAppleTrack}
-                hitSlop={8}
-                style={({ pressed }) => [styles.fileRemove, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Remove this Apple Music track"
-              >
-                <IconClose size={16} color={colors.t3} />
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable
-              onPress={() => router.push('/zone-apple-music')}
-              style={({ pressed }) => [styles.appleTile, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Search Apple Music"
-              accessibilityHint="Opens the catalogue to pick a song for your zone"
-            >
-              <View style={styles.appleRing}>
-                <IconMusic size={22} color={colors.teal} />
-              </View>
-              <View style={styles.appleTileText}>
-                <Text style={styles.uploadTitle}>Search the catalogue</Text>
-                <Text style={styles.appleTileHint}>
-                  Pick any song on Apple Music. Zones play the 30-second preview —
-                  full tracks need each listener&rsquo;s own subscription.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.t3} />
-            </Pressable>
-          )}
-        </View>
-
-        {/* ── Your own track ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>YOUR TRACK</Text>
-
-          {isUpload && !uploading ? (
-            <View style={styles.fileCard}>
-              <View style={styles.fileIcon}>
-                <Ionicons name="musical-notes" size={20} color={colors.teal} />
-              </View>
-              <View style={styles.fileText}>
-                <Text style={styles.fileName} numberOfLines={1}>{title}</Text>
-                <Text style={styles.fileHint}>Your upload · loops in your zone</Text>
-              </View>
-              <Pressable
-                onPress={pickAudio}
-                hitSlop={8}
-                style={({ pressed }) => [styles.fileAction, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Replace your zone track"
-              >
-                <Text style={styles.fileActionText}>Replace</Text>
-              </Pressable>
-              <Pressable
-                onPress={removeAudio}
-                hitSlop={8}
-                style={({ pressed }) => [styles.fileRemove, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Remove your zone track"
-              >
-                <IconClose size={16} color={colors.t3} />
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable
-              onPress={pickAudio}
-              disabled={uploading}
-              style={({ pressed }) => [styles.uploadTile, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Upload a track for your zone"
-              accessibilityHint="Opens your files. MP3, M4A or WAV."
-            >
-              <View style={styles.uploadRing}>
-                {uploading ? (
-                  <ActivityIndicator color={colors.teal} />
-                ) : (
-                  <IconUpload size={26} color={colors.teal} />
-                )}
-              </View>
-
-              <Text style={styles.uploadTitle}>
-                {uploading ? 'Uploading your track…' : 'Upload your own track'}
-              </Text>
-              <Text style={styles.uploadHint}>
-                {uploading
-                  ? 'Keep this screen open until it finishes'
-                  : 'MP3, M4A or WAV — it loops while people are inside your zone'}
-              </Text>
-
-              {/* Decorative while idle; while uploading the same bars fill left
-                  to right, so the tile becomes its own progress meter. */}
-              <View style={styles.wave}>
-                {WAVE.map((h, i) => {
-                  const reached = uploading && (i / WAVE.length) * 100 <= (uploadPct ?? 0);
-                  return (
-                    <View
-                      key={i}
-                      style={[
-                        styles.waveBar,
-                        { height: h },
-                        uploading && (reached ? styles.waveBarOn : styles.waveBarOff),
-                      ]}
-                    />
-                  );
-                })}
-              </View>
-
-              {uploading ? (
-                <Text style={styles.uploadPct}>{uploadPct}%</Text>
-              ) : (
-                <View style={styles.uploadCta}>
-                  <Text style={styles.uploadCtaText}>Choose a file</Text>
-                </View>
-              )}
-            </Pressable>
-          )}
-        </View>
-
-        {/* ── Presets ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>OR PICK A PRESET</Text>
-          <View style={styles.presetGrid}>
-            {presets.map((p) => {
-              const selected = preset === p.id;
-              const icon: IoniconsName = PRESET_ICONS[p.id] ?? 'musical-notes-outline';
-              return (
-                <Pressable
-                  key={p.id}
-                  style={({ pressed }) => [
-                    styles.presetCard,
-                    selected && styles.presetCardSelected,
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => selectPreset(p.id)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  accessibilityHint={selected ? 'Tap again to clear it' : undefined}
-                >
-                  <Ionicons name={icon} size={26} color={selected ? colors.teal : colors.t3} />
-                  <Text style={[styles.presetName, selected && styles.presetNameSelected]}>
-                    {p.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.footnote}>
-            A zone plays one thing at a time, so whichever of these three you pick
-            last — a song, your own file, or a preset — replaces the other two.
-            Changes save as you make them.
-          </Text>
-        </View>
+        <UploadSection
+          isUpload={isUpload}
+          uploading={uploading}
+          uploadPct={uploadPct}
+          title={title}
+          onPick={pickAudio}
+          onRemove={removeAudio}
+        />
       </ScrollView>
     </View>
   );
@@ -1022,31 +1041,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.t2,
   },
   fileRemove: { padding: 4 },
-
-  // ── Preset grid ──
-  presetGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  presetCard: {
-    width: CARD_W,
-    paddingVertical: 20,
-    backgroundColor: colors.surface,
-    borderRadius: radius.m,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  presetCardSelected: {
-    backgroundColor: colors.tealTint,
-    borderColor: colors.tealLine,
-  },
-  presetName: {
-    fontFamily: fonts.body,
-    fontWeight: '500',
-    fontSize: 13,
-    color: colors.t3,
-  },
-  presetNameSelected: { color: colors.teal },
 
   pressed: { opacity: 0.6 },
 });

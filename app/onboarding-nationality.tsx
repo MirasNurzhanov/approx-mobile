@@ -82,6 +82,8 @@ export default function OnboardingNationalityScreen() {
       <FlatList
         data={visible}
         keyExtractor={(item) => item.code}
+        windowSize={5}
+        initialNumToRender={8}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={s.list}

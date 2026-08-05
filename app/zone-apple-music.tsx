@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Keyboard,
   Pressable,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -40,6 +40,12 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 350;
 
+/** Below this the box is not yet a search term, and nothing is shown for it. */
+const MIN_QUERY_LEN = 2;
+
+/** Module-level so the "nothing to show" case is the same array every render. */
+const NO_RESULTS: AppleSong[] = [];
+
 /** A headline per fault, so the panel names the thing that is wrong before the
  *  server's longer explanation underneath it. */
 const FAULT_TITLE: Record<AppleMusicFault, string> = {
@@ -56,8 +62,8 @@ export default function ZoneAppleMusicScreen() {
   const { top, bottom } = useSafeAreaInsets();
 
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<AppleSong[]>([]);
-  const [searching, setSearching] = useState(false);
+  const [rawResults, setResults] = useState<AppleSong[]>([]);
+  const [rawSearching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Set once the server says it cannot search at all. The screen then stops
    *  being a search box and becomes an explanation — of the actual fault,
@@ -67,19 +73,25 @@ export default function ZoneAppleMusicScreen() {
   const [picking, setPicking] = useState<string | null>(null);
   /** True once a search has come back, so "no results" can be told apart from
    *  "nothing has been searched yet". */
-  const [searched, setSearched] = useState(false);
+  const [rawSearched, setSearched] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  // A term too short to search has nothing to show for it, so that is worked
+  // out here rather than blanked by the effect afterwards. The effect version
+  // left the previous song list on screen for a frame after the field was
+  // cleared — long enough to see, and to tap the wrong row.
+  const term = query.trim();
+  const tooShort = term.length < MIN_QUERY_LEN;
+  const results = tooShort ? NO_RESULTS : rawResults;
+  const searching = tooShort ? false : rawSearching;
+  const searched = tooShort ? false : rawSearched;
 
   // Typing is the search. A button would mean the keyboard covers the results
   // until it is dismissed, and every keystroke cancels the request before it.
   useEffect(() => {
-    const term = query.trim();
-    if (term.length < 2) {
+    if (tooShort) {
       abortRef.current?.abort();
-      setResults([]);
-      setSearching(false);
-      setSearched(false);
       return;
     }
 
@@ -108,7 +120,7 @@ export default function ZoneAppleMusicScreen() {
     }, SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [term, tooShort]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -175,6 +187,8 @@ export default function ZoneAppleMusicScreen() {
           <FlatList
             data={results}
             keyExtractor={(song) => song.id}
+            windowSize={5}
+            initialNumToRender={8}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             contentContainerStyle={[styles.list, { paddingBottom: bottom + 32 }]}
@@ -215,7 +229,7 @@ export default function ZoneAppleMusicScreen() {
           <Text style={styles.unavailableTitle}>{FAULT_TITLE[fault.code]}</Text>
           <Text style={styles.faultDetail}>{fault.message}</Text>
           <Text style={styles.emptyText}>
-            Your presets and your own uploads still work in the meantime.
+            Your own uploads still work in the meantime.
           </Text>
         </View>
       )}
@@ -233,7 +247,7 @@ function SongRow({
   onPress: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const length = songLength(song.duration_ms);
 
   return (

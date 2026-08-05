@@ -67,10 +67,10 @@ export default function ConnectionsScreen() {
     setRefreshing(true);
     try {
       await load();
-    } catch {
-    } finally {
-      setRefreshing(false);
-    }
+    } catch {}
+    // The `catch` swallows everything, so this always runs. Deliberately not a
+    // `finally` — React Compiler bails on any component containing one.
+    setRefreshing(false);
   }, [load]);
 
   function confirmRemove(person: Person) {
@@ -91,9 +91,9 @@ export default function ConnectionsScreen() {
             } catch {
               setPeople(previous ?? null);
               Alert.alert('Could not remove', `Removing @${person.username} failed. Please try again.`);
-            } finally {
-              setRemoving(null);
             }
+            // Reached on both paths: the `catch` rolls back and stops there.
+            setRemoving(null);
           },
         },
       ],
@@ -124,6 +124,8 @@ export default function ConnectionsScreen() {
         <FlatList
           data={people}
           keyExtractor={(item) => String(item.id)}
+          windowSize={5}
+          initialNumToRender={8}
           contentContainerStyle={[styles.list, { paddingBottom: bottom + 32 }]}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />

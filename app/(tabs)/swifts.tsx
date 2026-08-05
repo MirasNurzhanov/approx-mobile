@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Speedometer } from '@/components/Speedometer';
@@ -9,7 +8,7 @@ import { useTheme } from '@/context/ThemeContext';
 
 export default function SwiftsScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
 
   return (
     <View style={styles.root}>

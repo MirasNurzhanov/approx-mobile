@@ -1,7 +1,100 @@
 {
+  // ─── Editor ────────────────────────────────────────────────────────────────
   "editor.codeActionsOnSave": {
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+
+  // ─── Java language server ──────────────────────────────────────────────────
+  //
+  // This is a React Native / Expo project. The only Java and Kotlin in it lives
+  // in `node_modules/**/android/` (third-party native modules) and in `android/`
+  // itself, which is *generated* by `expo prebuild` and gitignored. None of it
+  // is edited by hand, and none of it is compiled by the VS Code Java tooling —
+  // Gradle builds it, invoked through `npx expo run:android`.
+  //
+  // Left to itself the Red Hat Java extension treats any .java file you happen
+  // to open as a loose "non-project file", reports it has no classpath, and then
+  // emits upstream lint (unused imports, hidden fields, leaking `this`) for
+  // library source nobody here can or should change. The settings below stop it
+  // adopting those trees at all. They are editor-only: nothing here reaches
+  // Gradle, so the APK is byte-for-byte unaffected.
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/android/**",
+    "**/ios/**",
+    "**/.expo/**",
+    "**/build/**"
+  ],
+  // Don't go looking for Gradle/Maven projects to import in the first place.
+  // `android/` is regenerated wholesale by prebuild, so importing it produces a
+  // model that is stale the next time anyone runs it.
+  "java.import.gradle.enabled": false,
+  "java.import.maven.enabled": false,
+  // Never silently re-import on file changes; there is no Java project to sync.
+  "java.configuration.updateBuildConfiguration": "disabled",
+  "java.autobuild.enabled": false,
+  "java.maxConcurrentBuilds": 1,
+  "java.project.explorer.showNonJavaResources": false,
+  // Belt and braces: even if a .java file is opened directly, say nothing about
+  // it. Without a classpath every diagnostic is guesswork anyway — which is
+  // exactly what "only syntax errors are reported" was admitting.
+  "java.errors.incompleteClasspath.severity": "ignore",
+
+  // ─── Oracle Java extension ─────────────────────────────────────────────────
+  // It runs its own NetBeans-based Gradle tooling against whatever project it
+  // finds, and it offers no setting to make it skip a workspace — the only way
+  // to stop that is "Disable (Workspace)" in the Extensions view, which is why
+  // it is listed in extensions.json.
+  //
+  // Until then, at least point it at the same JDK real builds use. Left to
+  // itself it picked up the JDK 25 in OneDrive\Documents\javafolder and drove
+  // Gradle 7.5.1 with it, which cannot read Java 25 class files — that is the
+  // "Unsupported class file major version 69" / nb-tooling.gradle failure, an
+  // error about the extension's own tooling rather than about this app.
+  "jdk.project.jdkhome": "C:\\Program Files\\Android\\Android Studio\\jbr",
+  "jdk.telemetry.enabled": false,
+
+  // ─── File watching ─────────────────────────────────────────────────────────
+  // Generated + vendored trees. Watching them is pure cost, and on this
+  // OneDrive-synced checkout it also adds contention with the sync client while
+  // Gradle is writing build output.
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.git/**": true,
+    "**/.expo/**": true,
+    "**/android/.gradle/**": true,
+    "**/android/.kotlin/**": true,
+    "**/android/build/**": true,
+    "**/android/app/build/**": true,
+    "**/ios/Pods/**": true,
+    "**/venv/**": true
+  },
+
+  // ─── Search ────────────────────────────────────────────────────────────────
+  // Only generated and vendored output. `android/` itself stays searchable —
+  // it is occasionally worth grepping a generated manifest — but its build
+  // artefacts are not.
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.expo": true,
+    "**/android/.gradle": true,
+    "**/android/.kotlin": true,
+    "**/android/build": true,
+    "**/android/app/build": true,
+    "**/ios/Pods": true,
+    "**/venv": true,
+    "**/package-lock.json": true
+  },
+
+  // ─── TypeScript / JavaScript ───────────────────────────────────────────────
+  // Untouched by the exclusions above: `search.exclude` and
+  // `files.watcherExclude` do not feed the TS server, which keeps resolving
+  // types out of node_modules through tsconfig.json exactly as before. Pinned
+  // to the workspace TypeScript so the editor and `npx tsc` agree.
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "javascript.preferences.importModuleSpecifier": "non-relative",
+  "typescript.preferences.importModuleSpecifier": "non-relative"
 }

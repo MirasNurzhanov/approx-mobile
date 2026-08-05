@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -29,10 +30,14 @@ export interface SwiftCardProps {
   swift: Swift;
   /** Exactly one card in the feed is active; the rest stay paused. */
   isActive: boolean;
+  /** Held by the feed, not the card: scrolling to another Swift is what makes a
+   *  manual pause stale, and the feed is where that scroll is handled. */
+  pausedByUser: boolean;
   muted: boolean;
   height: number;
   /** Bottom padding that keeps overlays clear of the nav arc. */
   navClearance: number;
+  onTogglePause: () => void;
   onToggleMute: () => void;
   onToggleLike: (id: string, liked: boolean) => void;
   onComment: (swift: Swift) => void;
@@ -43,9 +48,11 @@ export interface SwiftCardProps {
 export function SwiftCard({
   swift,
   isActive,
+  pausedByUser,
   muted,
   height,
   navClearance,
+  onTogglePause,
   onToggleMute,
   onToggleLike,
   onComment,
@@ -54,7 +61,6 @@ export function SwiftCard({
 }: SwiftCardProps) {
   const { colors } = useTheme();
   const reduceMotion = useReduceMotion();
-  const [pausedByUser, setPausedByUser] = useState(false);
   const heartScale = useSharedValue(0);
 
   const player = useVideoPlayer(swift.videoUrl, (p) => {
@@ -70,10 +76,7 @@ export function SwiftCard({
       player.play();
     } else {
       player.pause();
-      if (!isActive) {
-        player.currentTime = 0;
-        setPausedByUser(false);
-      }
+      if (!isActive) player.currentTime = 0;
     }
   }, [isActive, pausedByUser, player]);
 
@@ -107,7 +110,7 @@ export function SwiftCard({
   }
 
   const handleTap = useDoubleTap(
-    () => setPausedByUser((prev) => !prev),
+    onTogglePause,
     () => {
       // Double tap only ever likes — it never toggles back off, matching the
       // gesture everywhere else it exists.
@@ -131,7 +134,7 @@ export function SwiftCard({
         <Image
           source={{ uri: swift.thumbnailUrl }}
           style={StyleSheet.absoluteFill}
-          resizeMode="cover"
+          contentFit="cover"
         />
         <VideoView
           style={StyleSheet.absoluteFill}

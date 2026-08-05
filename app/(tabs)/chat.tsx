@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -39,7 +39,14 @@ import {
 } from '@/services/alerts';
 import { NotifRow, RequestRow } from '@/components/alerts/AlertRow';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { clubsApi, type Club } from '@/services/clubs';
+import {
+  clubsApi,
+  fetchMyLocation,
+  UNPLACED,
+  visibilityLabel,
+  type Club,
+  type MyClubLocation,
+} from '@/services/clubs';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -86,7 +93,7 @@ function fmtTime(iso?: string): string {
 // ─── Empty state ──────────────────────────────────────────────────────────────
 function EmptyState({ message }: { message: string }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyText}>{message}</Text>
@@ -115,7 +122,7 @@ interface UserCardProps {
  */
 function UserCard({ user, type, requestSent, onMessage, onAddFriend, onMenu }: UserCardProps) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const ringColor = type === 'connected' ? colors.orange : colors.blue;
   const hasMessage = !!user.last_message;
   const unread = user.unread_count ?? 0;
@@ -196,7 +203,7 @@ function ClubCard({
   joining?: boolean;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <Pressable style={styles.clubCard} onPress={onPress}>
       {club.emblem ? (
@@ -209,10 +216,14 @@ function ClubCard({
       <View style={styles.clubCardBody}>
         <View style={styles.clubCardTop}>
           <Text style={styles.clubCardName} numberOfLines={1}>{club.name}</Text>
-          {club.role && (
+          {/* `my_role`, not `role`: the club list serialises the viewer's own
+              membership under that name (see ClubSerializer.get_my_role). It
+              is absent on a club you have not joined, which is what keeps the
+              badge off the discover list. */}
+          {club.my_role && (
             <View style={styles.clubRoleBadge}>
               <Text style={styles.clubRoleText}>
-                {club.role === 'owner' ? '👑 Owner' : 'Member'}
+                {club.my_role === 'owner' ? '👑 Owner' : 'Member'}
               </Text>
             </View>
           )}
@@ -223,6 +234,17 @@ function ClubCard({
         <View style={styles.clubMemberRow}>
           <Ionicons name="people-outline" size={12} color={colors.t3} />
           <Text style={styles.clubMemberCount}>{club.member_count} members</Text>
+          {/* Where the club reaches. Worth a line on the card: a district club
+              and a city club are different offers, and the difference is
+              invisible once you are inside the area either way. */}
+          {visibilityLabel(club) ? (
+            <>
+              <Ionicons name="location-outline" size={12} color={colors.t3} />
+              <Text style={styles.clubMemberCount} numberOfLines={1}>
+                {visibilityLabel(club)}
+              </Text>
+            </>
+          ) : null}
         </View>
       </View>
       {onJoin !== undefined && (
@@ -271,7 +293,7 @@ function SearchField({
   onChange: (next: string) => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={styles.searchWrap}>
       <IconSearch size={16} color={colors.t3} />
@@ -302,7 +324,7 @@ function SearchField({
 
 function SearchPersonRow({ user, onPress }: { user: ChatUser; onPress: () => void }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const isFriend = user.chatType === 'friend';
   return (
     <Card onPress={onPress}>
@@ -333,7 +355,490 @@ function SearchPersonRow({ user, onPress }: { user: ChatUser; onPress: () => voi
   );
 }
 
+// ─── Module-level cache ───────────────────────────────────────────────────────
+// Persists across tab switches so the screen paints instantly on re-focus and
+// the spinner only ever shows on the first visit of a session.
+let _cache: { friendList: FriendList; alerts: AlertsData } | null = null;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
+// ─── Tab bodies ───────────────────────────────────────────────────────────────
+// One component per thing the screen can be showing. The screen below owns all
+// the data and the actions; each of these is only the list that draws it.
+
+type ScrollProps = ReturnType<typeof useScrollHandler>;
+
+function SearchResultsList({ rows, trimmed, scrollProps, onMessage, onOpenClub }: {
+  rows: SearchRow[];
+  trimmed: string;
+  scrollProps: ScrollProps;
+  onMessage: (user: ChatUser) => void;
+  onOpenClub: (clubId: number) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <FlatList
+      data={rows}
+      keyExtractor={(item) => item.key}
+      windowSize={5}
+      initialNumToRender={8}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      renderItem={({ item }) => {
+        if (item.kind === 'label') {
+          return <Text style={styles.searchSectionLabel}>{item.label}</Text>;
+        }
+        if (item.kind === 'person') {
+          return <SearchPersonRow user={item.user} onPress={() => onMessage(item.user)} />;
+        }
+        return <ClubCard club={item.club} onPress={() => onOpenClub(item.club.id)} />;
+      }}
+      contentContainerStyle={styles.list}
+      ListEmptyComponent={
+        <EmptyState
+          message={`Nothing matches “${trimmed}”\nThis searches your friends, connections and clubs`}
+        />
+      }
+      showsVerticalScrollIndicator={false}
+      {...scrollProps}
+    />
+  );
+}
+
+function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, markingRead, refreshControl, scrollProps, onRequest, onOpenActivity, onOpenProfile, onMarkAllRead }: {
+  rows: AlertRow[];
+  actioning: Record<string, 'accept' | 'decline'>;
+  unreadCount: number;
+  hasUnreadActivity: boolean;
+  markingRead: boolean;
+  refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
+  scrollProps: ScrollProps;
+  onRequest: (request: AlertRequest, action: 'accept' | 'decline') => void;
+  onOpenActivity: (notif: Notification) => void;
+  onOpenProfile: (userId: number) => void;
+  onMarkAllRead: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <FlatList
+      data={rows}
+      keyExtractor={(item) => item.key}
+      windowSize={5}
+      initialNumToRender={8}
+      renderItem={({ item }) => {
+        if (item.kind === 'label') {
+          return <Text style={styles.alertsSectionLabel}>{item.label}</Text>;
+        }
+        if (item.kind === 'request') {
+          const key = `${item.request.kind}-${item.request.id}`;
+          return (
+            <RequestRow
+              request={item.request}
+              actioning={actioning[key]}
+              onAccept={() => onRequest(item.request, 'accept')}
+              onDecline={() => onRequest(item.request, 'decline')}
+              onPressUser={() => onOpenProfile(item.request.user.id)}
+            />
+          );
+        }
+        return <NotifRow notif={item.notif} onPress={() => onOpenActivity(item.notif)} />;
+      }}
+      ListHeaderComponent={
+        unreadCount > 0 ? (
+          <View style={styles.alertsHeader}>
+            <View style={styles.unreadPill}>
+              <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
+            </View>
+            {hasUnreadActivity && (
+              <Pressable onPress={onMarkAllRead} disabled={markingRead} hitSlop={10}>
+                {markingRead ? (
+                  <ActivityIndicator color={colors.teal} size="small" />
+                ) : (
+                  <Text style={styles.markReadBtn}>Mark all read</Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+        ) : null
+      }
+      contentContainerStyle={styles.alertsList}
+      ListEmptyComponent={
+        <EmptyState message={"You're all caught up\nRequests and story activity land here"} />
+      }
+      refreshControl={refreshControl}
+      showsVerticalScrollIndicator={false}
+      {...scrollProps}
+    />
+  );
+}
+
+function ChatsList({ users, sentRequestIds, refreshControl, scrollProps, onMessage, onAddFriend, onMenu }: {
+  users: ChatUser[];
+  sentRequestIds: Set<number>;
+  refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
+  scrollProps: ScrollProps;
+  onMessage: (user: UserSummary) => void;
+  onAddFriend: (user: UserSummary) => void;
+  onMenu: (user: UserSummary, type: 'connected' | 'friend') => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <FlatList
+      data={users}
+      keyExtractor={(item) => String(item.id)}
+      windowSize={5}
+      initialNumToRender={8}
+      renderItem={({ item }) => (
+        <UserCard
+          user={item}
+          type={item.chatType}
+          requestSent={sentRequestIds.has(item.id)}
+          onMessage={onMessage}
+          onAddFriend={item.chatType === 'connected' ? onAddFriend : undefined}
+          onMenu={onMenu}
+        />
+      )}
+      contentContainerStyle={styles.list}
+      ListEmptyComponent={<EmptyState message={'No chats yet\nAccept incoming Hi requests'} />}
+      refreshControl={refreshControl}
+      showsVerticalScrollIndicator={false}
+      {...scrollProps}
+    />
+  );
+}
+
+function ClubsTab({ myClubs, discoverClubs, clubPlace, loadingClubs, refreshingPlace, joiningClubId, onRefreshClubs, onCreateClub, onOpenClub, onJoin, onRetryLocation }: {
+  myClubs: Club[];
+  discoverClubs: Club[];
+  clubPlace: MyClubLocation;
+  loadingClubs: boolean;
+  refreshingPlace: boolean;
+  joiningClubId: number | null;
+  onRefreshClubs: () => void;
+  onCreateClub: () => void;
+  onOpenClub: (clubId: number) => void;
+  onJoin: (clubId: number) => void;
+  onRetryLocation: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={styles.clubsScroll}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={loadingClubs} onRefresh={onRefreshClubs} tintColor={colors.teal} colors={[colors.teal]} />
+      }
+    >
+      <Pressable style={styles.createClubBtn} onPress={onCreateClub}>
+        <Ionicons name="add-circle-outline" size={18} color="#ffffff" />
+        <Text style={styles.createClubBtnText}>Create Club</Text>
+      </Pressable>
+
+      {loadingClubs ? (
+        <ActivityIndicator color={colors.teal} style={{ marginTop: 40 }} />
+      ) : (
+        <>
+          {myClubs.length > 0 && (
+            <>
+              <Text style={styles.clubsSectionLabel}>MY CLUBS</Text>
+              {myClubs.map((club) => (
+                <ClubCard key={club.id} club={club} onPress={() => onOpenClub(club.id)} />
+              ))}
+            </>
+          )}
+
+          <Text style={styles.clubsSectionLabel}>
+            {clubPlace.resolved && clubPlace.city
+              ? `DISCOVER IN ${clubPlace.city.name.toUpperCase()}`
+              : 'DISCOVER'}
+          </Text>
+
+          {/* An unplaceable user is not shown an empty list and left to
+              guess. Clubs are scoped to areas now, so "we cannot tell where
+              you are" is the answer, and it comes with the fix. */}
+          {!clubPlace.resolved && (
+            <View style={styles.locationNotice}>
+              <Ionicons name="location-outline" size={18} color={colors.t2} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.locationNoticeText}>
+                  {clubPlace.detail ||
+                    'Aura needs your location to show clubs near you.'}
+                </Text>
+                <Pressable
+                  style={styles.locationNoticeBtn}
+                  onPress={onRetryLocation}
+                  disabled={refreshingPlace}
+                  accessibilityRole="button"
+                  accessibilityLabel="Update my location"
+                >
+                  {refreshingPlace ? (
+                    <ActivityIndicator color={colors.teal} size="small" />
+                  ) : (
+                    <Text style={styles.locationNoticeBtnText}>Update my location</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {discoverClubs.length > 0 ? (
+            discoverClubs.map((club) => (
+              <ClubCard
+                key={club.id}
+                club={club}
+                onPress={() => onOpenClub(club.id)}
+                onJoin={() => onJoin(club.id)}
+                joining={joiningClubId === club.id}
+              />
+            ))
+          ) : (
+            clubPlace.resolved && (
+              <Text style={styles.clubsEmptyText}>
+                {clubPlace.city
+                  ? `No clubs in ${clubPlace.city.name} yet. Create the first one.`
+                  : 'No clubs to discover yet.'}
+              </Text>
+            )
+          )}
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+/**
+ * The Clubs tab's own data: the two lists, where the server thinks you are, and
+ * the three separate things that can be in flight at once.
+ *
+ * Self-contained because nothing else on this screen reads any of it — the tab
+ * is a different feature that happens to share a header.
+ *
+ * `visible` is the tab being open. It arms the spinner on the way in, which is
+ * why `fetchClubs` only ever clears it: the refetch on focus is a silent
+ * background refresh and must not blank a list the reader is already using.
+ */
+function useClubsTab(visible: boolean) {
+  const [myClubs, setMyClubs] = useState<Club[]>([]);
+  const [discoverClubs, setDiscoverClubs] = useState<Club[]>([]);
+  const [loadingClubs, setLoadingClubs] = useState(false);
+  const [joiningClubId, setJoiningClubId] = useState<number | null>(null);
+  // Discovery only shows clubs scoped to where this user actually is, so when
+  // the server cannot place them the tab has to say so rather than look empty.
+  const [clubPlace, setClubPlace] = useState<MyClubLocation>(UNPLACED);
+  const [refreshingPlace, setRefreshingPlace] = useState(false);
+
+  const fetchClubs = useCallback(async () => {
+    try {
+      const [myRes, discoverRes, placeRes] = await Promise.allSettled([
+        clubsApi.myList(),   // GET /api/clubs/?joined=true  — only joined clubs
+        clubsApi.list(),     // GET /api/clubs/              — unjoined, and in this area
+        fetchMyLocation(),   // why the discover list looks the way it does
+      ]);
+      if (myRes.status === 'fulfilled') setMyClubs(myRes.value.data);
+      if (discoverRes.status === 'fulfilled') setDiscoverClubs(discoverRes.value.data);
+      if (placeRes.status === 'fulfilled') setClubPlace(placeRes.value);
+    } catch {}
+    // The `catch` above swallows everything, so this always runs — it is the old
+    // `finally`, unwound. React Compiler cannot lower a `finally` and gives up on
+    // the whole hook containing one, which costs this tab its auto-memoization.
+    setLoadingClubs(false);
+  }, []);
+
+  /** Show the spinner, then fetch. For pull-to-refresh and the tab press. */
+  const reload = useCallback(() => {
+    setLoadingClubs(true);
+    fetchClubs();
+  }, [fetchClubs]);
+
+  useEffect(() => {
+    if (visible) fetchClubs();
+  }, [visible, fetchClubs]);
+
+  useFocusEffect(useCallback(() => {
+    fetchClubs();
+  }, [fetchClubs]));
+
+  /** Ask the server to work out where we are properly, upstream and all.
+   *  The cheap lookup on every load answers from stored boundaries; this is the
+   *  one that can place somebody in a city nobody has opened this tab in. */
+  async function retryLocation() {
+    setRefreshingPlace(true);
+    // Neither call rejects — `fetchMyLocation` answers with UNPLACED on failure
+    // and `fetchClubs` swallows its own errors — so the flag clears here rather
+    // than in a `finally`, which React Compiler cannot compile.
+    setClubPlace(await fetchMyLocation(true));
+    await fetchClubs();
+    setRefreshingPlace(false);
+  }
+
+  async function join(clubId: number) {
+    setJoiningClubId(clubId);
+    try {
+      await clubsApi.join(clubId);
+      await fetchClubs();
+    } catch (e: any) {
+      // A 404 here means the list on screen is older than the user's position —
+      // they have walked out of the club's area since it was fetched. Say so,
+      // and reload rather than leaving a card that cannot be joined.
+      if (e?.response?.status === 404) {
+        Alert.alert(
+          'Not available here',
+          'This club is only for people in its area, and you are outside it now.',
+        );
+        await fetchClubs();
+      } else {
+        Alert.alert('Error', e?.response?.data?.detail ?? 'Could not join club.');
+      }
+    }
+    // Reached on both paths — the `catch` handles every failure and rethrows
+    // nothing — so the spinner clears without a compiler-defeating `finally`.
+    setJoiningClubId(null);
+  }
+
+  return {
+    /** Arms the spinner for the press that reveals the tab. */
+    arm: () => setLoadingClubs(true),
+    /** Spread straight onto `<ClubsTab>` alongside its navigation callbacks. */
+    tabProps: {
+      myClubs,
+      discoverClubs,
+      clubPlace,
+      loadingClubs,
+      refreshingPlace,
+      joiningClubId,
+      onRefreshClubs: reload,
+      onJoin: join,
+      onRetryLocation: retryLocation,
+    },
+  };
+}
+
+/**
+ * The things you can do *to* a person from their row: block, remove, add, open.
+ *
+ * All optimistic — the list updates first and the request follows, because none
+ * of these are worth a spinner on a row you are already looking at. Blocking is
+ * the one that rolls back and re-fetches if the server disagrees; removals are
+ * left alone, since a failed remove that silently reappears on the next poll is
+ * less alarming than a row that flickers back under the reader's thumb.
+ */
+function usePeopleActions({ setFriendList, setSentRequestIds, onBlockFailed, router }: {
+  setFriendList: React.Dispatch<React.SetStateAction<FriendList>>;
+  setSentRequestIds: React.Dispatch<React.SetStateAction<Set<number>>>;
+  onBlockFailed: () => void;
+  router: ReturnType<typeof useRouter>;
+}) {
+  function handleBlock(user: UserSummary) {
+    setFriendList((prev) => ({
+      connections: prev.connections.filter((u) => u.id !== user.id),
+      friends:     prev.friends.filter((u) => u.id !== user.id),
+    }));
+    blockUser(user)
+      .then(() => triggerNearbyRefresh())
+      .catch(() => {
+        Alert.alert('Could not block', `Blocking @${user.username} failed. Please try again.`);
+        onBlockFailed();
+      });
+  }
+
+  function remove(user: UserSummary, tier: 'friends' | 'connections') {
+    setFriendList((prev) => ({ ...prev, [tier]: prev[tier].filter((u) => u.id !== user.id) }));
+    api.delete(`/api/friends/${user.id}/remove/`).catch(() => {});
+  }
+
+  return {
+    onAddFriend(user: UserSummary) {
+      api.post(`/api/friends/request/${user.id}/`)
+        .then(() => setSentRequestIds((prev) => new Set(prev).add(user.id)))
+        .catch((e) => console.log('[Friend Request] error:', e?.response?.status));
+    },
+
+    onMenu(user: UserSummary, type: 'connected' | 'friend') {
+      const isFriend = type === 'friend';
+      Alert.alert(user.username, undefined, [
+        {
+          text: isFriend ? 'Remove Friend' : 'Remove Connection',
+          style: 'destructive',
+          onPress: () => remove(user, isFriend ? 'friends' : 'connections'),
+        },
+        { text: 'Block User', style: 'destructive', onPress: () => handleBlock(user) },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    },
+
+    onMessage(user: UserSummary) {
+      // Clear the badge on the way in: the thread marks itself read on open, so
+      // waiting for the next poll would leave a count on a chat you just read.
+      setFriendList((prev) => ({
+        connections: prev.connections.map((u) => u.id === user.id ? { ...u, unread_count: 0 } : u),
+        friends:     prev.friends.map((u)     => u.id === user.id ? { ...u, unread_count: 0 } : u),
+      }));
+      router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } } as any);
+    },
+  };
+}
+
+/**
+ * The chats list, and the one search box that spans it and the clubs lists.
+ *
+ * Ordering is friends first, then connections — the same tiering the nearby
+ * list uses, so "who am I closest to" reads the same way everywhere. Recency
+ * only sorts *within* a tier, so an active connection can never push your
+ * friends down the list.
+ */
+function useChatSearch(
+  query: string,
+  friendList: FriendList,
+  connections: UserSummary[],
+  myClubs: Club[],
+  discoverClubs: Club[],
+) {
+  const chatUsers: ChatUser[] = [
+    ...friendList.friends.map((u) => ({ ...u, chatType: 'friend' as const })),
+    ...connections.map((u) => ({ ...u, chatType: 'connected' as const })),
+  ].sort((a, b) => {
+    if (a.chatType !== b.chatType) return a.chatType === 'friend' ? -1 : 1;
+    if (a.last_message_at && b.last_message_at) return b.last_message_at.localeCompare(a.last_message_at);
+    if (a.last_message_at) return -1;
+    if (b.last_message_at) return 1;
+    return 0;
+  });
+
+  const trimmed = query.trim();
+
+  const searchRows: SearchRow[] = useMemo(() => {
+    const needle = trimmed.toLowerCase();
+    if (!needle) return [];
+
+    const people = chatUsers.filter((u) => matches(u.username, needle));
+
+    // A club can be in both lists across a refresh; the one you are in wins,
+    // because its row carries your role.
+    const clubById = new Map<number, Club>();
+    for (const club of [...discoverClubs, ...myClubs]) clubById.set(club.id, club);
+    const clubs = [...clubById.values()].filter(
+      (c) => matches(c.name, needle) || matches(c.interest?.name, needle),
+    );
+
+    return [
+      ...(people.length ? [{ kind: 'label' as const, key: 'l-people', label: 'PEOPLE' }] : []),
+      ...people.map((user) => ({ kind: 'person' as const, key: `p-${user.id}`, user })),
+      ...(clubs.length ? [{ kind: 'label' as const, key: 'l-clubs', label: 'CLUBS' }] : []),
+      ...clubs.map((club) => ({ kind: 'club' as const, key: `c-${club.id}`, club })),
+    ];
+    // chatUsers is rebuilt every render from friendList; depending on the two
+    // lists it comes from keeps this from recomputing on unrelated state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trimmed, friendList, myClubs, discoverClubs]);
+
+  return { chatUsers, trimmed, searching: trimmed.length > 0, searchRows };
+}
+
 export default function ChatScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -344,18 +849,21 @@ export default function ChatScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('alerts');
   const [tabOrder, setTabOrder] = useState<DraggableTabKey[]>(['alerts', 'chats', 'clubs']);
   const [query, setQuery] = useState('');
-  const [friendList, setFriendList] = useState<FriendList>({ connections: [], friends: [] });
-  const [alerts, setAlerts] = useState<AlertsData>(EMPTY_ALERTS);
+  const [friendList, setFriendList] = useState<FriendList>(_cache?.friendList ?? { connections: [], friends: [] });
+  const [alerts, setAlerts] = useState<AlertsData>(_cache?.alerts ?? EMPTY_ALERTS);
   useBlockedUsers();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(_cache === null);
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
   const [markingRead, setMarkingRead] = useState(false);
   const [actioning, setActioning] = useState<Record<string, 'accept' | 'decline'>>({});
-  const [myClubs, setMyClubs] = useState<Club[]>([]);
-  const [discoverClubs, setDiscoverClubs] = useState<Club[]>([]);
-  const [loadingClubs, setLoadingClubs] = useState(false);
-  const [joiningClubId, setJoiningClubId] = useState<number | null>(null);
+  const clubsTab = useClubsTab(activeTab === 'clubs');
+  const peopleActions = usePeopleActions({
+    setFriendList,
+    setSentRequestIds,
+    onBlockFailed: () => fetchAll(),
+    router,
+  });
 
   const fetchUnreadBreakdown = useCallback(async () => {
     try {
@@ -391,14 +899,21 @@ export default function ChatScreen() {
       loadAlerts(),
       refreshBlocked(),
     ]);
+    let list = _cache?.friendList ?? { connections: [], friends: [] };
+    let alertsData = _cache?.alerts ?? EMPTY_ALERTS;
     if (listRes.status === 'fulfilled') {
       const data = listRes.value.data;
-      setFriendList({
+      list = {
         connections: data.connections ?? [],
         friends:     data.friends     ?? [],
-      });
+      };
+      setFriendList(list);
     }
-    if (alertsRes.status === 'fulfilled') setAlerts(alertsRes.value);
+    if (alertsRes.status === 'fulfilled') {
+      alertsData = alertsRes.value;
+      setAlerts(alertsData);
+    }
+    _cache = { friendList: list, alerts: alertsData };
     // The nav arc reads the same count from the shared store; nudge it so the
     // wedge badge cannot lag behind the tab badge right next to it.
     refreshAlertsCount();
@@ -413,49 +928,17 @@ export default function ChatScreen() {
   useFocusEffect(useCallback(() => {
     fetchAll();
     fetchUnreadBreakdown();
-    pollRef.current = setInterval(fetchAll, 5_000);
+    pollRef.current = setInterval(fetchAll, 15_000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchAll, fetchUnreadBreakdown]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchAll();
-    setRefreshing(false);
+    // Promise `.finally` rather than a `try/finally` block: it stops the spinner
+    // on rejection just the same, but React Compiler can compile it, and a
+    // `finally` statement makes it bail on this whole screen.
+    await fetchAll().finally(() => setRefreshing(false));
   }, [fetchAll]);
-
-  const fetchClubs = useCallback(async () => {
-    setLoadingClubs(true);
-    try {
-      const [myRes, discoverRes] = await Promise.allSettled([
-        clubsApi.myList(),   // GET /api/clubs/?member=true  — only joined clubs
-        clubsApi.list(),     // GET /api/clubs/              — only unjoined clubs
-      ]);
-      if (myRes.status === 'fulfilled') setMyClubs(myRes.value.data);
-      if (discoverRes.status === 'fulfilled') setDiscoverClubs(discoverRes.value.data);
-    } catch {} finally {
-      setLoadingClubs(false);
-    }
-  }, []);
-
-  async function handleJoinFromCard(clubId: number) {
-    setJoiningClubId(clubId);
-    try {
-      await clubsApi.join(clubId);
-      await fetchClubs();
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not join club.');
-    } finally {
-      setJoiningClubId(null);
-    }
-  }
-
-  useEffect(() => {
-    if (activeTab === 'clubs') fetchClubs();
-  }, [activeTab, fetchClubs]);
-
-  useFocusEffect(useCallback(() => {
-    fetchClubs();
-  }, [fetchClubs]));
 
   const friendIds = new Set(friendList.friends.map((f) => f.id));
   const connections = friendList.connections.filter((c) => !friendIds.has(c.id));
@@ -479,9 +962,9 @@ export default function ChatScreen() {
       fetchAll();
     } catch (e) {
       console.log(`[Alerts] ${req.kind} ${action} failed`, e);
-    } finally {
-      setActioning((prev) => { const next = { ...prev }; delete next[key]; return next; });
     }
+    // Runs on both paths: the `catch` only logs, so nothing escapes it.
+    setActioning((prev) => { const next = { ...prev }; delete next[key]; return next; });
   }
 
   async function markAllRead() {
@@ -489,10 +972,9 @@ export default function ChatScreen() {
     try {
       await api.patch('/api/notifications/mark-all-read/');
     } catch {}
-    finally {
-      await fetchAll();
-      setMarkingRead(false);
-    }
+    // Refresh either way — a failed mark-all still wants the true unread state.
+    await fetchAll();
+    setMarkingRead(false);
   }
 
   /** Follow an alert to whatever it is about. A reply lives in the chat it was
@@ -535,106 +1017,14 @@ export default function ChatScreen() {
     ...activity.map((notif) => ({ kind: 'activity' as const, key: `a-${notif.id}`, notif })),
   ];
 
-  // ── Block / remove ─────────────────────────────────────────────────
-  function removeFromLists(userId: number) {
-    setFriendList((prev) => ({
-      connections: prev.connections.filter((u) => u.id !== userId),
-      friends:     prev.friends.filter((u) => u.id !== userId),
-    }));
-  }
-
-  function handleBlock(user: UserSummary) {
-    removeFromLists(user.id);
-    blockUser(user)
-      .then(() => triggerNearbyRefresh())
-      .catch(() => {
-        Alert.alert('Could not block', `Blocking @${user.username} failed. Please try again.`);
-        fetchAll();
-      });
-  }
-
-  function handleRemoveFriend(user: UserSummary) {
-    setFriendList((prev) => ({ ...prev, friends: prev.friends.filter((u) => u.id !== user.id) }));
-    api.delete(`/api/friends/${user.id}/remove/`).catch(() => {});
-  }
-
-  function handleRemoveConnection(user: UserSummary) {
-    setFriendList((prev) => ({ ...prev, connections: prev.connections.filter((u) => u.id !== user.id) }));
-    api.delete(`/api/friends/${user.id}/remove/`).catch(() => {});
-  }
-
-  function handleAddFriend(user: UserSummary) {
-    api.post(`/api/friends/request/${user.id}/`)
-      .then(() => setSentRequestIds((prev) => new Set(prev).add(user.id)))
-      .catch((e) => console.log('[Friend Request] error:', e?.response?.status));
-  }
-
-  function openMenu(user: UserSummary, type: 'connected' | 'friend') {
-    const removeLabel = type === 'friend' ? 'Remove Friend' : 'Remove Connection';
-    const removeAction = type === 'friend' ? () => handleRemoveFriend(user) : () => handleRemoveConnection(user);
-    Alert.alert(user.username, undefined, [
-      { text: removeLabel, style: 'destructive', onPress: removeAction },
-      { text: 'Block User', style: 'destructive', onPress: () => handleBlock(user) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }
-
-  function handleMessage(user: UserSummary) {
-    setFriendList((prev) => ({
-      connections: prev.connections.map((u) => u.id === user.id ? { ...u, unread_count: 0 } : u),
-      friends:     prev.friends.map((u)     => u.id === user.id ? { ...u, unread_count: 0 } : u),
-    }));
-    router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } } as any);
-  }
-
-  // Friends first, then connections — the same tiering the nearby list uses, so
-  // "who am I closest to" reads the same way everywhere. Recency only sorts
-  // within a tier, so an active connection can't push your friends down the
-  // list.
-  const chatUsers: ChatUser[] = [
-    ...friendList.friends.map((u) => ({ ...u, chatType: 'friend' as const })),
-    ...connections.map((u) => ({ ...u, chatType: 'connected' as const })),
-  ].sort((a, b) => {
-    if (a.chatType !== b.chatType) return a.chatType === 'friend' ? -1 : 1;
-    if (a.last_message_at && b.last_message_at) return b.last_message_at.localeCompare(a.last_message_at);
-    if (a.last_message_at) return -1;
-    if (b.last_message_at) return 1;
-    return 0;
-  });
-
-  // ── Search across people and clubs ─────────────────────────────────
-  const trimmed = query.trim();
-  const searching = trimmed.length > 0;
-
-  const searchRows: SearchRow[] = useMemo(() => {
-    const needle = trimmed.toLowerCase();
-    if (!needle) return [];
-
-    const people = chatUsers.filter((u) => matches(u.username, needle));
-
-    // A club can be in both lists across a refresh; the one you are in wins,
-    // because its row carries your role.
-    const clubById = new Map<number, Club>();
-    for (const club of [...discoverClubs, ...myClubs]) clubById.set(club.id, club);
-    const clubs = [...clubById.values()].filter(
-      (c) => matches(c.name, needle) || matches(c.interest?.name, needle),
-    );
-
-    return [
-      ...(people.length ? [{ kind: 'label' as const, key: 'l-people', label: 'PEOPLE' }] : []),
-      ...people.map((user) => ({ kind: 'person' as const, key: `p-${user.id}`, user })),
-      ...(clubs.length ? [{ kind: 'label' as const, key: 'l-clubs', label: 'CLUBS' }] : []),
-      ...clubs.map((club) => ({ kind: 'club' as const, key: `c-${club.id}`, club })),
-    ];
-    // chatUsers is rebuilt every render from friendList; depending on the two
-    // lists it comes from keeps this from recomputing on unrelated state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmed, friendList, myClubs, discoverClubs]);
+  const { chatUsers, trimmed, searching, searchRows } = useChatSearch(
+    query, friendList, connections, clubsTab.tabProps.myClubs, clubsTab.tabProps.discoverClubs,
+  );
 
   const TABS: { key: Tab; label: string; count: number }[] = [
     { key: 'alerts', label: 'Alerts', count: unreadCount },
     { key: 'chats',  label: 'Chats',  count: chatUsers.length },
-    { key: 'clubs',  label: 'Clubs',  count: myClubs.length },
+    { key: 'clubs',  label: 'Clubs',  count: clubsTab.tabProps.myClubs.length },
   ];
 
   const refreshControl = (
@@ -662,7 +1052,12 @@ export default function ChatScreen() {
           tabs={TABS}
           activeTab={activeTab}
           order={tabOrder}
-          onTabPress={(key) => setActiveTab(key)}
+          onTabPress={(key) => {
+            // The spinner belongs to the press that reveals the list, not to
+            // an effect reacting to the tab change afterwards.
+            if (key === 'clubs') clubsTab.arm();
+            setActiveTab(key);
+          }}
           onOrderChange={setTabOrder}
         />
       )}
@@ -672,162 +1067,43 @@ export default function ChatScreen() {
           <ActivityIndicator color={colors.teal} size="large" />
         </View>
       ) : searching ? (
-        <FlatList
-          data={searchRows}
-          keyExtractor={(item) => item.key}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          renderItem={({ item }) => {
-            if (item.kind === 'label') {
-              return <Text style={styles.searchSectionLabel}>{item.label}</Text>;
-            }
-            if (item.kind === 'person') {
-              return (
-                <SearchPersonRow
-                  user={item.user}
-                  onPress={() => handleMessage(item.user)}
-                />
-              );
-            }
-            return (
-              <ClubCard
-                club={item.club}
-                onPress={() =>
-                  router.push({ pathname: '/clubs/[id]', params: { id: item.club.id } } as any)
-                }
-              />
-            );
-          }}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={
-            <EmptyState
-              message={`Nothing matches “${trimmed}”\nThis searches your friends, connections and clubs`}
-            />
-          }
-          showsVerticalScrollIndicator={false}
-          {...scrollProps}
+        <SearchResultsList
+          rows={searchRows}
+          trimmed={trimmed}
+          scrollProps={scrollProps}
+          onMessage={peopleActions.onMessage}
+          onOpenClub={(clubId) => router.push({ pathname: '/clubs/[id]', params: { id: clubId } } as any)}
         />
       ) : activeTab === 'alerts' ? (
-        <FlatList
-          data={alertRows}
-          keyExtractor={(item) => item.key}
-          renderItem={({ item }) => {
-            if (item.kind === 'label') {
-              return <Text style={styles.alertsSectionLabel}>{item.label}</Text>;
-            }
-            if (item.kind === 'request') {
-              const key = `${item.request.kind}-${item.request.id}`;
-              return (
-                <RequestRow
-                  request={item.request}
-                  actioning={actioning[key]}
-                  onAccept={() => handleRequest(item.request, 'accept')}
-                  onDecline={() => handleRequest(item.request, 'decline')}
-                  onPressUser={() =>
-                    router.push({
-                      pathname: '/profile/[id]',
-                      params: { id: item.request.user.id },
-                    } as any)
-                  }
-                />
-              );
-            }
-            return <NotifRow notif={item.notif} onPress={() => openActivity(item.notif)} />;
-          }}
-          ListHeaderComponent={
-            unreadCount > 0 ? (
-              <View style={styles.alertsHeader}>
-                <View style={styles.unreadPill}>
-                  <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
-                </View>
-                {hasUnreadActivity && (
-                  <Pressable onPress={markAllRead} disabled={markingRead} hitSlop={10}>
-                    {markingRead ? (
-                      <ActivityIndicator color={colors.teal} size="small" />
-                    ) : (
-                      <Text style={styles.markReadBtn}>Mark all read</Text>
-                    )}
-                  </Pressable>
-                )}
-              </View>
-            ) : null
-          }
-          contentContainerStyle={styles.alertsList}
-          ListEmptyComponent={
-            <EmptyState message={"You're all caught up\nRequests and story activity land here"} />
-          }
+        <AlertsList
+          rows={alertRows}
+          actioning={actioning}
+          unreadCount={unreadCount}
+          hasUnreadActivity={hasUnreadActivity}
+          markingRead={markingRead}
           refreshControl={refreshControl}
-          showsVerticalScrollIndicator={false}
-          {...scrollProps}
+          scrollProps={scrollProps}
+          onRequest={handleRequest}
+          onOpenActivity={openActivity}
+          onOpenProfile={(userId) => router.push({ pathname: '/profile/[id]', params: { id: userId } } as any)}
+          onMarkAllRead={markAllRead}
         />
       ) : activeTab === 'chats' ? (
-        <FlatList
-          data={chatUsers}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => (
-            <UserCard
-              user={item}
-              type={item.chatType}
-              requestSent={sentRequestIds.has(item.id)}
-              onMessage={handleMessage}
-              onAddFriend={item.chatType === 'connected' ? handleAddFriend : undefined}
-              onMenu={openMenu}
-            />
-          )}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={<EmptyState message={'No chats yet\nAccept incoming Hi requests'} />}
+        <ChatsList
+          users={chatUsers}
+          sentRequestIds={sentRequestIds}
           refreshControl={refreshControl}
-          showsVerticalScrollIndicator={false}
-          {...scrollProps}
+          scrollProps={scrollProps}
+          onMessage={peopleActions.onMessage}
+          onAddFriend={peopleActions.onAddFriend}
+          onMenu={peopleActions.onMenu}
         />
       ) : (
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.clubsScroll}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={loadingClubs} onRefresh={fetchClubs} tintColor={colors.teal} colors={[colors.teal]} />
-          }
-        >
-          <Pressable style={styles.createClubBtn} onPress={() => router.push('/create-club' as any)}>
-            <Ionicons name="add-circle-outline" size={18} color="#ffffff" />
-            <Text style={styles.createClubBtnText}>Create Club</Text>
-          </Pressable>
-
-          {loadingClubs ? (
-            <ActivityIndicator color={colors.teal} style={{ marginTop: 40 }} />
-          ) : (
-            <>
-              {myClubs.length > 0 && (
-                <>
-                  <Text style={styles.clubsSectionLabel}>MY CLUBS</Text>
-                  {myClubs.map((club) => (
-                    <ClubCard
-                      key={club.id}
-                      club={club}
-                      onPress={() => router.push({ pathname: '/clubs/[id]', params: { id: club.id } } as any)}
-                    />
-                  ))}
-                </>
-              )}
-
-              <Text style={styles.clubsSectionLabel}>DISCOVER</Text>
-              {discoverClubs.length > 0 ? (
-                discoverClubs.map((club) => (
-                  <ClubCard
-                    key={club.id}
-                    club={club}
-                    onPress={() => router.push({ pathname: '/clubs/[id]', params: { id: club.id } } as any)}
-                    onJoin={() => handleJoinFromCard(club.id)}
-                    joining={joiningClubId === club.id}
-                  />
-                ))
-              ) : (
-                <Text style={styles.clubsEmptyText}>No clubs to discover yet.</Text>
-              )}
-            </>
-          )}
-        </ScrollView>
+        <ClubsTab
+          {...clubsTab.tabProps}
+          onCreateClub={() => router.push('/create-club' as any)}
+          onOpenClub={(clubId) => router.push({ pathname: '/clubs/[id]', params: { id: clubId } } as any)}
+        />
       )}
 
       <Speedometer />
@@ -1106,5 +1382,41 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     textAlign: 'center',
     lineHeight: 21,
     paddingVertical: 24,
+  },
+
+  locationNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 14,
+    marginBottom: 12,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  locationNoticeText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.t2,
+  },
+  locationNoticeBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.m,
+    backgroundColor: colors.tealTint,
+    borderWidth: 1,
+    borderColor: colors.tealLine,
+  },
+  locationNoticeBtnText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.teal,
   },
 });

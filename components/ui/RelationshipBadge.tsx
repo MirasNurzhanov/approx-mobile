@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fonts, radius, type as typography } from '@/constants/theme';
@@ -68,8 +67,8 @@ export function RelationshipBadge({
   compact?: boolean;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
-  const rel = useMemo(() => makeRelationship(colors), [colors]);
+  const styles = makeStyles(colors);
+  const rel = makeRelationship(colors);
   const d = rel[relationship] ?? rel.stranger;
   return (
     <View

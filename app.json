@@ -4,7 +4,7 @@
     "slug": "aura-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icon-light.png",
     "scheme": "auramobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -33,8 +33,9 @@
         }
       },
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#0a0a0a"
+        "foregroundImage": "./assets/images/adaptive-icon-light.png",
+        "backgroundColor": "#FAF9F5",
+        "monochromeImage": "./assets/images/adaptive-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -78,14 +79,27 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash-icon-light.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#0a0a0a"
+          "backgroundColor": "#FAF9F5"
         }
       ],
       "expo-font",
-      "expo-video"
+      "expo-video",
+      [
+        "@mozzius/expo-dynamic-app-icon",
+        {
+          "light": {
+            "ios": "./assets/images/icon-light.png",
+            "android": "./assets/images/icon-android-light.png"
+          },
+          "dark": {
+            "ios": "./assets/images/icon-dark.png",
+            "android": "./assets/images/icon-android-dark.png"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

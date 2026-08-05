@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Modal,
   Pressable,
   RefreshControl,
@@ -12,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -55,7 +55,7 @@ function MemberRow({
   onMenu: (member: ClubMember) => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const isSelf = Number(member.user.id) === Number(currentUserId);
   const showMenu = !isSelf && viewerIsCreator;
 
@@ -77,6 +77,258 @@ function MemberRow({
   );
 }
 
+// ─── Module-level cache ───────────────────────────────────────────────────────
+// Keyed by club id: revisiting a club paints the last-known detail + member
+// list immediately while the refresh runs in the background.
+const _clubCache = new Map<number, { club: Club; members: ClubMember[] }>();
+
+// ─── Sections ─────────────────────────────────────────────────────────────────
+
+/** Emblem, name, what it is about, and the way into its chat. */
+function ClubHero({ club, memberCount, myRole, isMember, onOpenChat }: {
+  club: Club;
+  memberCount: number;
+  myRole: ClubRole | null | undefined;
+  isMember: boolean;
+  onOpenChat: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.hero}>
+      {club.emblem ? (
+        <Image source={{ uri: club.emblem }} style={styles.emblem} />
+      ) : (
+        <View style={styles.emblemFallback}>
+          <Text style={styles.emblemInitial}>{club.name.charAt(0).toUpperCase()}</Text>
+        </View>
+      )}
+
+      <Text style={styles.clubName}>{club.name}</Text>
+
+      <View style={styles.metaRow}>
+        {club.interest && (
+          <View style={styles.interestBadge}>
+            <Text style={styles.interestIcon}>{club.interest.icon}</Text>
+            <Text style={styles.interestName}>{club.interest.name}</Text>
+          </View>
+        )}
+        <View style={styles.memberCountBadge}>
+          <Ionicons name="people-outline" size={13} color={colors.t3} />
+          <Text style={styles.memberCountText}>{memberCount}</Text>
+        </View>
+      </View>
+
+      {myRole && (
+        <View style={styles.myRoleBadge}>
+          <Text style={styles.myRoleText}>{roleBadge(myRole)}{roleBadge(myRole) ? ' ' : ''}{roleLabel(myRole)}</Text>
+        </View>
+      )}
+
+      {club.description ? (
+        <Text style={styles.description}>{club.description}</Text>
+      ) : null}
+
+      {isMember && (
+        <Pressable style={styles.chatBtn} onPress={onOpenChat}>
+          <Ionicons name="chatbubbles-outline" size={18} color={colors.bg} />
+          <Text style={styles.chatBtnText}>Open Club Chat</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function MembersSection({ members, canManage, isCreator, currentUserId, onInvite, onMemberMenu }: {
+  members: ClubMember[];
+  canManage: boolean;
+  isCreator: boolean;
+  currentUserId: number | null;
+  onInvite: () => void;
+  onMemberMenu: (member: ClubMember) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>MEMBERS</Text>
+        {canManage && (
+          <Pressable style={styles.inviteHeaderBtn} onPress={onInvite} hitSlop={10}>
+            <Ionicons name="person-add-outline" size={15} color={colors.teal} />
+            <Text style={styles.inviteHeaderText}>Invite</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {members.map((m) => (
+        <MemberRow
+          key={m.user.id}
+          member={m}
+          viewerIsCreator={isCreator}
+          currentUserId={currentUserId}
+          onMenu={onMemberMenu}
+        />
+      ))}
+      {members.length === 0 && (
+        <Text style={styles.emptyText}>No members yet.</Text>
+      )}
+    </View>
+  );
+}
+
+function InviteModal({ visible, query, results, searching, invitingIds, bottom, onQueryChange, onClearQuery, onInvite, onDismiss }: {
+  visible: boolean;
+  query: string;
+  results: InviteUser[];
+  searching: boolean;
+  invitingIds: Set<number>;
+  bottom: number;
+  onQueryChange: (q: string) => void;
+  onClearQuery: () => void;
+  onInvite: (user: InviteUser) => void;
+  onDismiss: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onDismiss}
+    >
+      <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
+      <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
+        <View style={styles.modalHandle} />
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>Invite Member</Text>
+          <Pressable onPress={onDismiss} hitSlop={10}>
+            <Ionicons name="close" size={22} color={colors.t2} />
+          </Pressable>
+        </View>
+
+        <View style={styles.searchRow}>
+          <Ionicons name="search" size={15} color={colors.t3} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by username…"
+            placeholderTextColor={colors.t3}
+            value={query}
+            onChangeText={onQueryChange}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+          />
+          {query.length > 0 && (
+            <Pressable onPress={onClearQuery} hitSlop={8}>
+              <Ionicons name="close-circle" size={16} color={colors.t3} />
+            </Pressable>
+          )}
+        </View>
+
+        {searching ? (
+          <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
+        ) : results.length > 0 ? (
+          <ScrollView style={styles.inviteList} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {results.map((user) => (
+              <View key={user.id} style={styles.inviteRow}>
+                <Avatar uri={user.profile_picture} name={user.username} size="sm" />
+                <Text style={styles.inviteUsername} numberOfLines={1}>@{user.username}</Text>
+                <Pressable
+                  style={[styles.inviteBtn, invitingIds.has(user.id) && styles.inviteBtnBusy]}
+                  onPress={() => onInvite(user)}
+                  disabled={invitingIds.has(user.id)}
+                >
+                  {invitingIds.has(user.id) ? (
+                    <ActivityIndicator size="small" color={colors.bg} />
+                  ) : (
+                    <Text style={styles.inviteBtnText}>Invite</Text>
+                  )}
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        ) : query.length > 0 ? (
+          <Text style={styles.inviteEmpty}>No users found.</Text>
+        ) : null}
+      </View>
+    </Modal>
+  );
+}
+
+/**
+ * Everything behind the invite modal: its own search, its own debounce, and the
+ * set of invites currently in flight.
+ *
+ * None of it is the screen's business — the screen opens the modal, and the
+ * rest is between the modal and the server — so it lives here rather than as
+ * six more pieces of state on a screen that already has plenty.
+ */
+function useClubInvite(clubId: number, members: ClubMember[], onInvited: () => Promise<void>) {
+  const [visible, setVisible] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<InviteUser[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [invitingIds, setInvitingIds] = useState<Set<number>>(new Set());
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function search(q: string) {
+    setSearching(true);
+    try {
+      const { data } = await api.get<InviteUser[]>(`/api/users/search/?q=${encodeURIComponent(q)}`);
+      const memberIds = new Set(members.map((m) => m.user.id));
+      setResults(data.filter((u) => !memberIds.has(u.id)));
+    } catch {
+      setResults([]);
+    }
+    // Always reached — the `catch` just empties the list — so this clears the
+    // spinner without a `finally`, which React Compiler cannot compile.
+    setSearching(false);
+  }
+
+  function onQueryChange(text: string) {
+    setQuery(text);
+    if (debounce.current) clearTimeout(debounce.current);
+    if (!text.trim()) { setResults([]); return; }
+    debounce.current = setTimeout(() => search(text.trim()), 350);
+  }
+
+  function clearQuery() {
+    setQuery('');
+    setResults([]);
+  }
+
+  async function onInvite(user: InviteUser) {
+    setInvitingIds((prev) => new Set(prev).add(user.id));
+    try {
+      await clubsApi.invite(clubId, user.id);
+      await onInvited();
+      setResults((prev) => prev.filter((u) => u.id !== user.id));
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not invite user.');
+    }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setInvitingIds((prev) => { const s = new Set(prev); s.delete(user.id); return s; });
+  }
+
+  return {
+    open: () => setVisible(true),
+    /** Spread straight onto `<InviteModal>`; `bottom` is the caller's inset. */
+    modalProps: {
+      visible,
+      query,
+      results,
+      searching,
+      invitingIds,
+      onQueryChange,
+      onClearQuery: clearQuery,
+      onInvite,
+      onDismiss: () => { setVisible(false); clearQuery(); },
+    },
+  };
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ClubDetailScreen() {
   const { colors } = useTheme();
@@ -84,23 +336,15 @@ export default function ClubDetailScreen() {
   const { id, fromCreate } = useLocalSearchParams<{ id: string; fromCreate?: string }>();
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
+  const clubId = Number(id);
+  const cached = _clubCache.get(clubId);
 
-  const [club, setClub] = useState<Club | null>(null);
-  const [members, setMembers] = useState<ClubMember[]>([]);
+  const [club, setClub] = useState<Club | null>(cached?.club ?? null);
+  const [members, setMembers] = useState<ClubMember[]>(cached?.members ?? []);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cached === undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [actioning, setActioning] = useState(false);
-
-  // Invite modal
-  const [showInvite, setShowInvite] = useState(false);
-  const [inviteQuery, setInviteQuery] = useState('');
-  const [inviteResults, setInviteResults] = useState<InviteUser[]>([]);
-  const [searchingInvite, setSearchingInvite] = useState(false);
-  const [invitingIds, setInvitingIds] = useState<Set<number>>(new Set());
-  const inviteDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clubId = Number(id);
 
   const fetchMembers = useCallback(async () => {
     try {
@@ -108,6 +352,8 @@ export default function ClubDetailScreen() {
       setMembers(res.data);
     } catch {}
   }, [clubId]);
+
+  const invite = useClubInvite(clubId, members, fetchMembers);
 
   const fetchAll = useCallback(async () => {
     const [clubRes, membersRes, meRes] = await Promise.allSettled([
@@ -131,6 +377,7 @@ export default function ClubDetailScreen() {
         }
       }
       setClub(clubData);
+      _clubCache.set(clubId, { club: clubData, members: fetchedMembers });
     }
   }, [clubId]);
 
@@ -140,8 +387,10 @@ export default function ClubDetailScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchAll();
-    setRefreshing(false);
+    // Promise `.finally`, as on the mount effect above: the spinner still stops
+    // on rejection, but React Compiler can compile it — a `try/finally`
+    // statement makes it bail on this whole screen.
+    await fetchAll().finally(() => setRefreshing(false));
   }, [fetchAll]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -161,9 +410,9 @@ export default function ClubDetailScreen() {
       await fetchAll();
     } catch (e: any) {
       Alert.alert('Error', e?.response?.data?.detail ?? 'Could not join club.');
-    } finally {
-      setActioning(false);
     }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setActioning(false);
   }
 
   async function handleLeave() {
@@ -257,7 +506,6 @@ export default function ClubDetailScreen() {
   }
 
   async function handleKick(member: ClubMember) {
-    console.log('[Kick] calling with userId:', member.user.id, 'member object:', JSON.stringify(member));
     try {
       await clubsApi.kick(clubId, member.user.id);
       setMembers((prev) => prev.filter((m) => m.user.id !== member.user.id));
@@ -274,46 +522,6 @@ export default function ClubDetailScreen() {
     } catch {
       Alert.alert('Error', 'Could not promote member.');
     }
-  }
-
-  // ── Invite ────────────────────────────────────────────────────────────────
-  function onInviteQueryChange(text: string) {
-    setInviteQuery(text);
-    if (inviteDebounce.current) clearTimeout(inviteDebounce.current);
-    if (!text.trim()) { setInviteResults([]); return; }
-    inviteDebounce.current = setTimeout(() => searchInviteUsers(text.trim()), 350);
-  }
-
-  async function searchInviteUsers(q: string) {
-    setSearchingInvite(true);
-    try {
-      const { data } = await api.get<InviteUser[]>(`/api/users/search/?q=${encodeURIComponent(q)}`);
-      const memberIds = new Set(members.map((m) => m.user.id));
-      setInviteResults(data.filter((u) => !memberIds.has(u.id)));
-    } catch {
-      setInviteResults([]);
-    } finally {
-      setSearchingInvite(false);
-    }
-  }
-
-  async function handleInvite(user: InviteUser) {
-    setInvitingIds((prev) => new Set(prev).add(user.id));
-    try {
-      await clubsApi.invite(clubId, user.id);
-      await fetchMembers();
-      setInviteResults((prev) => prev.filter((u) => u.id !== user.id));
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not invite user.');
-    } finally {
-      setInvitingIds((prev) => { const s = new Set(prev); s.delete(user.id); return s; });
-    }
-  }
-
-  function closeInviteModal() {
-    setShowInvite(false);
-    setInviteQuery('');
-    setInviteResults([]);
   }
 
   // ── Loading / error ───────────────────────────────────────────────────────
@@ -363,93 +571,32 @@ export default function ClubDetailScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />}
         contentContainerStyle={styles.scroll}
       >
-        {/* Club hero */}
-        <View style={styles.hero}>
-          {club.emblem ? (
-            <Image source={{ uri: club.emblem }} style={styles.emblem} />
-          ) : (
-            <View style={styles.emblemFallback}>
-              <Text style={styles.emblemInitial}>{club.name.charAt(0).toUpperCase()}</Text>
-            </View>
-          )}
+        <ClubHero
+          club={club}
+          memberCount={members.length || club.member_count}
+          myRole={myRole}
+          isMember={isMember}
+          onOpenChat={() =>
+            router.push({
+              pathname: '/clubs/[id]/chat',
+              params: {
+                id: club.id,
+                name: club.name,
+                emblem: club.emblem ?? '',
+                memberCount: members.length || club.member_count,
+              },
+            } as any)
+          }
+        />
 
-          <Text style={styles.clubName}>{club.name}</Text>
-
-          <View style={styles.metaRow}>
-            {club.interest && (
-              <View style={styles.interestBadge}>
-                <Text style={styles.interestIcon}>{club.interest.icon}</Text>
-                <Text style={styles.interestName}>{club.interest.name}</Text>
-              </View>
-            )}
-            <View style={styles.memberCountBadge}>
-              <Ionicons name="people-outline" size={13} color={colors.t3} />
-              <Text style={styles.memberCountText}>{members.length || club.member_count}</Text>
-            </View>
-          </View>
-
-          {myRole && (
-            <View style={styles.myRoleBadge}>
-              <Text style={styles.myRoleText}>{roleBadge(myRole)}{roleBadge(myRole) ? ' ' : ''}{roleLabel(myRole)}</Text>
-            </View>
-          )}
-
-          {club.description ? (
-            <Text style={styles.description}>{club.description}</Text>
-          ) : null}
-
-          {isMember && (
-            <Pressable
-              style={styles.chatBtn}
-              onPress={() =>
-                router.push({
-                  pathname: '/clubs/[id]/chat',
-                  params: {
-                    id: club.id,
-                    name: club.name,
-                    emblem: club.emblem ?? '',
-                    memberCount: members.length || club.member_count,
-                  },
-                } as any)
-              }
-            >
-              <Ionicons name="chatbubbles-outline" size={18} color={colors.bg} />
-              <Text style={styles.chatBtnText}>Open Club Chat</Text>
-            </Pressable>
-          )}
-        </View>
-
-        {/* Members section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>MEMBERS</Text>
-            {canManage && (
-              <Pressable style={styles.inviteHeaderBtn} onPress={() => setShowInvite(true)} hitSlop={10}>
-                <Ionicons name="person-add-outline" size={15} color={colors.teal} />
-                <Text style={styles.inviteHeaderText}>Invite</Text>
-              </Pressable>
-            )}
-          </View>
-
-          {members.map((m) => {
-            console.log('[Club] club.creator raw:', JSON.stringify(club?.creator));
-            console.log('[Club] viewer isOwner:', isOwner, 'isCreator:', isCreator);
-            console.log('[Club] member:', m.user.username, 'role:', m.role);
-            console.log('[Club] should show menu:', isOwner && Number(m.user.id) !== Number(currentUserId));
-            return (
-              <MemberRow
-                key={m.user.id}
-                member={m}
-                viewerIsCreator={isCreator}
-                currentUserId={currentUserId}
-                onMenu={openMemberMenu}
-              />
-            );
-          })}
-          {members.length === 0 && (
-            <Text style={styles.emptyText}>No members yet.</Text>
-          )}
-        </View>
+        <MembersSection
+          members={members}
+          canManage={canManage}
+          isCreator={isCreator}
+          currentUserId={currentUserId}
+          onInvite={invite.open}
+          onMemberMenu={openMemberMenu}
+        />
 
         {/* Creator: Delete Club danger section */}
         {isCreator && (
@@ -459,69 +606,7 @@ export default function ClubDetailScreen() {
         )}
       </ScrollView>
 
-      {/* Invite modal */}
-      <Modal
-        visible={showInvite}
-        transparent
-        animationType="slide"
-        onRequestClose={closeInviteModal}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={closeInviteModal} />
-        <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
-          <View style={styles.modalHandle} />
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Invite Member</Text>
-            <Pressable onPress={closeInviteModal} hitSlop={10}>
-              <Ionicons name="close" size={22} color={colors.t2} />
-            </Pressable>
-          </View>
-
-          <View style={styles.searchRow}>
-            <Ionicons name="search" size={15} color={colors.t3} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by username…"
-              placeholderTextColor={colors.t3}
-              value={inviteQuery}
-              onChangeText={onInviteQueryChange}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-            />
-            {inviteQuery.length > 0 && (
-              <Pressable onPress={() => { setInviteQuery(''); setInviteResults([]); }} hitSlop={8}>
-                <Ionicons name="close-circle" size={16} color={colors.t3} />
-              </Pressable>
-            )}
-          </View>
-
-          {searchingInvite ? (
-            <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
-          ) : inviteResults.length > 0 ? (
-            <ScrollView style={styles.inviteList} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {inviteResults.map((user) => (
-                <View key={user.id} style={styles.inviteRow}>
-                  <Avatar uri={user.profile_picture} name={user.username} size="sm" />
-                  <Text style={styles.inviteUsername} numberOfLines={1}>@{user.username}</Text>
-                  <Pressable
-                    style={[styles.inviteBtn, invitingIds.has(user.id) && styles.inviteBtnBusy]}
-                    onPress={() => handleInvite(user)}
-                    disabled={invitingIds.has(user.id)}
-                  >
-                    {invitingIds.has(user.id) ? (
-                      <ActivityIndicator size="small" color={colors.bg} />
-                    ) : (
-                      <Text style={styles.inviteBtnText}>Invite</Text>
-                    )}
-                  </Pressable>
-                </View>
-              ))}
-            </ScrollView>
-          ) : inviteQuery.length > 0 ? (
-            <Text style={styles.inviteEmpty}>No users found.</Text>
-          ) : null}
-        </View>
-      </Modal>
+      <InviteModal {...invite.modalProps} bottom={bottom} />
     </View>
   );
 }

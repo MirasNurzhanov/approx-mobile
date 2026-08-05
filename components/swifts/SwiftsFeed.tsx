@@ -81,13 +81,14 @@ export function SwiftsFeed() {
   const [swifts, setSwifts] = useState<Swift[]>([]);
   const [state, setState] = useState<FeedState>('loading');
   const [activeIndex, setActiveIndex] = useState(0);
+  /** The Swift the viewer has tap-paused, if any. Cleared on scroll. */
+  const [pausedId, setPausedId] = useState<string | null>(null);
   // Muted until the viewer asks otherwise — sound that starts on its own in a
   // public place is the single most hostile default a video feed can have.
   const [muted, setMuted] = useState(true);
   const [height, setHeight] = useState(0);
 
   const load = useCallback(() => {
-    setState('loading');
     getSwifts()
       .then((data) => {
         setSwifts(data);
@@ -98,11 +99,25 @@ export function SwiftsFeed() {
 
   useEffect(load, [load]);
 
+  // Only the retry path has to put the feed back into 'loading' — the first
+  // load already starts there, so doing it in the mount effect would just be a
+  // second render to set the value it already had.
+  const retry = useCallback(() => {
+    setState('loading');
+    load();
+  }, [load]);
+
   // Stable identity: FlatList warns and misbehaves if this changes per render.
   const handleViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
-      if (first?.index != null) setActiveIndex(first.index);
+      if (first?.index != null) {
+        setActiveIndex(first.index);
+        // Scrolling to another Swift ends the manual pause here, in the event
+        // that causes it, rather than in an effect inside the card reacting to
+        // the prop afterwards.
+        setPausedId(null);
+      }
     },
   ).current;
 
@@ -151,7 +166,7 @@ export function SwiftsFeed() {
       <View style={styles.center}>
         <Ionicons name="cloud-offline-outline" size={32} color={colors.t3} />
         <Text style={styles.emptyTitle}>Couldn&apos;t load Swifts</Text>
-        <Pressable onPress={load} hitSlop={10}>
+        <Pressable onPress={retry} hitSlop={10}>
           <Text style={styles.retry}>Try again</Text>
         </Pressable>
       </View>
@@ -181,9 +196,11 @@ export function SwiftsFeed() {
             <SwiftCard
               swift={item}
               isActive={index === activeIndex}
+              pausedByUser={pausedId === item.id}
               muted={muted}
               height={height}
               navClearance={navClearance}
+              onTogglePause={() => setPausedId((p) => (p === item.id ? null : item.id))}
               onToggleMute={() => setMuted((m) => !m)}
               onToggleLike={handleToggleLike}
               onComment={noop}

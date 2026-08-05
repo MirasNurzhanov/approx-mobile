@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import MapView, { Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { reportLocation } from '@/services/location';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { Card } from '@/components/ui/Card';
@@ -108,7 +109,7 @@ function ModeTabs({ mode, onChange, disabled }: {
   disabled?: boolean;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={styles.tabs} accessibilityRole="tablist">
       {(['radius', 'region'] as const).map((key) => {
@@ -138,6 +139,495 @@ function ModeTabs({ mode, onChange, disabled }: {
   );
 }
 
+// ─── Sections ─────────────────────────────────────────────────────────────────
+// The screen owns the zone state and every save; these draw it.
+
+/** A map viewport. Named apart from this file's own `Region`, which is a place
+ *  with a border rather than a rectangle on screen. */
+type Viewport = { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number };
+
+/** The shape being edited, drawn on a map that cannot be touched. */
+function ZonePreview({ mapRef, themeMode, mode, region, coords, previewCoords, previewViewport, previewRings, radiusM, outline }: {
+  mapRef: React.RefObject<MapView | null>;
+  themeMode: 'dark' | 'light';
+  mode: ZoneMode;
+  region: RegionSummary | null;
+  coords: { latitude: number; longitude: number } | null;
+  previewCoords: { latitude: number; longitude: number } | null;
+  previewViewport: (target: RegionSummary) => Viewport;
+  previewRings: { latitude: number; longitude: number }[][];
+  radiusM: number;
+  outline: Region | null;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.preview}>
+      {coords || region ? (
+        <MapView
+          ref={mapRef}
+          provider={PROVIDER_GOOGLE}
+          // Same basemap rules as the map itself. This preview is a few
+          // hundred pixels tall and exists to show one shape; Google's
+          // default business badges filled it with everything except the
+          // thing it is for.
+          customMapStyle={mapStyleFor(themeMode)}
+          style={StyleSheet.absoluteFill}
+          initialRegion={
+            mode === 'region' && region
+              ? previewViewport(region)
+              : { ...(previewCoords ?? { latitude: 0, longitude: 0 }), latitudeDelta: 0.02, longitudeDelta: 0.02 }
+          }
+          pointerEvents="none"
+          scrollEnabled={false}
+          zoomEnabled={false}
+          rotateEnabled={false}
+          pitchEnabled={false}
+          toolbarEnabled={false}
+        >
+          {mode === 'radius' && previewCoords && (
+            <Circle
+              center={previewCoords}
+              radius={radiusM}
+              fillColor="rgba(139,92,246,0.12)"
+              strokeColor="rgba(139,92,246,0.55)"
+              strokeWidth={2}
+            />
+          )}
+          {/* One polygon per piece, not per ring: a region straddling the
+              dateline is cut in two at ±180 so it draws as an island group
+              rather than as a band around the planet. */}
+          {mode === 'region' && previewRings.map((piece, i) => (
+            <Polygon
+              key={i}
+              coordinates={piece}
+              fillColor="rgba(139,92,246,0.12)"
+              strokeColor="rgba(139,92,246,0.55)"
+              strokeWidth={2}
+            />
+          ))}
+        </MapView>
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.center]}>
+          <Text style={styles.previewEmpty}>
+            {mode === 'region' ? 'Pick a place to see it here' : 'Turn on location to preview'}
+          </Text>
+        </View>
+      )}
+      {mode === 'region' && region && !outline && (
+        <View style={styles.previewLoading}>
+          <ActivityIndicator color={colors.t2} size="small" />
+        </View>
+      )}
+    </View>
+  );
+}
+
+function RadiusCard({ radiusM, saving, onChange, onCommit }: {
+  radiusM: number;
+  saving: boolean;
+  onChange: (next: number) => void;
+  onCommit: (next: number) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <Card style={styles.card}>
+      <View style={styles.readoutRow}>
+        <Text style={styles.readoutLabel}>Reach</Text>
+        <Text style={styles.readout}>{formatRadius(radiusM)}</Text>
+      </View>
+      <RadiusSlider
+        value={radiusM}
+        min={RADIUS_MIN_M}
+        max={RADIUS_MAX_M}
+        onChange={onChange}
+        onCommit={onCommit}
+        format={formatRadius}
+        disabled={saving}
+      />
+      <Text style={styles.hint}>
+        Anyone inside the circle is in your zone. To cover a whole city, switch to
+        Place — a circle that big spills into the next town on one side and stops
+        short of the suburbs on the other.
+      </Text>
+    </Card>
+  );
+}
+
+/**
+ * What the server hands back instead of guessing.
+ *
+ * Every one of these provably contains you; what it could not establish is
+ * which of them you mean. The reasons come along because a list of names with
+ * nothing to separate them just moves the problem rather than solving it.
+ */
+function RankedChoices({ choices, choicesFor, saving, onPick }: {
+  choices: RegionCandidate[];
+  choicesFor: 'city' | 'district' | null;
+  saving: boolean;
+  onPick: (region: RegionSummary) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  if (!choices.length) return null;
+  return (
+    <View style={styles.choices}>
+      <Text style={styles.choicesLabel}>
+        {choicesFor === 'district' ? 'Areas around you' : 'Places around you'}
+      </Text>
+      {choices.map((choice) => (
+        <Pressable
+          key={choice.region.id}
+          style={styles.resultRow}
+          onPress={() => onPick(choice.region)}
+          disabled={saving}
+          accessibilityRole="button"
+          accessibilityLabel={`Use ${choice.region.name}. ${choice.reasons.join('. ')}`}
+          accessibilityState={{ disabled: saving }}
+        >
+          <Ionicons name="location" size={16} color={colors.purple} />
+          <View style={styles.resultText}>
+            <View style={styles.chosenTitleRow}>
+              <Text style={styles.resultName} numberOfLines={1}>
+                {choice.region.name}
+              </Text>
+              <View style={styles.kindTag}>
+                <Text style={styles.kindTagText}>
+                  {kindLabel(choice.region.kind)}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.resultWhere} numberOfLines={2}>
+              {choice.reasons.length
+                ? choice.reasons.join(' · ')
+                : choice.region.display_name}
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * The way through when tracing finds nothing.
+ *
+ * OSM's coverage of sub-city areas is patchy and its address hierarchy does not
+ * name every district in a way the lookup can resolve, so a place can be
+ * perfectly well mapped and still be unreachable from the trace buttons.
+ * Typing its name finds it.
+ */
+function RegionSearch({ query, results, searching, searchError, coords, saving, onQueryChange, onPick }: {
+  query: string;
+  results: RegionSummary[] | null;
+  searching: boolean;
+  searchError: string | null;
+  coords: { latitude: number; longitude: number } | null;
+  saving: boolean;
+  onQueryChange: (q: string) => void;
+  onPick: (region: RegionSummary) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.searchWrap}>
+      <View style={styles.searchField}>
+        <Ionicons name="search" size={16} color={colors.t3} />
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={onQueryChange}
+          placeholder="Or find your city or district by name"
+          placeholderTextColor={colors.t3}
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel="Search for a city or district by name"
+        />
+        {searching ? <ActivityIndicator color={colors.t3} size="small" /> : null}
+        {!searching && query.length > 0 ? (
+          <Pressable
+            onPress={() => onQueryChange('')}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
+            <Ionicons name="close-circle" size={17} color={colors.t3} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {searchError ? <Text style={styles.error}>{searchError}</Text> : null}
+
+      {!searchError && results?.length === 0 ? (
+        <Text style={styles.searchEmpty}>
+          Nothing found for “{query.trim()}”. Only places with a real mapped
+          border can be a zone, so try the city it is in.
+        </Text>
+      ) : null}
+
+      {results?.map((found) => {
+        // A zone has to cover somewhere you actually are, and the server
+        // enforces that on save. The box test is cheap, needs no
+        // geometry, and can only ever produce a *definite* no — so it
+        // greys out the results that would be refused without pretending
+        // to be the real containment check.
+        const unreachable =
+          !!coords && !regionBoxContains(found, coords.latitude, coords.longitude);
+        return (
+          <Pressable
+            key={found.id}
+            style={[styles.resultRow, unreachable && styles.resultRowOff]}
+            onPress={() => onPick(found)}
+            disabled={unreachable || saving}
+            accessibilityRole="button"
+            accessibilityLabel={
+              unreachable
+                ? `${found.name}, not where you are`
+                : `Use ${found.name}`
+            }
+            accessibilityState={{ disabled: unreachable || saving }}
+          >
+            <Ionicons
+              name={unreachable ? 'location-outline' : 'location'}
+              size={16}
+              color={unreachable ? colors.t3 : colors.purple}
+            />
+            <View style={styles.resultText}>
+              <View style={styles.chosenTitleRow}>
+                <Text style={styles.resultName} numberOfLines={1}>{found.name}</Text>
+                <View style={styles.kindTag}>
+                  <Text style={styles.kindTagText}>{kindLabel(found.kind)}</Text>
+                </View>
+              </View>
+              <Text style={styles.resultWhere} numberOfLines={1}>
+                {unreachable ? 'Not where you are' : found.display_name}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function PlaceCard({ region, locating, saving, lookupError, choices, choicesFor, query, results, searching, searchError, coords, onClearRegion, onTrace, onPickRegion, onQueryChange }: {
+  region: RegionSummary | null;
+  locating: 'city' | 'district' | null;
+  saving: boolean;
+  lookupError: string | null;
+  choices: RegionCandidate[];
+  choicesFor: 'city' | 'district' | null;
+  query: string;
+  results: RegionSummary[] | null;
+  searching: boolean;
+  searchError: string | null;
+  coords: { latitude: number; longitude: number } | null;
+  onClearRegion: () => void;
+  onTrace: (size: 'city' | 'district') => void;
+  onPickRegion: (region: RegionSummary) => void;
+  onQueryChange: (q: string) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const busy = locating !== null || saving;
+  return (
+    <Card style={styles.card}>
+      {region ? (
+        <View style={styles.chosen}>
+          <Ionicons name="location" size={18} color={colors.purple} />
+          <View style={styles.chosenText}>
+            <View style={styles.chosenTitleRow}>
+              <Text style={styles.chosenName} numberOfLines={1}>{region.name}</Text>
+              <View style={styles.kindTag}>
+                <Text style={styles.kindTagText}>{kindLabel(region.kind)}</Text>
+              </View>
+            </View>
+            <Text style={styles.chosenWhere} numberOfLines={1}>
+              {region.display_name}
+            </Text>
+          </View>
+          <Pressable
+            onPress={onClearRegion}
+            hitSlop={10}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel={`Clear ${region.name}`}
+          >
+            <Ionicons name="close-circle" size={20} color={colors.t3} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* Two sizes, traced from where you are standing. Side by side
+          rather than one button with a size picker: they are the two
+          answers to the same question, and neither is the default. */}
+      <View style={styles.traceRow}>
+        <Pressable
+          style={[styles.traceBtn, locating === 'city' && styles.traceBtnBusy]}
+          onPress={() => onTrace('city')}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="Use my whole city"
+          accessibilityState={{ disabled: busy }}
+        >
+          {locating === 'city'
+            ? <ActivityIndicator color={colors.teal} size="small" />
+            : <Ionicons name="business-outline" size={17} color={colors.teal} />}
+          <Text style={styles.traceLabel}>Use my city</Text>
+          <Text style={styles.traceHint}>The whole city</Text>
+        </Pressable>
+
+        <Pressable
+          style={[styles.traceBtn, locating === 'district' && styles.traceBtnBusy]}
+          onPress={() => onTrace('district')}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="Use my district, the area inside my city"
+          accessibilityState={{ disabled: busy }}
+        >
+          {locating === 'district'
+            ? <ActivityIndicator color={colors.teal} size="small" />
+            : <Ionicons name="navigate-outline" size={17} color={colors.teal} />}
+          <Text style={styles.traceLabel}>Use my district</Text>
+          <Text style={styles.traceHint}>Just my area of it</Text>
+        </Pressable>
+      </View>
+
+      {lookupError ? <Text style={styles.error}>{lookupError}</Text> : null}
+
+      <RankedChoices
+        choices={choices}
+        choicesFor={choicesFor}
+        saving={saving}
+        onPick={onPickRegion}
+      />
+
+      <RegionSearch
+        query={query}
+        results={results}
+        searching={searching}
+        searchError={searchError}
+        coords={coords}
+        saving={saving}
+        onQueryChange={onQueryChange}
+        onPick={onPickRegion}
+      />
+
+      <Text style={styles.hint}>
+        Your zone follows the real border of the place, however big it is. It can
+        only be somewhere you actually are — whether you trace it or find it by
+        name, Aura checks that you are inside it before it takes effect.
+      </Text>
+    </Card>
+  );
+}
+
+/**
+ * The little map above the controls: what to draw on it, and where to point it.
+ *
+ * This preview is a static map — it draws one shape, nothing on it can be
+ * touched, and no code reads a coordinate back off it. That makes it the one
+ * surface where the mainland-China display shift can be applied *completely*:
+ * circle, outline and camera all move together, so they stay consistent with
+ * each other and with the tiles underneath. The main map deliberately does not
+ * do this; see services/gcj02 for why.
+ */
+function useZonePreview({ mapRef, coords, outline, mode, region, radiusM }: {
+  mapRef: React.RefObject<MapView | null>;
+  coords: { latitude: number; longitude: number } | null;
+  outline: Region | null;
+  mode: ZoneMode;
+  region: RegionSummary | null;
+  radiusM: number;
+}) {
+  const previewCoords = useMemo(
+    () => (coords ? wgs84ToGcj02(coords.latitude, coords.longitude) : null),
+    [coords],
+  );
+  /** The outline, split at the antimeridian and shifted for the basemap. */
+  const previewRings = useMemo(
+    () => (outline ? ringsForDisplay(outline, shiftForDisplay) : []),
+    [outline],
+  );
+  const previewViewport = useCallback((target: RegionSummary) => {
+    const box = regionViewport(target);
+    return { ...box, ...wgs84ToGcj02(box.latitude, box.longitude) };
+  }, []);
+
+  // The preview is only useful if it is showing the thing being changed, so it
+  // re-frames whenever the shape does.
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (mode === 'region' && region) {
+      mapRef.current.animateToRegion(previewViewport(region), 400);
+    } else if (previewCoords) {
+      // Roughly four radii across, so the circle fills about half the frame at
+      // every size instead of vanishing at 50m and overflowing at 5km.
+      const delta = Math.max((radiusM * 4) / 111_000, 0.004);
+      mapRef.current.animateToRegion({
+        ...previewCoords, latitudeDelta: delta, longitudeDelta: delta,
+      }, 300);
+    }
+  }, [mapRef, mode, region, radiusM, previewCoords, previewViewport]);
+
+  return { previewCoords, previewRings, previewViewport };
+}
+
+/**
+ * Find-a-place-by-name, in one piece.
+ *
+ * The fallback for when tracing comes back empty — usually because OSM's
+ * address hierarchy did not name the area in a way the lookup could resolve,
+ * even though the region itself is already cached and findable by name.
+ *
+ * Everything it reports is derived from the box and the last answer received,
+ * so clearing the field empties the list in the same render and a set of
+ * results can never be shown against a query it does not answer.
+ */
+function useRegionSearch(query: string) {
+  const [answer, setAnswer] = useState<{
+    term: string;
+    results: RegionSummary[] | null;
+    error: string | null;
+  } | null>(null);
+
+  const trimmed = query.trim();
+  const tooShort = trimmed.length < MIN_QUERY_LEN;
+  const answered = !tooShort && answer?.term === trimmed;
+
+  useEffect(() => {
+    if (tooShort) return;
+
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const found = await searchRegions(trimmed);
+        if (alive) setAnswer({ term: trimmed, results: found, error: null });
+      } catch (e: any) {
+        if (!alive) return;
+        setAnswer({
+          term: trimmed,
+          results: null,
+          error:
+            e?.response?.status === 503
+              ? 'Place search is busy right now. Try again in a moment.'
+              : 'Could not search places. Check your connection and try again.',
+        });
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => { alive = false; clearTimeout(timer); };
+  }, [trimmed, tooShort]);
+
+  return {
+    results: answered ? answer!.results : null,
+    searchError: answered ? answer!.error : null,
+    /** There is a term to search, and what is on screen does not yet answer it. */
+    searching: !tooShort && !answered,
+  };
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneAreaScreen() {
   const { colors, themeMode } = useTheme();
@@ -148,7 +638,7 @@ export default function ZoneAreaScreen() {
   const [mode, setMode] = useState<ZoneMode>('radius');
   const [radiusM, setRadiusM] = useState(500);
   const [region, setRegion] = useState<RegionSummary | null>(null);
-  const [outline, setOutline] = useState<Region | null>(null);
+  const [fetchedOutline, setFetchedOutline] = useState<Region | null>(null);
 
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -171,9 +661,7 @@ export default function ZoneAreaScreen() {
   // idle state, an empty array is a search that genuinely found nothing, and
   // the two need to look different on screen.
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<RegionSummary[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
+  const { results, searchError, searching } = useRegionSearch(query);
 
   const mapRef = useRef<MapView | null>(null);
 
@@ -199,12 +687,17 @@ export default function ZoneAreaScreen() {
     return () => { alive = false; };
   }, []);
 
+  // Matched against the selected region rather than cleared by an effect, so a
+  // boundary can never be drawn under a different region's name — switching
+  // areas used to keep the old shape on the preview until the new one arrived.
+  const outline = region && fetchedOutline?.id === region.id ? fetchedOutline : null;
+
   // The outline is only needed to draw the preview, so it is fetched after the
   // region is known rather than as part of the settings load.
   useEffect(() => {
+    if (!region) return;
     let alive = true;
-    if (!region) { setOutline(null); return; }
-    getRegion(region.id).then((r) => { if (alive) setOutline(r); });
+    getRegion(region.id).then((r) => { if (alive) setFetchedOutline(r); });
     return () => { alive = false; };
   }, [region]);
 
@@ -212,9 +705,10 @@ export default function ZoneAreaScreen() {
   // Everything saves as you touch it, matching the zone-music screen next door.
   const save = useCallback(async (patch: Partial<ZoneState>, revert: () => void) => {
     setSaving(true);
-    try {
-      await api.patch('/api/users/zone/', patch);
-    } catch (e: any) {
+    await runBusy(
+      () => api.patch('/api/users/zone/', patch),
+      () => setSaving(false),
+    ).catch((e: any) => {
       revert();
       Alert.alert(
         'Could not save',
@@ -223,9 +717,7 @@ export default function ZoneAreaScreen() {
         e?.response?.data?.detail ??
         'Please try again.',
       );
-    } finally {
-      setSaving(false);
-    }
+    });
   }, []);
 
   const commitRadius = useCallback((next: number) => {
@@ -259,9 +751,9 @@ export default function ZoneAreaScreen() {
     setRegion(next);
     setMode('region');
     setLookupError(null);
+    // Clearing the box is enough to empty the results — they are derived from
+    // it — so there is nothing else to reset here.
     setQuery('');
-    setResults(null);
-    setSearchError(null);
     setChoices([]);
     setChoicesFor(null);
     save({ zone_mode: 'region', zone_region: next.id }, () => {
@@ -273,8 +765,9 @@ export default function ZoneAreaScreen() {
   const clearRegion = useCallback(() => {
     const previous = region;
     if (!previous) return;
+    // The outline follows the region — it is matched against it, not stored
+    // beside it — so dropping the region is all this has to do.
     setRegion(null);
-    setOutline(null);
     // Dropping the place has to drop the mode with it. Leaving the server in
     // region mode pointed at the region just cleared would keep the old city
     // on everyone's map while this screen showed nothing chosen.
@@ -296,6 +789,15 @@ export default function ZoneAreaScreen() {
     setLookupError(null);
     setChoices([]);
     setChoicesFor(null);
+    // The lookup runs in its own function so that its several early exits all
+    // land on the `setLocating(null)` below. That used to be a `finally`, which
+    // React Compiler cannot compile — it gives up on this whole screen, and the
+    // spinner has to stop on every one of those paths or the button sticks.
+    await runTrace(level);
+    setLocating(null);
+  }
+
+  async function runTrace(level: 'city' | 'district') {
     try {
       const position = coords ?? (await currentCoords());
       if (!position) {
@@ -341,85 +843,12 @@ export default function ZoneAreaScreen() {
           ? 'Place lookups are busy right now. Try again in a moment.'
           : 'Could not find your area right now.',
       );
-    } finally {
-      setLocating(null);
     }
   }
 
-  // ── Search ─────────────────────────────────────────────────────────────────
-  // The fallback for when tracing comes back empty — usually because OSM's
-  // address hierarchy did not name the area in a way the lookup could resolve,
-  // even though the region itself is already cached and findable by name.
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < MIN_QUERY_LEN) {
-      setResults(null);
-      setSearchError(null);
-      setSearching(false);
-      return;
-    }
-
-    let alive = true;
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      try {
-        const found = await searchRegions(trimmed);
-        if (!alive) return;
-        setResults(found);
-        setSearchError(null);
-      } catch (e: any) {
-        if (!alive) return;
-        setResults(null);
-        setSearchError(
-          e?.response?.status === 503
-            ? 'Place search is busy right now. Try again in a moment.'
-            : 'Could not search places. Check your connection and try again.',
-        );
-      } finally {
-        if (alive) setSearching(false);
-      }
-    }, SEARCH_DEBOUNCE_MS);
-
-    return () => { alive = false; clearTimeout(timer); };
-  }, [query]);
-
-  // ── Preview geometry ───────────────────────────────────────────────────────
-  // This preview is a static map: it draws one shape, nothing on it can be
-  // touched, and no code reads a coordinate back off it. That makes it the one
-  // surface where the mainland-China display shift can be applied *completely*
-  // — circle, outline and camera all move together, so they stay consistent
-  // with each other and with the tiles underneath. The main map deliberately
-  // does not do this; see services/gcj02 for why.
-  const previewCoords = useMemo(
-    () => (coords ? wgs84ToGcj02(coords.latitude, coords.longitude) : null),
-    [coords],
-  );
-  /** The outline, split at the antimeridian and shifted for the basemap. */
-  const previewRings = useMemo(
-    () => (outline ? ringsForDisplay(outline, shiftForDisplay) : []),
-    [outline],
-  );
-  const previewViewport = useCallback((target: RegionSummary) => {
-    const box = regionViewport(target);
-    return { ...box, ...wgs84ToGcj02(box.latitude, box.longitude) };
-  }, []);
-
-  // ── Preview framing ────────────────────────────────────────────────────────
-  // The preview is only useful if it is showing the thing being changed, so it
-  // re-frames whenever the shape does.
-  useEffect(() => {
-    if (!mapRef.current) return;
-    if (mode === 'region' && region) {
-      mapRef.current.animateToRegion(previewViewport(region), 400);
-    } else if (previewCoords) {
-      // Roughly four radii across, so the circle fills about half the frame at
-      // every size instead of vanishing at 50m and overflowing at 5km.
-      const delta = Math.max((radiusM * 4) / 111_000, 0.004);
-      mapRef.current.animateToRegion({
-        ...previewCoords, latitudeDelta: delta, longitudeDelta: delta,
-      }, 300);
-    }
-  }, [mode, region, radiusM, previewCoords, previewViewport]);
+  const { previewCoords, previewRings, previewViewport } = useZonePreview({
+    mapRef, coords, outline, mode, region, radiusM,
+  });
 
   if (loading) {
     return (
@@ -450,288 +879,44 @@ export default function ZoneAreaScreen() {
       >
         <ModeTabs mode={mode} onChange={commitMode} disabled={saving} />
 
-        {/* ── Preview ── */}
-        <View style={styles.preview}>
-          {coords || region ? (
-            <MapView
-              ref={mapRef}
-              provider={PROVIDER_GOOGLE}
-              // Same basemap rules as the map itself. This preview is a few
-              // hundred pixels tall and exists to show one shape; Google's
-              // default business badges filled it with everything except the
-              // thing it is for.
-              customMapStyle={mapStyleFor(themeMode)}
-              style={StyleSheet.absoluteFill}
-              initialRegion={
-                mode === 'region' && region
-                  ? previewViewport(region)
-                  : { ...(previewCoords ?? { latitude: 0, longitude: 0 }), latitudeDelta: 0.02, longitudeDelta: 0.02 }
-              }
-              pointerEvents="none"
-              scrollEnabled={false}
-              zoomEnabled={false}
-              rotateEnabled={false}
-              pitchEnabled={false}
-              toolbarEnabled={false}
-            >
-              {mode === 'radius' && previewCoords && (
-                <Circle
-                  center={previewCoords}
-                  radius={radiusM}
-                  fillColor="rgba(139,92,246,0.12)"
-                  strokeColor="rgba(139,92,246,0.55)"
-                  strokeWidth={2}
-                />
-              )}
-              {/* One polygon per piece, not per ring: a region straddling the
-                  dateline is cut in two at ±180 so it draws as an island group
-                  rather than as a band around the planet. */}
-              {mode === 'region' && previewRings.map((piece, i) => (
-                <Polygon
-                  key={i}
-                  coordinates={piece}
-                  fillColor="rgba(139,92,246,0.12)"
-                  strokeColor="rgba(139,92,246,0.55)"
-                  strokeWidth={2}
-                />
-              ))}
-            </MapView>
-          ) : (
-            <View style={[StyleSheet.absoluteFill, styles.center]}>
-              <Text style={styles.previewEmpty}>
-                {mode === 'region' ? 'Pick a place to see it here' : 'Turn on location to preview'}
-              </Text>
-            </View>
-          )}
-          {mode === 'region' && region && !outline && (
-            <View style={styles.previewLoading}>
-              <ActivityIndicator color={colors.t2} size="small" />
-            </View>
-          )}
-        </View>
+        <ZonePreview
+          mapRef={mapRef}
+          themeMode={themeMode}
+          mode={mode}
+          region={region}
+          coords={coords}
+          previewCoords={previewCoords}
+          previewViewport={previewViewport}
+          previewRings={previewRings}
+          radiusM={radiusM}
+          outline={outline}
+        />
 
-        {/* ── Radius ── */}
         {mode === 'radius' ? (
-          <Card style={styles.card}>
-            <View style={styles.readoutRow}>
-              <Text style={styles.readoutLabel}>Reach</Text>
-              <Text style={styles.readout}>{formatRadius(radiusM)}</Text>
-            </View>
-            <RadiusSlider
-              value={radiusM}
-              min={RADIUS_MIN_M}
-              max={RADIUS_MAX_M}
-              onChange={setRadiusM}
-              onCommit={commitRadius}
-              format={formatRadius}
-              disabled={saving}
-            />
-            <Text style={styles.hint}>
-              Anyone inside the circle is in your zone. To cover a whole city, switch to
-              Place — a circle that big spills into the next town on one side and stops
-              short of the suburbs on the other.
-            </Text>
-          </Card>
+          <RadiusCard
+            radiusM={radiusM}
+            saving={saving}
+            onChange={setRadiusM}
+            onCommit={commitRadius}
+          />
         ) : (
-          /* ── Place ── */
-          <Card style={styles.card}>
-            {region ? (
-              <View style={styles.chosen}>
-                <Ionicons name="location" size={18} color={colors.purple} />
-                <View style={styles.chosenText}>
-                  <View style={styles.chosenTitleRow}>
-                    <Text style={styles.chosenName} numberOfLines={1}>{region.name}</Text>
-                    <View style={styles.kindTag}>
-                      <Text style={styles.kindTagText}>{kindLabel(region.kind)}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.chosenWhere} numberOfLines={1}>
-                    {region.display_name}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={clearRegion}
-                  hitSlop={10}
-                  disabled={saving}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Clear ${region.name}`}
-                >
-                  <Ionicons name="close-circle" size={20} color={colors.t3} />
-                </Pressable>
-              </View>
-            ) : null}
-
-            {/* Two sizes, traced from where you are standing. Side by side
-                rather than one button with a size picker: they are the two
-                answers to the same question, and neither is the default. */}
-            <View style={styles.traceRow}>
-              <Pressable
-                style={[styles.traceBtn, locating === 'city' && styles.traceBtnBusy]}
-                onPress={() => traceMyPlace('city')}
-                disabled={locating !== null || saving}
-                accessibilityRole="button"
-                accessibilityLabel="Use my whole city"
-                accessibilityState={{ disabled: locating !== null || saving }}
-              >
-                {locating === 'city'
-                  ? <ActivityIndicator color={colors.teal} size="small" />
-                  : <Ionicons name="business-outline" size={17} color={colors.teal} />}
-                <Text style={styles.traceLabel}>Use my city</Text>
-                <Text style={styles.traceHint}>The whole city</Text>
-              </Pressable>
-
-              <Pressable
-                style={[styles.traceBtn, locating === 'district' && styles.traceBtnBusy]}
-                onPress={() => traceMyPlace('district')}
-                disabled={locating !== null || saving}
-                accessibilityRole="button"
-                accessibilityLabel="Use my district, the area inside my city"
-                accessibilityState={{ disabled: locating !== null || saving }}
-              >
-                {locating === 'district'
-                  ? <ActivityIndicator color={colors.teal} size="small" />
-                  : <Ionicons name="navigate-outline" size={17} color={colors.teal} />}
-                <Text style={styles.traceLabel}>Use my district</Text>
-                <Text style={styles.traceHint}>Just my area of it</Text>
-              </Pressable>
-            </View>
-
-            {lookupError ? <Text style={styles.error}>{lookupError}</Text> : null}
-
-            {/* ── Ranked choices ──
-                What the server hands back instead of guessing. Every one of
-                these provably contains you; what it could not establish is
-                which of them you mean. The reasons come along because a list
-                of names with nothing to separate them just moves the problem
-                rather than solving it. */}
-            {choices.length ? (
-              <View style={styles.choices}>
-                <Text style={styles.choicesLabel}>
-                  {choicesFor === 'district' ? 'Areas around you' : 'Places around you'}
-                </Text>
-                {choices.map((choice) => (
-                  <Pressable
-                    key={choice.region.id}
-                    style={styles.resultRow}
-                    onPress={() => commitRegion(choice.region)}
-                    disabled={saving}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Use ${choice.region.name}. ${choice.reasons.join('. ')}`}
-                    accessibilityState={{ disabled: saving }}
-                  >
-                    <Ionicons name="location" size={16} color={colors.purple} />
-                    <View style={styles.resultText}>
-                      <View style={styles.chosenTitleRow}>
-                        <Text style={styles.resultName} numberOfLines={1}>
-                          {choice.region.name}
-                        </Text>
-                        <View style={styles.kindTag}>
-                          <Text style={styles.kindTagText}>
-                            {kindLabel(choice.region.kind)}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={styles.resultWhere} numberOfLines={2}>
-                        {choice.reasons.length
-                          ? choice.reasons.join(' · ')
-                          : choice.region.display_name}
-                      </Text>
-                    </View>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-
-            {/* ── Search ──
-                The way through when tracing finds nothing. OSM's coverage of
-                sub-city areas is patchy and its address hierarchy does not name
-                every district in a way the lookup can resolve, so a place can be
-                perfectly well mapped and still be unreachable from the buttons
-                above. Typing its name finds it. */}
-            <View style={styles.searchWrap}>
-              <View style={styles.searchField}>
-                <Ionicons name="search" size={16} color={colors.t3} />
-                <TextInput
-                  style={styles.searchInput}
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="Or find your city or district by name"
-                  placeholderTextColor={colors.t3}
-                  autoCorrect={false}
-                  returnKeyType="search"
-                  accessibilityLabel="Search for a city or district by name"
-                />
-                {searching ? <ActivityIndicator color={colors.t3} size="small" /> : null}
-                {!searching && query.length > 0 ? (
-                  <Pressable
-                    onPress={() => setQuery('')}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear search"
-                  >
-                    <Ionicons name="close-circle" size={17} color={colors.t3} />
-                  </Pressable>
-                ) : null}
-              </View>
-
-              {searchError ? <Text style={styles.error}>{searchError}</Text> : null}
-
-              {!searchError && results?.length === 0 ? (
-                <Text style={styles.searchEmpty}>
-                  Nothing found for “{query.trim()}”. Only places with a real mapped
-                  border can be a zone, so try the city it is in.
-                </Text>
-              ) : null}
-
-              {results?.map((found) => {
-                // A zone has to cover somewhere you actually are, and the server
-                // enforces that on save. The box test is cheap, needs no
-                // geometry, and can only ever produce a *definite* no — so it
-                // greys out the results that would be refused without pretending
-                // to be the real containment check.
-                const unreachable =
-                  !!coords && !regionBoxContains(found, coords.latitude, coords.longitude);
-                return (
-                  <Pressable
-                    key={found.id}
-                    style={[styles.resultRow, unreachable && styles.resultRowOff]}
-                    onPress={() => commitRegion(found)}
-                    disabled={unreachable || saving}
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      unreachable
-                        ? `${found.name}, not where you are`
-                        : `Use ${found.name}`
-                    }
-                    accessibilityState={{ disabled: unreachable || saving }}
-                  >
-                    <Ionicons
-                      name={unreachable ? 'location-outline' : 'location'}
-                      size={16}
-                      color={unreachable ? colors.t3 : colors.purple}
-                    />
-                    <View style={styles.resultText}>
-                      <View style={styles.chosenTitleRow}>
-                        <Text style={styles.resultName} numberOfLines={1}>{found.name}</Text>
-                        <View style={styles.kindTag}>
-                          <Text style={styles.kindTagText}>{kindLabel(found.kind)}</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.resultWhere} numberOfLines={1}>
-                        {unreachable ? 'Not where you are' : found.display_name}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={styles.hint}>
-              Your zone follows the real border of the place, however big it is. It can
-              only be somewhere you actually are — whether you trace it or find it by
-              name, Aura checks that you are inside it before it takes effect.
-            </Text>
-          </Card>
+          <PlaceCard
+            region={region}
+            locating={locating}
+            saving={saving}
+            lookupError={lookupError}
+            choices={choices}
+            choicesFor={choicesFor}
+            query={query}
+            results={results}
+            searching={searching}
+            searchError={searchError}
+            coords={coords}
+            onClearRegion={clearRegion}
+            onTrace={traceMyPlace}
+            onPickRegion={commitRegion}
+            onQueryChange={setQuery}
+          />
         )}
 
         {regionMissing && (

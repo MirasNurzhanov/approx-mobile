@@ -5,7 +5,6 @@ import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
 import { reportLocation } from './location';
-import { getPref } from './preferences';
 import { getCachedLocationSharing } from './privacy';
 
 const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
@@ -24,15 +23,17 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     const location = data?.locations?.at(-1);
     if (!location) return;
 
-    console.log('[BG Task] running, checking zones...');
-
     try {
       // Honours the Location sharing setting: paused sends nothing at all,
       // approximate coarsens before transmitting.
-      const sent = await reportLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
+      const sent = await reportLocation(
+        {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        },
+        location.coords.speed,
+        location.coords.accuracy,
+      );
       if (!sent) {
         console.log('[BG Location] sharing paused, nothing sent');
         return;
@@ -50,7 +51,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
           music_zone_radius?: number; music_zone_separate?: boolean;
         }[]
       >('/api/proximity/nearby/');
-      console.log('[BG Task] nearby users:', nearbyUsers.length);
 
       // "You entered a zone — tap to listen", so this has to agree with what is
       // actually audible. Three rules, all mirroring _trigger_zone_music_alerts
@@ -81,8 +81,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         const earshot = u.music_zone_radius ?? u.zone_radius ?? 500;
         return (u.distance_km ?? Infinity) * 1000 < earshot;
       });
-      console.log('[BG Task] zone found:', zoneUser?.username);
-
       if (zoneUser) {
         const lastNotified = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
         if (lastNotified !== zoneUser.username) {
@@ -105,11 +103,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 );
 
 export async function startBackgroundLocationUpdates(): Promise<void> {
-  if (!(await getPref('backgroundLocation'))) {
-    console.log('[BG Location] disabled by user preference, skipping');
-    return;
-  }
-
   // "Pause location sharing entirely" should stop the phone tracking us at
   // all, not just stop the uploads. The per-update check in the task is the
   // correctness guarantee; this is the one that saves the battery.

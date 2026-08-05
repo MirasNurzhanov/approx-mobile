@@ -66,12 +66,16 @@ const AUDIENCE_FIELDS: {
   key: keyof PrivacySettings;
   label: string;
   hint: string;
+  /** Restricts the picker's choices. Omitted means all of AUDIENCES. */
+  options?: Audience[];
 }[] = [
   { key: 'visibility_presence',    label: 'Online status',  hint: 'Who can see when you’re active, and when you were last online' },
   { key: 'visibility_stories',     label: 'Stories',        hint: 'Who can see stories you post' },
   { key: 'visibility_interests',   label: 'Interests',      hint: 'Hiding these makes you harder to match with' },
   { key: 'visibility_stats',       label: 'Stats',          hint: 'Your connection and friend counts' },
-  { key: 'visibility_zone_audio',  label: 'Zone audio',     hint: 'Who can hear your sound zone' },
+  // No "Everyone": a music zone is never for strangers, whatever this says —
+  // "Friends" here always reaches connections too. See app/zone.tsx.
+  { key: 'visibility_zone_audio',  label: 'Zone audio',     hint: 'Your connections and friends only — strangers never see or hear it', options: ['friends', 'nobody'] },
   { key: 'visibility_connections', label: 'Connections',    hint: 'Who can see who you’re connected to' },
   { key: 'visibility_links',       label: 'Links',          hint: 'Instagram, Spotify and other links on your profile' },
 ];
@@ -79,7 +83,7 @@ const AUDIENCE_FIELDS: {
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 function SectionLabel({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
@@ -87,16 +91,18 @@ function AudiencePicker({
   value,
   onChange,
   disabled,
+  options = AUDIENCES,
 }: {
   value: Audience;
   onChange: (next: Audience) => void;
   disabled?: boolean;
+  options?: Audience[];
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={styles.segment}>
-      {AUDIENCES.map((option) => {
+      {options.map((option) => {
         const selected = option === value;
         return (
           <Pressable
@@ -137,7 +143,7 @@ function ToggleRow({
   last?: boolean;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={[styles.row, !last && styles.rowBorder]}>
       {Icon && <Icon size={20} color={colors.t2} />}
@@ -183,9 +189,10 @@ export default function PrivacyScreen() {
       }
     } catch {
       setError('That change didn’t save. Your previous setting is still in effect.');
-    } finally {
-      setSaving(false);
     }
+    // Reached on both paths: the `catch` records the message and stops there.
+    // Not a `finally` — React Compiler bails on any component containing one.
+    setSaving(false);
   }
 
   function togglePrivate(next: boolean) {
@@ -332,6 +339,7 @@ export default function PrivacyScreen() {
                   value={settings[field.key] as Audience}
                   onChange={(next) => save({ [field.key]: next } as Partial<PrivacySettings>)}
                   disabled={saving}
+                  options={field.options}
                 />
               </View>
             ))}

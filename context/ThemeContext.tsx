@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Appearance } from 'react-native';
 
 import { colors as darkColors, lightColors, type ColorPalette } from '@/constants/theme';
+import { setDesiredAppIcon } from '@/services/appIcon';
 
 interface ThemeContextValue {
   colors: ColorPalette;
@@ -24,13 +26,31 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, []);
 
-  const toggleTheme = useCallback(() => {
+  const toggleTheme = () => {
     setThemeMode((prev) => {
       const next = prev === 'dark' ? 'light' : 'dark';
       AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
       return next;
     });
-  }, []);
+  };
+
+  // Two things outside React have to follow the theme too.
+  //
+  // The icon is queued rather than swapped: it only lands when the app next
+  // goes to the background, because changing it in the foreground restarts the
+  // app on Android and raises a system alert on iOS. See services/appIcon.
+  //
+  // `Appearance.setColorScheme` is what stops the *native* chrome — keyboards,
+  // system alerts, scroll indicators, the text-selection menu — from staying on
+  // whatever the phone is set to while the app itself is the other way round.
+  // The app's theme is its own setting and deliberately does not follow the OS,
+  // so without this a light app on a dark phone gets a black keyboard.
+  useEffect(() => {
+    setDesiredAppIcon(themeMode);
+    // Guarded: react-native-web has no such method, and this runs on the web
+    // build too.
+    Appearance.setColorScheme?.(themeMode);
+  }, [themeMode]);
 
   const activeColors = themeMode === 'dark' ? darkColors : lightColors;
 

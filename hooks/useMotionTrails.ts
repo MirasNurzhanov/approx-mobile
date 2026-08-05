@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import type { MotionClass } from '@/services/presence';
 
@@ -62,6 +62,74 @@ function movedEnough(a: TrailPoint, b: TrailPoint): boolean {
   );
 }
 
+interface TrailState {
+  /** The `users` array this snapshot was folded from. Identity comparison
+   *  against the next one is what decides whether there is a new poll to
+   *  process, so a plain re-render costs nothing. */
+  source: TrackedUser[] | null;
+  tracks: Map<number, TrackState>;
+  trails: Map<number, TrailPoint[]>;
+}
+
+const EMPTY_STATE: TrailState = { source: null, tracks: new Map(), trails: new Map() };
+
+/**
+ * Fold one poll's positions into the running history.
+ *
+ * Deliberately pure — it copies rather than mutates. That is what lets it be
+ * called during render: React may invoke a render twice in development, and a
+ * version that incremented the hysteresis counters in place would count every
+ * poll twice under it, making trails appear a poll early and linger a poll late.
+ */
+function advance(prev: TrailState, users: TrackedUser[]): TrailState {
+  const tracks = new Map<number, TrackState>();
+  const candidates: { id: number; distance: number; path: TrailPoint[] }[] = [];
+
+  for (const user of users) {
+    if (user.latitude == null || user.longitude == null) continue;
+    const id = Number(user.id);
+
+    const before = prev.tracks.get(id);
+    const path = before ? [...before.path] : [];
+    let fastRun = before?.fastRun ?? 0;
+    let slowRun = before?.slowRun ?? 0;
+    let showing = before?.showing ?? false;
+
+    const point = { latitude: user.latitude, longitude: user.longitude };
+    const last = path[path.length - 1];
+    if (!last || movedEnough(last, point)) {
+      path.push(point);
+      if (path.length > TRAIL_POINTS) path.shift();
+    }
+
+    if (user.motion_class === 'fast') {
+      fastRun += 1;
+      slowRun = 0;
+    } else {
+      slowRun += 1;
+      fastRun = 0;
+    }
+
+    if (!showing && fastRun >= POLLS_TO_START) showing = true;
+    else if (showing && slowRun >= POLLS_TO_STOP) showing = false;
+
+    tracks.set(id, { path, fastRun, slowRun, showing });
+
+    // Two points is the minimum that describes a direction.
+    if (showing && path.length >= 2) {
+      candidates.push({ id, distance: user.distance_km ?? Infinity, path });
+    }
+  }
+
+  // Anyone absent from this poll is dropped by simply not being carried over,
+  // so the history cannot grow without bound across a long session.
+  candidates.sort((a, b) => a.distance - b.distance);
+  const trails = new Map<number, TrailPoint[]>();
+  for (const c of candidates.slice(0, MAX_TRAILS)) trails.set(c.id, c.path);
+
+  return { source: users, tracks, trails };
+}
+
 /**
  * Trail paths for the people who should currently show one, keyed by user id.
  *
@@ -71,66 +139,20 @@ function movedEnough(a: TrailPoint, b: TrailPoint): boolean {
  * rather than "assume stationary".
  */
 export function useMotionTrails(users: TrackedUser[]): Map<number, TrailPoint[]> {
-  const tracks = useRef(new Map<number, TrackState>());
-  const [trails, setTrails] = useState<Map<number, TrailPoint[]>>(new Map());
+  const [state, setState] = useState<TrailState>(() => advance(EMPTY_STATE, users));
 
-  useEffect(() => {
-    const seen = new Set<number>();
-    const next = new Map<number, TrailPoint[]>();
+  // Folded during render rather than in an effect. The old version drew one
+  // frame of stale trails on every poll — the markers had already moved to
+  // their new positions while the tails were still those of the previous fetch,
+  // which on a fast walker is a visible detachment.
+  //
+  // `users` is a memoized list, so an ordinary re-render compares equal here
+  // and does no work.
+  if (state.source !== users) {
+    const next = advance(state, users);
+    setState(next);
+    return next.trails;
+  }
 
-    const candidates: { id: number; distance: number; path: TrailPoint[] }[] = [];
-
-    for (const user of users) {
-      if (user.latitude == null || user.longitude == null) continue;
-      const id = Number(user.id);
-      seen.add(id);
-
-      let track = tracks.current.get(id);
-      if (!track) {
-        track = { path: [], fastRun: 0, slowRun: 0, showing: false };
-        tracks.current.set(id, track);
-      }
-
-      const point = { latitude: user.latitude, longitude: user.longitude };
-      const last = track.path[track.path.length - 1];
-      if (!last || movedEnough(last, point)) {
-        track.path.push(point);
-        if (track.path.length > TRAIL_POINTS) track.path.shift();
-      }
-
-      const fast = user.motion_class === 'fast';
-      if (fast) {
-        track.fastRun += 1;
-        track.slowRun = 0;
-      } else {
-        track.slowRun += 1;
-        track.fastRun = 0;
-      }
-
-      if (!track.showing && track.fastRun >= POLLS_TO_START) track.showing = true;
-      else if (track.showing && track.slowRun >= POLLS_TO_STOP) track.showing = false;
-
-      // Two points is the minimum that describes a direction.
-      if (track.showing && track.path.length >= 2) {
-        candidates.push({
-          id,
-          distance: user.distance_km ?? Infinity,
-          path: [...track.path],
-        });
-      }
-    }
-
-    // Drop anyone who left the map, so the history does not grow without bound
-    // across a long session.
-    for (const id of tracks.current.keys()) {
-      if (!seen.has(id)) tracks.current.delete(id);
-    }
-
-    candidates.sort((a, b) => a.distance - b.distance);
-    for (const c of candidates.slice(0, MAX_TRAILS)) next.set(c.id, c.path);
-
-    setTrails(next);
-  }, [users]);
-
-  return trails;
+  return state.trails;
 }

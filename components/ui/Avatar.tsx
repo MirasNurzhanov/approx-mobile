@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { View, Text, Image, StyleSheet } from 'react-native'
+import { View, Text, StyleSheet } from 'react-native'
+import { Image } from 'expo-image'
 import { fonts, radius } from '@/constants/theme'
 import type { ColorPalette } from '@/constants/theme'
 import { useTheme } from '@/context/ThemeContext'
@@ -65,7 +65,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function Avatar({ uri, name, size = 'md', active = false, ringColor, presence }: AvatarProps) {
   const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
+  const styles = makeStyles(colors)
   const dim = SIZE_MAP[size]
   const dot = DOT_MAP[size]
   const fontSize = Math.round(dim * 0.38)
@@ -87,7 +87,7 @@ export function Avatar({ uri, name, size = 'md', active = false, ringColor, pres
           <Image
             source={{ uri }}
             style={{ width: dim, height: dim, borderRadius: dim / 2 }}
-            resizeMode="cover"
+            contentFit="cover"
           />
         ) : (
           <Text style={[styles.initials, { fontSize }]}>{initials}</Text>

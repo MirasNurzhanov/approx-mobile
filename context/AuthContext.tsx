@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { Alert } from 'react-native';
 import { setOnAuthFailure } from '@/services/api';
 import { getAccessToken, loginRequest } from '@/services/auth';
+import { markOnboardingSeen } from '@/services/onboarding';
 import { flushPendingRevocations, performSignOut } from '@/services/signOut';
 
 interface AuthContextValue {
@@ -50,6 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       getAccessToken(),
       new Promise<void>((resolve) => setTimeout(resolve, 2500)),
     ]).then(([token]) => {
+      // A device with an account signed in on it has plainly been introduced
+      // to the app, whether or not anyone ever pressed through the carousel —
+      // which nothing recorded until now. Without this, every existing install
+      // would meet the intro once more the first time it signed out.
+      if (token) markOnboardingSeen();
       setIsAuthenticated(!!token);
       setIsLoading(false);
     });
@@ -57,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function login(email: string, password: string) {
     await loginRequest(email, password);
+    markOnboardingSeen();
     setIsAuthenticated(true);
     router.replace('/(tabs)/map');
   }
@@ -97,7 +104,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // navigator — which cannot handle it either — for a red "action
       // 'POP_TO_TOP' was not handled by any navigator" on every sign out.
       if (router.canDismiss()) router.dismissAll();
-      router.replace('/');
+      // Straight to the screen with Log in and Create account on it, rather
+      // than to '/' — which routes a signed-out user through the intro
+      // carousel. Somebody who just signed out has used the app; making them
+      // swipe an introduction to reach the login button reads as the sign-out
+      // having gone nowhere.
+      router.replace('/welcome');
       // Released so the buttons never strand the user on a permanently
       // spinning Sign out.
       signingOut.current = false;

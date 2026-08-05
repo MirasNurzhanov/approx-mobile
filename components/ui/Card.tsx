@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { View, Pressable, StyleSheet, type ViewStyle, type PressableProps } from 'react-native'
 import { radius } from '@/constants/theme'
 import { useTheme } from '@/context/ThemeContext'
@@ -33,7 +32,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function Card({ children, style, onPress, variant = 'default' }: CardProps) {
   const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
+  const styles = makeStyles(colors)
   const containerStyle = [styles.card, variant === 'elevated' && styles.elevated, style]
 
   if (onPress) {

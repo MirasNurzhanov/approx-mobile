@@ -74,9 +74,10 @@ export default function EditLinksScreen() {
       // Server-side validation is the only validation; surface its message
       // verbatim rather than guessing at a friendlier one.
       setError(linkErrorMessage(e));
-    } finally {
-      setAdding(false);
     }
+    // Reached on both paths: the `catch` records the message and stops there.
+    // Not a `finally` — React Compiler bails on any component containing one.
+    setAdding(false);
   }
 
   function confirmDelete(link: ProfileLink) {

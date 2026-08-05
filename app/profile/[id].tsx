@@ -4,7 +4,6 @@ import {
   ActionSheetIOS,
   ActivityIndicator,
   Alert,
-  Image,
   Platform,
   ScrollView,
   StyleSheet,
@@ -12,10 +11,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
 import { blockUser } from '@/services/blocked';
+import { sectionise } from '@/services/interestCategories';
 import { type ClubRole } from '@/services/clubs';
 import { Ionicons } from '@expo/vector-icons';
 import { IconBack, IconMore } from '@/components/ui/icons';
@@ -32,7 +33,7 @@ import type { Presence } from '@/services/presence';
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Relationship = 'stranger' | 'hi_sent' | 'hi_received' | 'connected' | 'friend';
 
-interface Interest { icon: string; name: string; }
+interface Interest { icon: string; name: string; category?: string; category_label?: string; }
 
 interface UserProfile {
   id: number;
@@ -79,6 +80,221 @@ const makeRelColor = (colors: ColorPalette): Record<Relationship, string> => ({
   friend:      colors.blue,
 });
 
+// ─── Sections ─────────────────────────────────────────────────────────────────
+// The screen below owns the profile and the relationship; each section only
+// renders one band of it, so the screen reads as its own table of contents.
+
+function ProfileHeader({ username, relationship, top, onBack, onMenu }: {
+  username: string;
+  relationship: Relationship;
+  top: number;
+  onBack: () => void;
+  onMenu: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={[styles.header, { paddingTop: top + 6 }]}>
+      <TouchableOpacity onPress={onBack} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="Back">
+        <IconBack size={24} color={colors.teal} />
+      </TouchableOpacity>
+
+      <View style={styles.headerCenter} accessible accessibilityRole="header">
+        <Text style={styles.headerTitle} numberOfLines={1}>{username}</Text>
+        <View style={styles.relRow}>
+          <RelationshipBadge relationship={relationship} />
+        </View>
+      </View>
+
+      <TouchableOpacity onPress={onMenu} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel={`More options for ${username}`}>
+        <IconMore size={22} color={colors.t3} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function ProfileHero({ profile, relationship, relColor, metaLine, locked }: {
+  profile: UserProfile;
+  relationship: Relationship;
+  relColor: string;
+  metaLine: string | null;
+  locked: boolean;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const bg = avatarBg(profile.username);
+  const initial = profile.username.charAt(0).toUpperCase();
+  return (
+    <View style={styles.hero}>
+      {(relationship === 'friend' || relationship === 'connected') ? (
+        <View style={[styles.avatarRing, { borderColor: relColor + '60' }]}>
+          <View style={[styles.avatar, { backgroundColor: bg }]}>
+            {profile.profile_picture
+              ? <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
+              : <Text style={styles.avatarInitial}>{initial}</Text>
+            }
+          </View>
+        </View>
+      ) : (
+        <View style={styles.avatarPlaceholder}>
+          <Ionicons name="person-outline" size={38} color={colors.t3} />
+        </View>
+      )}
+
+      <Text style={styles.username}>{profile.username}</Text>
+
+      {metaLine ? (
+        <Text style={styles.userMetaLine}>{metaLine}</Text>
+      ) : null}
+
+      {profile.presence && (
+        <View style={styles.presenceRow}>
+          <PresenceDot presence={profile.presence} size={9} withText />
+        </View>
+      )}
+
+      {locked ? (
+        <View style={styles.lockedBox}>
+          <Text style={styles.lockedTitle}>This account is private</Text>
+          <Text style={styles.lockedBody}>
+            {relationship === 'hi_sent'
+              ? 'Your request is waiting for them to accept.'
+              : "Send a Hi to ask for access. If they accept, you'll see their full profile."}
+          </Text>
+        </View>
+      ) : (
+        <>
+          {profile.bio
+            ? <Text style={styles.bio}>{profile.bio}</Text>
+            : <Text style={styles.bioEmpty}>No bio</Text>
+          }
+          {profile.date_joined && (
+            <Text style={styles.joinDate}>Member since {fmtDate(profile.date_joined)}</Text>
+          )}
+        </>
+      )}
+    </View>
+  );
+}
+
+/** Grouped like everywhere else. On somebody else's profile this is what the
+ *  list is actually for: "mostly climbing and cycling" reads in a glance where
+ *  twenty ungrouped chips do not. */
+function InterestsSection({ interests }: { interests: Interest[] }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  if (interests.length === 0) return null;
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Interests</Text>
+      {sectionise(interests).map((group, index, all) => (
+        <View
+          key={group.key || 'more'}
+          style={index > 0 ? styles.interestGroup : undefined}
+        >
+          {all.length > 1 && (
+            <View style={styles.interestGroupHeader}>
+              <Ionicons name={group.icon} size={13} color={group.color} />
+              <Text style={styles.interestGroupLabel}>{group.label}</Text>
+            </View>
+          )}
+          <View style={styles.chipWrap}>
+            {group.items.map((tag, i) => (
+              <View key={i} style={styles.chip}>
+                <Text style={styles.chipText}>{tag.name}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ClubsSection({ clubs, onOpenClub }: {
+  clubs: UserProfile['clubs'];
+  onOpenClub: (clubId: number) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Clubs</Text>
+      {!clubs || clubs.length === 0 ? (
+        <Text style={styles.clubsEmpty}>Not a member of any clubs yet</Text>
+      ) : (
+        clubs.map(club => (
+          <TouchableOpacity
+            key={club.id}
+            style={styles.clubRow}
+            onPress={() => onOpenClub(club.id)}
+            activeOpacity={0.7}
+          >
+            {club.emblem ? (
+              <Image source={{ uri: club.emblem }} style={styles.clubEmblem} />
+            ) : (
+              <View style={styles.clubEmblemFallback}>
+                <Ionicons name="people-outline" size={18} color={colors.t3} />
+              </View>
+            )}
+            <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
+            {club.role && (
+              <View style={styles.clubRoleBadge}>
+                <Text style={styles.clubRoleText}>
+                  {club.role === 'owner' ? '👑 Owner' : 'Member'}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))
+      )}
+    </View>
+  );
+}
+
+/** The one button whose meaning depends entirely on where the two of you
+ *  already stand. */
+function RelationshipActions({ relationship, actionLoading, onSendHi, onAcceptHi, onMessage }: {
+  relationship: Relationship;
+  actionLoading: string | null;
+  onSendHi: () => void;
+  onAcceptHi: () => void;
+  onMessage: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      {relationship === 'stranger' && (
+        <TouchableOpacity style={[styles.btnPrimary, actionLoading === 'hi' && styles.btnOff]} onPress={onSendHi} disabled={actionLoading !== null} activeOpacity={0.8}>
+          {actionLoading === 'hi'
+            ? <ActivityIndicator color={colors.bg} size="small" />
+            : <Text style={styles.btnPrimaryText}>Send Hi 👋</Text>
+          }
+        </TouchableOpacity>
+      )}
+      {relationship === 'hi_sent' && (
+        <TouchableOpacity style={[styles.btnPrimary, styles.btnOff]} disabled activeOpacity={1}>
+          <Text style={styles.btnPrimaryText}>Hi Sent ✓</Text>
+        </TouchableOpacity>
+      )}
+      {relationship === 'hi_received' && (
+        <TouchableOpacity style={[styles.btnPrimary, actionLoading === 'accept' && styles.btnOff]} onPress={onAcceptHi} disabled={actionLoading !== null} activeOpacity={0.8}>
+          {actionLoading === 'accept'
+            ? <ActivityIndicator color={colors.bg} size="small" />
+            : <Text style={styles.btnPrimaryText}>Accept Hi 👋</Text>
+          }
+        </TouchableOpacity>
+      )}
+      {(relationship === 'connected' || relationship === 'friend') && (
+        <TouchableOpacity style={styles.btnPrimary} onPress={onMessage} activeOpacity={0.8}>
+          <Text style={styles.btnPrimaryText}>Message 💬</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function UserProfileScreen() {
   const router = useRouter();
@@ -95,7 +311,6 @@ export default function UserProfileScreen() {
 
   useEffect(() => {
     const numId = Number(id);
-    console.log('[UserProfile] fetching profile + relationship for id:', numId);
 
     Promise.allSettled([
       api.get<UserProfile>(`/api/users/profile/${numId}/`),
@@ -104,7 +319,6 @@ export default function UserProfileScreen() {
       api.get<{ id: number; relationship?: string }[]>('/api/proximity/nearby/'),
     ]).then(([profileRes, friendsRes, requestsRes, nearbyRes]) => {
       if (profileRes.status === 'fulfilled') {
-        console.log('[UserProfile] profile:', JSON.stringify(profileRes.value.data).slice(0, 300));
         setProfile(profileRes.value.data);
         if (profileRes.value.data.relationship) {
           setRelationship(profileRes.value.data.relationship);
@@ -129,7 +343,6 @@ export default function UserProfileScreen() {
         if (found?.relationship) rel = found.relationship as Relationship;
       }
 
-      console.log('[UserProfile] derived relationship:', rel);
       setRelationship(rel);
     }).finally(() => setLoading(false));
   }, [id]);
@@ -142,7 +355,10 @@ export default function UserProfileScreen() {
       setRelationship('hi_sent');
     } catch (e: any) {
       Alert.alert('Error', e?.response?.data?.detail ?? 'Could not send Hi.');
-    } finally { setActionLoading(null); }
+    }
+    // Reached on both paths: the `catch` alerts and stops there. Not a
+    // `finally` — React Compiler bails on any component containing one.
+    setActionLoading(null);
   }
 
   async function acceptHi() {
@@ -152,7 +368,9 @@ export default function UserProfileScreen() {
       setRelationship('connected');
     } catch (e: any) {
       Alert.alert('Error', e?.response?.data?.detail ?? 'Could not accept Hi.');
-    } finally { setActionLoading(null); }
+    }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setActionLoading(null);
   }
 
   function goToMessages() {
@@ -224,8 +442,6 @@ export default function UserProfileScreen() {
 
   const rel      = relationship;
   const relColor = REL_COLOR[rel];
-  const bg       = avatarBg(profile.username);
-  const initial  = profile.username.charAt(0).toUpperCase();
   const interests = profile.interests ?? [];
   const locked   = isLocked(profile);
 
@@ -243,89 +459,24 @@ export default function UserProfileScreen() {
 
   return (
     <View style={styles.root}>
-      {/* ── Header ── */}
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="Back">
-          <IconBack size={24} color={colors.teal} />
-        </TouchableOpacity>
-
-        <View style={styles.headerCenter} accessible accessibilityRole="header">
-          <Text style={styles.headerTitle} numberOfLines={1}>{profile.username}</Text>
-          <View style={styles.relRow}>
-            <RelationshipBadge relationship={rel} />
-          </View>
-        </View>
-
-        <TouchableOpacity onPress={openMenu} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel={`More options for ${profile.username}`}>
-          <IconMore size={22} color={colors.t3} />
-        </TouchableOpacity>
-      </View>
+      <ProfileHeader
+        username={profile.username}
+        relationship={rel}
+        top={top}
+        onBack={() => router.back()}
+        onMenu={openMenu}
+      />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* ── Avatar ── */}
-        <View style={styles.hero}>
-          {(rel === 'friend' || rel === 'connected') ? (
-            <View style={[styles.avatarRing, { borderColor: relColor + '60' }]}>
-              <View style={[styles.avatar, { backgroundColor: bg }]}>
-                {profile.profile_picture
-                  ? <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
-                  : <Text style={styles.avatarInitial}>{initial}</Text>
-                }
-              </View>
-            </View>
-          ) : (
-            <View style={styles.avatarPlaceholder}>
-              <Ionicons name="person-outline" size={38} color={colors.t3} />
-            </View>
-          )}
+        <ProfileHero
+          profile={profile}
+          relationship={rel}
+          relColor={relColor}
+          metaLine={metaLine}
+          locked={locked}
+        />
 
-          <Text style={styles.username}>{profile.username}</Text>
-
-          {metaLine ? (
-            <Text style={styles.userMetaLine}>{metaLine}</Text>
-          ) : null}
-
-          {profile.presence && (
-            <View style={styles.presenceRow}>
-              <PresenceDot presence={profile.presence} size={9} withText />
-            </View>
-          )}
-
-          {locked ? (
-            <View style={styles.lockedBox}>
-              <Text style={styles.lockedTitle}>This account is private</Text>
-              <Text style={styles.lockedBody}>
-                {rel === 'hi_sent'
-                  ? 'Your request is waiting for them to accept.'
-                  : "Send a Hi to ask for access. If they accept, you'll see their full profile."}
-              </Text>
-            </View>
-          ) : (
-            <>
-              {profile.bio
-                ? <Text style={styles.bio}>{profile.bio}</Text>
-                : <Text style={styles.bioEmpty}>No bio</Text>
-              }
-              {profile.date_joined && (
-                <Text style={styles.joinDate}>Member since {fmtDate(profile.date_joined)}</Text>
-              )}
-            </>
-          )}
-        </View>
-
-        {/* ── Interests ── */}
-        {interests.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Interests</Text>
-            <View style={styles.chipWrap}>
-              {interests.map((tag, i) => (
-                <View key={i} style={styles.chip}>
-                  <Text style={styles.chipText}>{tag.name}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
+        <InterestsSection interests={interests} />
 
         {/* ── Links ── */}
         {(profile.links?.length ?? 0) > 0 && (
@@ -335,69 +486,18 @@ export default function UserProfileScreen() {
           </View>
         )}
 
-        {/* ── Clubs ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Clubs</Text>
-          {console.log('[Profile] clubs data:', JSON.stringify(profile.clubs)) as any}
-          {!profile.clubs || profile.clubs.length === 0 ? (
-            <Text style={styles.clubsEmpty}>Not a member of any clubs yet</Text>
-          ) : (
-            profile.clubs.map(club => (
-              <TouchableOpacity
-                key={club.id}
-                style={styles.clubRow}
-                onPress={() => router.push({ pathname: '/clubs/[id]', params: { id: club.id } })}
-                activeOpacity={0.7}
-              >
-                {club.emblem ? (
-                  <Image source={{ uri: club.emblem }} style={styles.clubEmblem} />
-                ) : (
-                  <View style={styles.clubEmblemFallback}>
-                    <Ionicons name="people-outline" size={18} color={colors.t3} />
-                  </View>
-                )}
-                <Text style={styles.clubName} numberOfLines={1}>{club.name}</Text>
-                {club.role && (
-                  <View style={styles.clubRoleBadge}>
-                    <Text style={styles.clubRoleText}>
-                      {club.role === 'owner' ? '👑 Owner' : 'Member'}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))
-          )}
-        </View>
+        <ClubsSection
+          clubs={profile.clubs}
+          onOpenClub={(clubId) => router.push({ pathname: '/clubs/[id]', params: { id: clubId } })}
+        />
 
-        {/* ── Actions ── */}
-        <View style={styles.section}>
-          {rel === 'stranger' && (
-            <TouchableOpacity style={[styles.btnPrimary, actionLoading === 'hi' && styles.btnOff]} onPress={sendHi} disabled={actionLoading !== null} activeOpacity={0.8}>
-              {actionLoading === 'hi'
-                ? <ActivityIndicator color={colors.bg} size="small" />
-                : <Text style={styles.btnPrimaryText}>Send Hi 👋</Text>
-              }
-            </TouchableOpacity>
-          )}
-          {rel === 'hi_sent' && (
-            <TouchableOpacity style={[styles.btnPrimary, styles.btnOff]} disabled activeOpacity={1}>
-              <Text style={styles.btnPrimaryText}>Hi Sent ✓</Text>
-            </TouchableOpacity>
-          )}
-          {rel === 'hi_received' && (
-            <TouchableOpacity style={[styles.btnPrimary, actionLoading === 'accept' && styles.btnOff]} onPress={acceptHi} disabled={actionLoading !== null} activeOpacity={0.8}>
-              {actionLoading === 'accept'
-                ? <ActivityIndicator color={colors.bg} size="small" />
-                : <Text style={styles.btnPrimaryText}>Accept Hi 👋</Text>
-              }
-            </TouchableOpacity>
-          )}
-          {(rel === 'connected' || rel === 'friend') && (
-            <TouchableOpacity style={styles.btnPrimary} onPress={goToMessages} activeOpacity={0.8}>
-              <Text style={styles.btnPrimaryText}>Message 💬</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        <RelationshipActions
+          relationship={rel}
+          actionLoading={actionLoading}
+          onSendHi={sendHi}
+          onAcceptHi={acceptHi}
+          onMessage={goToMessages}
+        />
       </ScrollView>
     </View>
   );
@@ -468,6 +568,20 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   sectionTitle: {
     fontFamily: fonts.body, fontWeight: '700', fontSize: 10,
     letterSpacing: 1.2, textTransform: 'uppercase', color: colors.t3, marginBottom: 12,
+  },
+
+  interestGroup: { marginTop: 14 },
+  interestGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  interestGroupLabel: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.t2,
   },
 
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

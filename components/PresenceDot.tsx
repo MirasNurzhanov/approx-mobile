@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { fonts, type as typography } from '@/constants/theme';
@@ -50,7 +49,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function PresenceDot({ presence, size = 10, haloColor, withText = false }: Props) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
 
   // Absent, not "offline".
   if (!presence) return null;

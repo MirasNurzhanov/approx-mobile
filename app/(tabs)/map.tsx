@@ -1,4 +1,3 @@
-import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -6,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Image,
+    AppState,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -19,7 +18,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import { Image } from 'expo-image';
 import MapView, { Circle, Marker, Polygon, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, {
     runOnJS,
@@ -71,6 +70,8 @@ import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
+import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { atSharingPrecision, reportLocation, type Coordinates } from '@/services/location';
@@ -79,6 +80,7 @@ import {
   check as checkPermission,
   openAppSettings,
   refreshPermissions,
+  request as requestPermission,
   usePermissionStore,
   type PermissionState,
 } from '@/services/permissions';
@@ -89,13 +91,7 @@ import { PresenceDot } from '@/components/PresenceDot';
 import { useMotionTrails } from '@/hooks/useMotionTrails';
 import { recordSpeed } from '@/services/ownMotion';
 import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
-import {
-    cachedZonePresets,
-    fmtRadius,
-    loadZonePresets,
-    trackTitle,
-    type ZonePreset,
-} from '@/services/zoneAudio';
+import { fmtRadius, trackTitle } from '@/services/zoneAudio';
 import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
 import {
     getRegion,
@@ -190,6 +186,12 @@ interface ClubMeetup {
   expires_at: string;
 }
 
+interface MapNearbyResponse {
+  users: NearbyUser[];
+  stories: Story[];
+  meetups: ClubMeetup[];
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Ring colour carries the relationship, and nothing else does: blue is a
 // friend, orange is a connection, teal is a matched stranger. One colour per
@@ -240,6 +242,36 @@ const Z_CLUSTER = 6;
 const Z_STORY   = 7;
 const Z_MEETUP  = 8;
 
+// ─── PARKED_MARKERS ───────────────────────────────────────────────────────────
+/*
+ * Why markers on this map are parked instead of unmounted.
+ *
+ * `react-native-maps` cannot reliably remove a child from the native map under
+ * the New Architecture. Fabric's interop layer loses track of custom children
+ * (`MapView → Marker → custom view`), logs `removeViewAt: view already removed
+ * from parent!`, and the removal never reaches `MapView.removeFeatureAt` — so
+ * the marker stays on the GoogleMap forever, long after React has forgotten it.
+ * Upstream: react-native-maps#5736, open, still present in 1.26.x, so upgrading
+ * is not the way out. `newArchEnabled: false` would be, at the cost of the rest
+ * of the app.
+ *
+ * The layout is what makes this visible. Pinching folds people into a headcount
+ * and opens them out again, and each fold unmounts a handful of markers: zoom
+ * out and the faces stay behind under the new badge, zoom back in and the badge
+ * stays behind on top of the faces. That second one is the bug as reported —
+ * "the number is still on the map" — and `layoutMarkers` was never at fault.
+ *
+ * So nothing this layout controls is ever unmounted. A marker with no one to
+ * draw goes transparent and shrinks to `parkedMarker`, keeping its slot in the
+ * child list; badges and leader lines come from fixed pools of slots that grow
+ * but never shrink. React then only ever *updates* map children while the
+ * camera moves, and update is the path that works.
+ *
+ * Markers do still unmount when someone leaves `visibleNearby` entirely, which
+ * is a poll-rate event rather than a per-frame one. Same latent bug, far rarer;
+ * worth pooling too if stale faces ever show up.
+ */
+
 const REL_LABEL: Record<Relationship, string> = {
   stranger:  'Nearby',
   hi_sent:   'Hi Sent',
@@ -248,7 +280,6 @@ const REL_LABEL: Record<Relationship, string> = {
 };
 
 const POLL_MS            = 10_000;
-const STORY_POLL_MS      = 10_000;
 /** How still the camera must be before the marker layout reacts to a new zoom. */
 const ZOOM_SETTLE_MS     = 220;
 
@@ -363,6 +394,34 @@ function distanceBand(m?: number): string | null {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /**
+ * `tracksViewChanges` for a marker whose bitmap depends on `key`.
+ *
+ * react-native-maps rasterizes a marker's children and then freezes the result,
+ * so anything that changes what the marker should look like has to re-arm
+ * tracking or it keeps drawing the picture it froze first.
+ *
+ * Phrased as "the key I last settled on is not the key I am drawing now", which
+ * means a changed key re-arms tracking in the *same* render that changes it.
+ * The older shape — a flag flipped back to true inside an effect — repainted
+ * every affected marker a second time on every poll, and on a busy map that is
+ * a full extra rasterization pass for each of them.
+ */
+function useMarkerSettle(key: string, settleMs = 400) {
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSettledKey(key), settleMs);
+    return () => clearTimeout(t);
+  }, [key, settleMs]);
+
+  return {
+    settling: settledKey !== key,
+    /** For markers that know they have finished drawing before the timer. */
+    markSettled: () => setSettledKey(key),
+  };
+}
+
+/**
  * A matched stranger.
  *
  * They stay anonymous — no photo, no name, nothing to screenshot — but not
@@ -376,7 +435,7 @@ function distanceBand(m?: number): string | null {
  * overlap, and you already know your own half of it.
  */
 function DotMarker({
-  coordinate, color, presence, zIndex, sharedInterests, showCaption = true, onPress,
+  coordinate, color, presence, zIndex, sharedInterests, showCaption = true, parked, onPress,
 }: {
   coordinate: { latitude: number; longitude: number };
   color: string;
@@ -387,6 +446,9 @@ function DotMarker({
   /** False when this dot shares its spot with others — the glyph stays, the
    *  word under it goes. See `FanResult.crowded`. */
   showCaption?: boolean;
+  /** This person is inside a headcount badge right now. Drawn as nothing rather
+   *  than unmounted — see `PARKED_MARKERS`. */
+  parked?: boolean;
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
@@ -402,16 +464,14 @@ function DotMarker({
   /** The word under the dot. Suppressed in a pile — see `showCaption`. */
   const captionText = showCaption ? primary : undefined;
 
-  const [settling, setSettling] = useState(true);
-  useEffect(() => {
-    setSettling(true);
-    const t = setTimeout(() => setSettling(false), 400);
-    return () => clearTimeout(t);
-    // `primary` belongs here with the rest: the marker freezes its own bitmap
-    // once settled, so an interest that arrives on a later poll — the first
-    // one can land before the interest data does — would otherwise never be
-    // drawn at all.
-  }, [color, online, primary, extra, captionText]);
+  // `primary` belongs in the key with the rest: the marker freezes its own
+  // bitmap once settled, so an interest that arrives on a later poll — the
+  // first one can land before the interest data does — would otherwise never be
+  // drawn at all. `parked` for the same reason: the dot has to redraw as the
+  // empty spacer on the way in, and as itself on the way back out.
+  const { settling } = useMarkerSettle(
+    `${color}|${online}|${primary}|${extra}|${captionText}|${parked}`,
+  );
 
   // The glyph needs a bigger core to sit in than a bare point does, and the
   // caption makes the marker taller than its halo — so the anchor moves off
@@ -424,16 +484,20 @@ function DotMarker({
       coordinate={coordinate}
       anchor={{ x: 0.5, y: (haloH / 2) / totalH }}
       tracksViewChanges={settling}
+      opacity={parked ? 0 : 1}
       zIndex={zIndex}
       accessibilityLabel={
-        primary
-          ? `Someone nearby who also likes ${primary}${extra > 0 ? `, and ${extra} more shared` : ''}`
-          : 'Someone nearby with a shared interest'
+        parked
+          ? undefined
+          : primary
+            ? `Someone nearby who also likes ${primary}${extra > 0 ? `, and ${extra} more shared` : ''}`
+            : 'Someone nearby with a shared interest'
       }
-      onPress={onPress}
+      onPress={parked ? undefined : onPress}
     >
-      {/* Android clips marker children to their parent box when it rasterizes,
-          so the halo and the caption both have to live inside this column. */}
+      {parked ? <View style={styles.parkedMarker} /> : (
+      /* Android clips marker children to their parent box when it rasterizes,
+         so the halo and the caption both have to live inside this column. */
       <View style={styles.dotColumn}>
         <View style={[styles.dotWrap, { width: haloH, height: haloH }]}>
           {/* Two discs, not one: a wide faint bloom and a tighter brighter one,
@@ -468,6 +532,7 @@ function DotMarker({
           </View>
         ) : null}
       </View>
+      )}
     </Marker>
   );
 }
@@ -487,6 +552,9 @@ interface AvatarMarkerProps {
   /** Appended to the caption in the ring colour — "· zone" when they are
    *  broadcasting, which is the one thing worth walking towards. */
   captionTag?: string;
+  /** This person is inside a headcount badge right now. Drawn as nothing rather
+   *  than unmounted — see `PARKED_MARKERS`. */
+  parked?: boolean;
   onPress?: () => void;
 }
 
@@ -504,6 +572,7 @@ function AvatarMarker({
   motion,
   caption,
   captionTag,
+  parked,
   onPress,
 }: AvatarMarkerProps) {
   const { colors } = useTheme();
@@ -513,33 +582,28 @@ function AvatarMarker({
   // after the first nearby fetch).
   // Seeded from `loadedAvatars`, which is why avatars stopped blinking.
   //
-  // A marker unmounts whenever its owner is folded into a headcount badge —
-  // pinching, or a poll that nudges two people within overlap distance — and
-  // remounts when the pile opens again. A fresh mount meant `imageReady` went
-  // back to false, so a picture already sitting in the image cache was drawn as
-  // a blank ring and then filled in. Repeat that through a pinch and every
-  // avatar on screen flickers.
-  //
-  // Remembering which URIs have decoded at least once makes a remount cheap:
-  // the ring comes back already wearing its face.
-  const [imageReady, setImageReady] = useState(() => !uri || loadedAvatars.has(uri));
-  const [imageFailed, setImageFailed] = useState(false);
-  const [ringSettling, setRingSettling] = useState(true);
-
+  // Being folded into a headcount badge no longer unmounts this marker — it
+  // parks, see `PARKED_MARKERS` — so `imageReady` survives a pinch outright.
+  // `loadedAvatars` still earns its keep for the mounts that remain: someone
+  // walking back into `visibleNearby` comes back already wearing their face
+  // instead of flashing a blank ring while a cached picture decodes again.
+  // Tagged with the uri it describes rather than reset by an effect when the
+  // uri changes. The effect version was a render late, so a marker whose
+  // picture changed showed the previous person's face inside the new ring for
+  // a frame before blanking.
+  const [load, setLoad] = useState<{ uri?: string; ready: boolean; failed: boolean }>(
+    () => ({ uri, ready: !uri || loadedAvatars.has(uri), failed: false }),
+  );
+  const loadIsCurrent = load.uri === uri;
+  const imageReady  = loadIsCurrent ? load.ready  : !uri || loadedAvatars.has(uri);
+  const imageFailed = loadIsCurrent ? load.failed : false;
   const online = presence?.is_online;
 
-  useEffect(() => {
-    setImageReady(!uri || loadedAvatars.has(uri));
-    setImageFailed(false);
-  }, [uri]);
-  useEffect(() => {
-    setRingSettling(true);
-    const t = setTimeout(() => setRingSettling(false), 400);
-    return () => clearTimeout(t);
-    // Presence changes the bitmap too, so it re-arms tracking — but keyed on
-    // the boolean, not the object, so a poll that returns an equal presence
-    // does not re-rasterize every avatar on the map.
-  }, [ringColor, online]);
+  // Presence changes the bitmap too, so it re-arms tracking — but keyed on the
+  // boolean, not the object, so a poll that returns an equal presence does not
+  // re-rasterize every avatar on the map. Parking is a bitmap change as well:
+  // the ring has to redraw as the empty spacer, and back again.
+  const { settling: ringSettling } = useMarkerSettle(`${ringColor}|${online}|${parked}`);
 
   // The trail is decorative and hidden from assistive tech, so the state it
   // conveys is spelled out here instead — motion must never be carried by the
@@ -561,12 +625,14 @@ function AvatarMarker({
       coordinate={coordinate}
       anchor={{ x: 0.5, y: anchorY }}
       tracksViewChanges={!imageReady || ringSettling}
+      opacity={parked ? 0 : 1}
       zIndex={zIndex}
-      accessibilityLabel={label}
-      onPress={onPress}
+      accessibilityLabel={parked ? undefined : label}
+      onPress={parked ? undefined : onPress}
     >
-      {/* Column wrapper: Android clips marker children to the parent box when
-          it rasterizes, so the caption has to live inside it. */}
+      {parked ? <View style={styles.parkedMarker} /> : (
+      /* Column wrapper: Android clips marker children to the parent box when
+         it rasterizes, so the caption has to live inside it. */
       <View style={styles.avatarMarkerWrap}>
         <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
           {uri && !imageFailed ? (
@@ -575,9 +641,9 @@ function AvatarMarker({
               style={{ width: inner, height: inner, borderRadius: inner / 2 }}
               onLoad={() => {
                 loadedAvatars.add(uri);
-                setTimeout(() => setImageReady(true), 250);
+                setTimeout(() => setLoad({ uri, ready: true, failed: false }), 250);
               }}
-              onError={() => { setImageFailed(true); setImageReady(true); }}
+              onError={() => setLoad({ uri, ready: true, failed: true })}
             />
           ) : (
             <View
@@ -605,6 +671,7 @@ function AvatarMarker({
           </View>
         ) : null}
       </View>
+      )}
     </Marker>
   );
 }
@@ -626,9 +693,14 @@ function SelfMarker({ coordinate, uri, username }: {
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [imageReady, setImageReady] = useState(!uri);
-  const [imageFailed, setImageFailed] = useState(false);
-  useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
+  // Same shape as AvatarMarker: the load state carries the uri it belongs to,
+  // so changing your own picture is not a reset an effect has to perform.
+  const [load, setLoad] = useState<{ uri?: string; ready: boolean; failed: boolean }>(
+    () => ({ uri, ready: !uri, failed: false }),
+  );
+  const loadIsCurrent = load.uri === uri;
+  const imageReady  = loadIsCurrent ? load.ready  : !uri;
+  const imageFailed = loadIsCurrent ? load.failed : false;
 
   return (
     <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={!imageReady}>
@@ -640,9 +712,9 @@ function SelfMarker({ coordinate, uri, username }: {
               style={styles.selfAvatar}
               onLoad={() => {
                 loadedAvatars.add(uri);
-                setTimeout(() => setImageReady(true), 250);
+                setTimeout(() => setLoad({ uri, ready: true, failed: false }), 250);
               }}
-              onError={() => { setImageFailed(true); setImageReady(true); }}
+              onError={() => setLoad({ uri, ready: true, failed: true })}
             />
           ) : (
             <View style={[styles.selfAvatar, styles.selfInitialWrap]}>
@@ -690,12 +762,10 @@ function MusicZoneBadge({ center, radius, mine, label, color }: {
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  // Same reason as ClusterMarker: let it draw, then freeze the raster.
-  const [settling, setSettling] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setSettling(false), 400);
-    return () => clearTimeout(t);
-  }, [radius]);
+  // Same reason as ClusterMarker: let it draw, then freeze the raster — and
+  // re-arm on every input that changes what the chip says, or a zone resized or
+  // recoloured mid-session keeps drawing the label it first froze.
+  const { settling } = useMarkerSettle(`${radius}|${label}|${color}`);
 
   return (
     <Marker
@@ -721,43 +791,55 @@ function MusicZoneBadge({ center, radius, mine, label, color }: {
   );
 }
 
-function ClusterMarker({ coordinate, count, onPress }: {
+function ClusterMarker({ coordinate, count, parked, onPress }: {
   coordinate: { latitude: number; longitude: number };
   count: number;
+  /** Slot currently standing in for no pile — see `PARKED_MARKERS`. */
+  parked?: boolean;
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   // Same reason as DotMarker: freeze the raster, but not before it has drawn.
-  const [settling, setSettling] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setSettling(false), 400);
-    return () => clearTimeout(t);
-  }, [count]);
+  //
+  // Re-arming is the point. Without it the badge froze its first bitmap for
+  // good: a pile that gained or lost someone kept drawing its old number,
+  // because the timer had already fired and nothing ever re-armed tracking.
+  // Parking is in the key too — a slot that goes quiet has to redraw as the
+  // empty spacer, or it keeps a headcount's worth of tap target sitting on the
+  // map.
+  const { settling } = useMarkerSettle(`${count}|${parked}`);
 
   return (
     <Marker
       coordinate={coordinate}
       anchor={{ x: 0.5, y: 0.5 }}
       tracksViewChanges={settling}
+      opacity={parked ? 0 : 1}
       zIndex={Z_CLUSTER}
-      onPress={onPress}
-      accessibilityLabel={`${count} ${count === 1 ? 'person' : 'people'} here. Zoom in to see them.`}
+      onPress={parked ? undefined : onPress}
+      accessibilityLabel={
+        parked ? undefined : `${count} ${count === 1 ? 'person' : 'people'} here. Zoom in to see them.`
+      }
     >
-      <View style={styles.clusterWrap}>
-        <View style={styles.clusterBloom} />
-        <View style={styles.clusterBadge}>
-          <IconPeople size={12} color={colors.teal} />
-          <Text style={styles.clusterCount}>{count}</Text>
+      {parked ? (
+        <View style={styles.parkedMarker} />
+      ) : (
+        <View style={styles.clusterWrap}>
+          <View style={styles.clusterBloom} />
+          <View style={styles.clusterBadge}>
+            <IconPeople size={12} color={colors.teal} />
+            <Text style={styles.clusterCount}>{count}</Text>
+          </View>
         </View>
-      </View>
+      )}
     </Marker>
   );
 }
 
-function StoryBubble({ story, count }: { story: Story; count: number }) {
+function StoryBubble({ story, count, onAvatarLoad }: { story: Story; count: number; onAvatarLoad?: () => void }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const avatarBg = avatarBgColor(story.author.username);
 
   const reactions = story.reactions ?? {};
@@ -778,7 +860,11 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
         <View style={styles.storyAvatarStack}>
           <View style={styles.storyAvatarWrap}>
             {story.author.profile_picture ? (
-              <Image source={{ uri: story.author.profile_picture }} style={styles.storyCardAvatarImg} />
+              <Image
+                source={{ uri: story.author.profile_picture }}
+                style={styles.storyCardAvatarImg}
+                onLoad={onAvatarLoad}
+              />
             ) : (
               <View style={[styles.storyCardAvatar, { backgroundColor: avatarBg }]}>
                 <Text style={styles.storyCardAvatarText}>{story.author.username.charAt(0).toUpperCase()}</Text>
@@ -800,6 +886,33 @@ function StoryBubble({ story, count }: { story: Story; count: number }) {
         </View>
       )}
     </View>
+  );
+}
+
+function StoryMarker({ stories, onPress }: { stories: Story[]; onPress: () => void }) {
+  const first = stories[0];
+  // With `tracksViewChanges` permanently false the marker is snapshotted on
+  // first render — before the avatar arrives — and stays blank forever. Track
+  // until the image load fires (or a fallback timeout for letter avatars and
+  // failed loads), and re-track for a beat whenever the bubble's content
+  // changes so new stories and reaction counts actually repaint.
+  const signature = `${first.id}:${stories.length}:${first.author.profile_picture ?? ''}:${JSON.stringify(first.reactions ?? {})}`;
+  const { settling: tracks, markSettled } = useMarkerSettle(signature, 3000);
+
+  // One frame after load isn't enough on Android — give the draw a moment
+  // before freezing the snapshot.
+  const settle = () => { setTimeout(markSettled, 300); };
+
+  return (
+    <Marker
+      coordinate={{ latitude: first.latitude, longitude: first.longitude }}
+      anchor={{ x: 0.5, y: 1 }}
+      tracksViewChanges={tracks}
+      zIndex={Z_STORY}
+      onPress={onPress}
+    >
+      <StoryBubble story={first} count={stories.length} onAvatarLoad={settle} />
+    </Marker>
   );
 }
 
@@ -839,7 +952,7 @@ function LocateButton({
   onPress: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const following = state === 'following';
 
   // The icon carries the state as a shape — a filled centre when tracking, a
@@ -884,7 +997,7 @@ function TopBar({
   onList: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top } = useSafeAreaInsets();
   return (
     <View style={[styles.topBar, { paddingTop: top + 6 }]}>
@@ -995,16 +1108,13 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
       return;
     }
     setPosting(true);
-    try {
+    await runBusy(async () => {
       await onPost(text.trim(), photoUri);
       setText('');
       setPhotoUri(null);
       onClose();
-    } catch {
-      Alert.alert('Failed to post', 'Please try again.');
-    } finally {
-      setPosting(false);
-    }
+    }, () => setPosting(false))
+      .catch(() => Alert.alert('Failed to post', 'Please try again.'));
   }
 
   return (
@@ -1038,7 +1148,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
           <Text style={styles.charCount}>{text.length}/280</Text>
           {photoUri ? (
             <View style={styles.photoPreviewContainer}>
-              <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
+              <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" />
               <TouchableOpacity style={styles.removePhotoBtn} onPress={() => setPhotoUri(null)} hitSlop={8}>
                 <IconClose size={14} color={colors.t1} />
               </TouchableOpacity>
@@ -1087,7 +1197,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
 // ─── Meetup Marker ────────────────────────────────────────────────────────────
 function MeetupMarker({ meetup, onPress }: { meetup: ClubMeetup; onPress: () => void }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <Marker
       coordinate={{ latitude: meetup.latitude, longitude: meetup.longitude }}
@@ -1121,7 +1231,7 @@ function MeetupSheet({
   onDismiss: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
 
@@ -1220,14 +1330,17 @@ function UserSheet({
   const relLabelColor = isFriend ? colors.blue : isConnected ? colors.orange : colors.t2;
   const dist          = fmtDistance(user.distance);
 
-  // The sheet stays mounted when tapping straight to another marker, so the
-  // sent state must reset per user.
-  const [requestSent, setRequestSent] = useState(false);
-  useEffect(() => { setRequestSent(false); }, [user.id]);
+  // The sheet stays mounted when tapping straight to another marker, so "sent"
+  // has to mean "sent to *this* person". Recording who it was sent to says that
+  // outright, instead of a boolean that an effect has to remember to clear —
+  // and the old version cleared it a render late, so tapping from someone you
+  // had just messaged to someone new showed "Sent" under the new name first.
+  const [sentTo, setSentTo] = useState<number | null>(null);
+  const requestSent = sentTo === user.id;
 
   function sendFriendRequest() {
     api.post(`/api/friends/request/${user.id}/`)
-      .then(() => setRequestSent(true))
+      .then(() => setSentTo(user.id))
       .catch((e) => console.log('[Friend Request] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
   }
 
@@ -1255,19 +1368,21 @@ function UserSheet({
 
   // Friends and connections get the real number; a stranger gets a band.
   const distLine = identified ? dist : distanceBand(user.distance);
-  const zoneLine = isFriend && user.zone_audio_url ? 'in their sound zone' : null;
+  const zoneLine = identified && user.zone_audio_url ? 'in their sound zone' : null;
   const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
 
 
   // ── Their zone track ──
-  // The server only sends zone_audio_url to viewers allowed to hear it, so a
-  // URL here is already permission to play — but permission is not a reason to
-  // start. Nothing loads until the play button below is pressed.
+  // The server only sends zone_audio_url to viewers allowed to hear it —
+  // friends and connections, never a stranger, whatever the owner's Zone
+  // audio setting says — so a URL here is already permission to play. This
+  // check is redundant with that server gate, kept as a second line of
+  // defence rather than trusting the field's mere presence.
   //
   // The track is its own switch. `zone_active` governs whether they are drawn
   // with a zone on the map, and reading it here is what made turning that
   // circle off silently mute a song its owner had not touched.
-  const zoneUrl = isFriend ? user.zone_audio_url : undefined;
+  const zoneUrl = identified ? user.zone_audio_url : undefined;
   const zoneRadius = user.zone_radius && user.zone_radius > 0 ? user.zone_radius : 500;
   const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
   // A region zone is a shape, not a distance: someone 3km away can be well
@@ -1288,15 +1403,6 @@ function UserSheet({
     ? (!viewerCoords ||
        regionContains(zoneRegion!, viewerCoords.latitude, viewerCoords.longitude))
     : (distanceM == null || distanceM < musicRadius);
-
-  // Preset names arrive from the API; until they do, the fallback list stands
-  // in and an upload is named after its file either way.
-  const [presets, setPresets] = useState<ZonePreset[]>(cachedZonePresets);
-  useEffect(() => {
-    let alive = true;
-    loadZonePresets().then((list) => { if (alive) setPresets(list); }).catch(() => {});
-    return () => { alive = false; };
-  }, []);
 
   return (
     <>
@@ -1369,10 +1475,10 @@ function UserSheet({
               // cannot leave the previous one loaded.
               key={zoneUrl}
               url={zoneUrl}
-              // An Apple track knows its own name and artist; a preset and an
-              // upload are still named from the URL, which for Apple's CDN
-              // would be a hash.
-              title={user.zone_track_title || trackTitle(zoneUrl, presets)}
+              // An Apple track knows its own name and artist; an upload is
+              // still named from the URL, which for Apple's CDN would be a
+              // hash.
+              title={user.zone_track_title || trackTitle(zoneUrl)}
               artwork={user.zone_track_artwork}
               startMs={user.zone_track_start_ms ?? 0}
               endMs={user.zone_track_end_ms ?? null}
@@ -1482,14 +1588,16 @@ export default function MapScreen() {
   const COLOR_FRIEND    = colors.blue;
   const COLOR_CONNECTED = colors.orange;
   const COLOR_STRANGER  = colors.teal;
-  useEffect(() => { console.log('[Map] step 1: component mounted'); }, []);
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
   const [nearby, setNearby]           = useState<NearbyUser[]>([]);
   const [permState, setPermState]     = useState<PermissionState | null>(null);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
-  const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
+  /** Who the sheet was opened for. The row shown is read back out of the live
+   *  list below, so an open sheet follows each poll on its own. */
+  const [openUser, setOpenUser] = useState<NearbyUser | null>(null);
+  const selectedUser = openUser ? (nearby.find((u) => u.id === openUser.id) ?? openUser) : null;
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
@@ -1498,12 +1606,23 @@ export default function MapScreen() {
   const [hiToast, setHiToast]           = useState(false);
   const [locationToast, setLocationToast] = useState(false);
   const [stories, setStories]           = useState<Story[]>([]);
-  const [storyViewer, setStoryViewer]   = useState<{ stories: Story[] } | null>(null);
+  /** Which stories the viewer was opened on. Each one is read back out of the
+   *  live list below, so reactions and refetches show through without the
+   *  viewer's copy having to be patched to match. */
+  const [openStories, setOpenStories]   = useState<Story[] | null>(null);
+  const storyViewer = openStories
+    ? { stories: openStories.map((s) => stories.find((f) => f.id === s.id) ?? s) }
+    : null;
   const [createStoryCoord, setCreateStoryCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [clubMeetups, setClubMeetups]   = useState<ClubMeetup[]>([]);
   const [selectedMeetup, setSelectedMeetup] = useState<ClubMeetup | null>(null);
 
-  const [following, setFollowing]     = useState(false);
+  // Refs that hold the last non-null selection — lets us keep the sheet
+  // components mounted between taps instead of unmounting on every dismiss.
+  const lastUserRef   = useRef<NearbyUser | null>(null);
+  const lastMeetupRef = useRef<ClubMeetup | null>(null);
+
+  const [followRequested, setFollowRequested] = useState(false);
   const [locating, setLocating]       = useState(false);
 
   const coordsRef          = useRef(coords);
@@ -1538,7 +1657,6 @@ export default function MapScreen() {
   const startingWatchRef   = useRef(false);
   coordsRef.current = coords;
   currentUserIdRef.current = currentUserId;
-  followingRef.current = following;
 
   const sheetY = useSharedValue(SHEET_H);
   const reduceMotion = useReduceMotion();
@@ -1568,6 +1686,14 @@ export default function MapScreen() {
   }, []);
   const locationState = permissions.location?.state ?? permState;
   const locationGranted = locationState === 'granted';
+
+  // Following depends on the permission that feeds it, so it is stated as a
+  // condition rather than a flag some effect has to switch off afterwards.
+  // Losing location mid-follow now stops it in the same render; before, the
+  // camera stayed locked to a position that would never update again until an
+  // effect noticed and re-rendered.
+  const following = followRequested && locationGranted;
+  followingRef.current = following;
 
   // Stories deleted from the archive screen vanish here immediately instead of
   // waiting for the next poll.
@@ -1821,6 +1947,40 @@ export default function MapScreen() {
     return layoutMarkers(points, metersPerPx, zoneAreas);
   }, [visibleNearby, displayCoords, zoomDelta, mapH, zoneAreas]);
 
+  /** Badges and leader lines the map is currently holding open.
+   *
+   * Both come and go with the zoom, and neither may be unmounted to do it — see
+   * `PARKED_MARKERS`. So each renders from a fixed run of slots, and the run
+   * only ever grows: a slot with nothing to draw parks rather than leaving.
+   * High-water marks live in refs because they are derived from the render they
+   * are used in — setting state here would only re-render to reach the same
+   * number, and both are bounded by the piles a screen can hold. */
+  const badgeSlots = useRef(0);
+  const leaderSlots = useRef(0);
+
+  /** Badge, or nothing, for each slot. Drawable filter first, so an unusable
+   *  coordinate parks its slot instead of shifting every badge after it. */
+  const badges = useMemo(() => {
+    const drawable = markerLayout.clusters.filter((c) => isDrawable(c.position));
+    badgeSlots.current = Math.max(badgeSlots.current, drawable.length);
+    return Array.from({ length: badgeSlots.current }, (_, i) => drawable[i] ?? null);
+  }, [markerLayout]);
+
+  /** Leader lines: the dashes from a moved marker back to where its owner
+   *  really is, and from a nudged badge back to the pile it counts. */
+  const leaders = useMemo(() => {
+    const lines = [
+      ...Array.from(markerLayout.placed.values()),
+      ...markerLayout.clusters,
+    ]
+      // Both ends validated: a single bad coordinate in a Polyline is enough to
+      // bring the native map down.
+      .filter((item) => item.anchor && isDrawable(item.anchor) && isDrawable(item.position))
+      .map((item) => [item.anchor!, item.position]);
+    leaderSlots.current = Math.max(leaderSlots.current, lines.length);
+    return Array.from({ length: leaderSlots.current }, (_, i) => lines[i] ?? null);
+  }, [markerLayout]);
+
   /** Marker position for someone, falling back to their true point before the
    *  viewport is measured on the first frame. */
   const posFor = useCallback(
@@ -1847,10 +2007,6 @@ export default function MapScreen() {
   // stop on unmount: a friend's track is loaded by the player inside their card
   // and unloaded when that card closes. Walking into a zone is an invitation,
   // not a command to a stranger's phone speaker.
-  //
-  // Only the track *names* are fetched here, once, so a friend's card can say
-  // "Rain" instead of the URL it came from.
-  useEffect(() => { loadZonePresets().catch(() => {}); }, []);
 
   function handleHiSent() {
     fetchFriends();
@@ -1859,40 +2015,28 @@ export default function MapScreen() {
     hiToastTimer.current = setTimeout(() => setHiToast(false), 1500);
   }
 
-  const fetchStories = useCallback(async () => {
-    console.log('[Stories] fetching nearby stories...');
+  const fetchMapData = useCallback(async () => {
     try {
-      const r = await api.get<Story[]>('/api/stories/nearby/');
-      const data = r.data;
-      console.log('[Stories] received:', data.length, 'stories');
-      console.log('[Stories] first story coords:', data[0]?.latitude, data[0]?.longitude);
-      console.log('[Stories] after reaction fetch:', JSON.stringify(data.map(s => ({ id: s.id, reactions: s.reactions }))));
-      setStories(data);
-      data.forEach(s => {
-        if (s.image) ExpoImage.prefetch(s.image);
-      });
-    } catch {}
-  }, []);
-
-  const fetchClubMeetups = useCallback(async () => {
-    try {
-      const r = await api.get<ClubMeetup[]>('/api/clubs/events/nearby/');
+      const r = await api.get<MapNearbyResponse>('/api/map/nearby/');
+      const { users, stories, meetups } = r.data;
+      setNearby(users);
+      setStories(stories);
+      stories.forEach(s => { if (s.image) Image.prefetch(s.image); });
       const now = Date.now();
-      setClubMeetups(r.data.filter((e) => new Date(e.expires_at).getTime() > now));
+      setClubMeetups(meetups.filter((e) => new Date(e.expires_at).getTime() > now));
     } catch {}
   }, []);
 
   function openStoryViewer(authorStories: Story[]) {
     sheetY.value = SHEET_H;
-    setSelectedUser(null);
+    setOpenUser(null);
     setSelectedMeetup(null);
-    setStoryViewer({ stories: authorStories });
+    setOpenStories(authorStories);
   }
 
   async function reactToStory(storyId: number, reaction: ReactionType) {
     try {
-      const response = await api.post(`/api/stories/${storyId}/react/`, { reaction: reaction });
-      console.log('[Reaction] success:', response.data);
+      await api.post(`/api/stories/${storyId}/react/`, { reaction });
       const applyReaction = <T extends Story>(s: T): T => {
         if (s.id !== storyId) return s;
         const wasActive = s.user_reaction === reaction;
@@ -1901,9 +2045,10 @@ export default function MapScreen() {
         if (!wasActive) updated[reaction] = (updated[reaction] ?? 0) + 1;
         return { ...s, reactions: updated, user_reaction: wasActive ? null : reaction };
       };
-      setStoryViewer((prev) => prev ? { stories: prev.stories.map(applyReaction) } : prev);
+      // Only the master list is patched: the open viewer reads its rows out of
+      // it, so it picks the reaction up from here without a copy of its own.
       setStories((prev) => prev.map(applyReaction));
-      await fetchStories();
+      await fetchMapData();
     } catch (error: any) {
       console.log('[Reaction] error:', error.response?.status, JSON.stringify(error.response?.data));
     }
@@ -1914,31 +2059,22 @@ export default function MapScreen() {
     if (!c) throw new Error('No location');
     const lat = parseFloat(c.latitude.toFixed(6));
     const lng = parseFloat(c.longitude.toFixed(6));
-    console.log('[Story] posting story at:', lat, lng);
-    console.log('[Story] content:', text);
-    const formData = new FormData();
-    formData.append('text', text);
-    formData.append('content', text);
-    formData.append('latitude', String(lat));
-    formData.append('longitude', String(lng));
-    if (photoUri) {
-      formData.append('image', {
-        uri: photoUri,
-        type: 'image/jpeg',
-        name: 'story-image.jpg',
-      } as any);
-    }
-    console.log('[Story] posting with image:', photoUri ? 'yes' : 'no');
-    console.log('[Story] formData fields:', text, lat, lng);
     try {
-      const response = await api.post('/api/stories/', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // The photo goes straight to Cloudinary; Django only ever sees the URL.
+      // One hop instead of two, and no Railway worker held for the transfer.
+      const imageUrl = photoUri ? await uploadImageToCloudinary(photoUri) : null;
+      const response = await api.post('/api/stories/', {
+        content: text,
+        latitude: lat,
+        longitude: lng,
+        ...(imageUrl ? { image_url: imageUrl } : {}),
+      });
       const newStory = response.data;
-      console.log('[Story] success:', newStory);
       setStories(prev => [...prev, newStory]);
       recordOwnStory(newStory);
-      setTimeout(() => fetchStories(), 500);
+      setTimeout(() => fetchMapData(), 500);
     } catch (error: any) {
-      console.log('[Story] error:', error.response?.status, JSON.stringify(error.response?.data));
+      console.log('[Story] error:', error.response?.status ?? error.message);
       throw error;
     }
   }
@@ -1947,7 +2083,6 @@ export default function MapScreen() {
   // login would otherwise never retry (leaving the owner's zone invisible),
   // and changes made in Zone Setup must show up when returning to the map.
   const loadSelf = useCallback(() => {
-    console.log('[Map] step 4: loading self (me/profile/zone)');
     api.get<{ id: number; username: string }>('/api/users/me/')
       .then((r) => setCurrentUserId(r.data.id))
       .catch((e: any) => console.log('[Map] /users/me/ error:', e?.response?.status));
@@ -1975,7 +2110,6 @@ export default function MapScreen() {
           music_zone_radius:
             Number(d.music_radius_m) > 0 ? Number(d.music_radius_m) : Number(d.zone_radius) || 500,
         };
-        console.log('[Zone] self zone:', JSON.stringify(normalized));
         setSelfZone(normalized);
       })
       .catch((e: any) => console.log('[Zone] self zone fetch error:', e?.response?.status));
@@ -1998,12 +2132,13 @@ export default function MapScreen() {
     if (watchRef.current || startingWatchRef.current) return;
     startingWatchRef.current = true;
     try {
-      // Background location is optional and is *not* asked for here. It now
-      // lives in Settings → Permissions, where the user can opt in knowingly
-      // rather than being ambushed on first launch.
+      // Not asked for here — this fires on every watch (re)start, including
+      // the permission-regained effect below, and re-asking on every one of
+      // those would be a dialog storm. The one place that primes and requests
+      // it is the mount effect, once, right after foreground is granted. This
+      // call only starts the OS task if that already succeeded.
       await startBackgroundLocationUpdates();
       const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      console.log('[Map] step 3: location received', init.coords.latitude, init.coords.longitude);
       fixAtRef.current = init.timestamp;
       setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
       recordSpeed(init.coords.speed);
@@ -2022,17 +2157,18 @@ export default function MapScreen() {
       );
     } catch (e: any) {
       console.log('[Map] location watch failed:', e?.message);
-    } finally {
-      startingWatchRef.current = false;
     }
+    // Always reached — the `catch` only logs — so the re-entrancy guard is
+    // released on both paths without a `finally`, which React Compiler cannot
+    // compile and which would cost this screen its auto-memoization.
+    startingWatchRef.current = false;
   }, []);
 
   useEffect(() => {
     (async () => {
       // Primed, not cold. The old code fired the system dialog the instant the
-      // map mounted, and then fired the *background* location dialog straight
-      // after it — two unexplained prompts back to back, with iOS allowing
-      // exactly one chance at each.
+      // map mounted — this sheet explains first so the one shot iOS gives a
+      // cold "Don't Allow" is not spent on a dialog nobody had context for.
       const granted = await ensurePermission('location');
       if (!granted) {
         const info = await checkPermission('location');
@@ -2041,6 +2177,10 @@ export default function MapScreen() {
       }
       setPermState('granted');
       await startWatching();
+      // Background gets no primer sheet of its own — straight to the OS
+      // dialog once foreground is already granted and the map is working.
+      await requestPermission('locationBackground');
+      await startBackgroundLocationUpdates();
     })();
 
     return () => {
@@ -2065,33 +2205,39 @@ export default function MapScreen() {
     // ourselves out of it), so keep retrying the identity fetch until it lands.
     if (currentUserIdRef.current === null) loadSelf();
 
-    const [, nearbyResult] = await Promise.allSettled([
+    await Promise.allSettled([
       // Honours the Location sharing setting; sends nothing when paused.
       // Speed rides along on the same request — the server buckets it into a
       // coarse class and never stores the figure itself.
       reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current),
-      api.get<NearbyUser[]>('/api/proximity/nearby/'),
+      fetchMapData(),
     ]);
+  }, [fetchMapData, loadSelf]);
 
-    if (nearbyResult.status === 'fulfilled') {
-      const users = nearbyResult.value.data;
-      users.forEach((u) => {
-        if (u.zone_active || u.zone_radius) {
-          console.log('[Map] zone data:', u.username, u.zone_active, u.zone_radius, u.zone_audio_url);
-        }
-      });
-      setNearby(users);
-    }
-    await fetchFriends();
-    await fetchClubMeetups();
-  }, [fetchFriends, loadSelf, fetchClubMeetups]);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Start the tick when coords first arrive; stop when the component unmounts.
   useEffect(() => {
     if (!coords) return;
     tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => clearInterval(id);
+    tickRef.current = setInterval(tick, POLL_MS);
+    return () => {
+      if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+    };
   }, [!!coords]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pause the tick when the app goes to the background and resume on return.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') {
+        if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+      } else if (coordsRef.current && !tickRef.current) {
+        tick();
+        tickRef.current = setInterval(tick, POLL_MS);
+      }
+    });
+    return () => sub.remove();
+  }, [tick]);
 
   // Register tick as the global refresh so other screens can trigger it
   useEffect(() => {
@@ -2104,50 +2250,27 @@ export default function MapScreen() {
     });
   }, []);
 
-  useEffect(() => {
-    fetchStories();
-    const id = setInterval(fetchStories, STORY_POLL_MS);
-    return () => clearInterval(id);
-  }, [fetchStories]);
-
-  useEffect(() => {
-    fetchClubMeetups();
-    const id = setInterval(fetchClubMeetups, STORY_POLL_MS);
-    return () => clearInterval(id);
-  }, [fetchClubMeetups]);
 
 
-  // Keep the open sheet in sync with the latest nearby fetch
-  useEffect(() => {
-    if (!selectedUser) return;
-    const fresh = nearby.find((u) => u.id === selectedUser.id);
-    if (fresh) setSelectedUser(fresh);
-  }, [nearby]);
-
-  // Keep the open story viewer in sync with the latest stories fetch
-  useEffect(() => {
-    if (!storyViewer) return;
-    setStoryViewer((prev) => {
-      if (!prev) return prev;
-      return { stories: prev.stories.map((s) => stories.find((f) => f.id === s.id) ?? s) };
-    });
-  }, [stories]);
+  // The sheet and the story viewer used to be re-synced here after every fetch.
+  // Both now read their rows out of the live lists as they render, so there is
+  // nothing left to copy across.
 
   function openSheet(user: NearbyUser) {
     setSelectedMeetup(null);
-    setSelectedUser(user);
+    setOpenUser(user);
     sheetY.value = withSpring(0, SPRING_CFG);
   }
 
   function closeSheet() {
     sheetY.value = withSpring(SHEET_H, SPRING_CFG, (done) => {
-      if (done) runOnJS(setSelectedUser)(null);
+      if (done) runOnJS(setOpenUser)(null);
     });
   }
 
   function openMeetupSheet(meetup: ClubMeetup) {
-    setStoryViewer(null);
-    setSelectedUser(null);
+    setOpenStories(null);
+    setOpenUser(null);
     setSelectedMeetup(meetup);
     sheetY.value = withSpring(0, SPRING_CFG);
   }
@@ -2196,7 +2319,7 @@ export default function MapScreen() {
   const stopFollowing = useCallback((reason: 'gesture' | 'tap') => {
     if (!followingRef.current) return;
     followingRef.current = false;
-    setFollowing(false);
+    setFollowRequested(false);
     announce(
       reason === 'gesture'
         ? 'Stopped following your location, map moved'
@@ -2237,12 +2360,6 @@ export default function MapScreen() {
     centerOnSelf(displayCoords, false);
   }, [following, displayCoords, centerOnSelf]);
 
-  // Losing permission while following leaves the camera locked to a position
-  // that will never update again.
-  useEffect(() => {
-    if (!locationGranted && following) setFollowing(false);
-  }, [locationGranted, following]);
-
   async function explainUnavailable() {
     // The primer already covers both shapes of this: the reason plus the OS
     // dialog while we may still ask, and the reason plus Linking.openSettings()
@@ -2272,7 +2389,7 @@ export default function MapScreen() {
     // Set before the re-render: stopFollowing reads the ref, and onPanDrag can
     // fire a frame ahead of the state update.
     followingRef.current = true;
-    setFollowing(true);
+    setFollowRequested(true);
     announce('Following your location');
   }
 
@@ -2332,6 +2449,12 @@ export default function MapScreen() {
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
 
+  // Keep last non-null selection cached so the sheets stay mounted.
+  if (selectedUser)   lastUserRef.current   = selectedUser;
+  if (selectedMeetup) lastMeetupRef.current = selectedMeetup;
+  const sheetUser   = lastUserRef.current;
+  const sheetMeetup = lastMeetupRef.current;
+
   return (
     <View style={styles.container}>
       {permState && permState !== 'granted' ? (
@@ -2380,7 +2503,6 @@ export default function MapScreen() {
         <MapView
           ref={mapRef}
           onLayout={(e) => {
-            console.log('[Map] step 5: map rendering');
             setMapH(e.nativeEvent.layout.height);
           }}
           style={styles.map}
@@ -2527,30 +2649,33 @@ export default function MapScreen() {
 
           {/* Leader lines back to the spot a moved marker really occupies.
               Without them the fan would quietly claim that people sitting at
-              one table are tens of metres apart. Drawn under the markers. */}
-          {[
-            ...Array.from(markerLayout.placed.entries()).map(([key, fan]) => ({ key, ...fan })),
-            ...markerLayout.clusters,
-          ].map((item) =>
-            // Both ends validated: a single bad coordinate in a Polyline is
-            // enough to bring the native map down.
-            item.anchor && isDrawable(item.anchor) && isDrawable(item.position) ? (
-              <Polyline
-                key={`leader-${item.key}`}
-                coordinates={[item.anchor, item.position]}
-                strokeColor="rgba(244,244,246,0.28)"
-                strokeWidth={1}
-                lineDashPattern={[3, 3]}
-                zIndex={2}
-              />
-            ) : null,
-          )}
+              one table are tens of metres apart. Drawn under the markers.
+              Slotted, and a spare slot collapses onto the owner's own point in
+              full transparency rather than unmounting — see PARKED_MARKERS. */}
+          {leaders.map((line, i) => (
+            <Polyline
+              key={`leader-slot-${i}`}
+              coordinates={line ?? [displayCoords, displayCoords]}
+              strokeColor={line ? 'rgba(244,244,246,0.28)' : 'transparent'}
+              strokeWidth={1}
+              lineDashPattern={[3, 3]}
+              zIndex={2}
+            />
+          ))}
 
           {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
             // Absent from `placed` means this person was folded into a headcount
-            // badge. Drawing them as well would put two of them on the map.
+            // badge. Drawing them as well would put two of them on the map — so
+            // the marker parks: transparent, untappable, still mounted. The
+            // unmount it replaces is the one that left a face behind under the
+            // badge on every pinch. See PARKED_MARKERS.
             const layout = markerLayout.placed.get(`u-${user.id}`);
-            if (!layout || !isDrawable(layout.position)) return null;
+            const truePos = { latitude: user.latitude, longitude: user.longitude };
+            const parked = !layout || !isDrawable(layout.position);
+            // Nowhere legal to stand at all: the one case still worth skipping,
+            // since a Marker needs a coordinate the native map can survive.
+            if (parked && !isDrawable(truePos)) return null;
+            const position = parked ? truePos : layout!.position;
 
             const uid = Number(user.id);
             const isFriend = friendIds.has(uid);
@@ -2563,7 +2688,8 @@ export default function MapScreen() {
             return isFriend || isConnected ? (
               <AvatarMarker
                 key={user.id}
-                coordinate={layout.position}
+                coordinate={position}
+                parked={parked}
                 uri={user.profile_picture}
                 username={user.username}
                 ringColor={color}
@@ -2571,13 +2697,12 @@ export default function MapScreen() {
                 motion={user.motion_class}
                 // Dropped when this marker shares its spot: the fan separates
                 // rings, and a name chip is wider than the ring it hangs under.
-                caption={layout.crowded ? undefined : user.username}
-                // A connection has no zone access, so tagging one would be
-                // advertising a door they cannot open. The tag marks a track
-                // you can play, so it follows the track rather than the
-                // map-zone switch.
+                caption={layout?.crowded ? undefined : user.username}
+                // Friends and connections both have zone access. The tag
+                // marks a track you can play, so it follows the track rather
+                // than the map-zone switch.
                 captionTag={
-                  !layout.crowded && isFriend && user.zone_audio_url ? 'zone' : undefined
+                  !layout?.crowded && (isFriend || isConnected) && user.zone_audio_url ? 'zone' : undefined
                 }
                 zIndex={Z_FRIEND}
                 onPress={() => openSheet(user)}
@@ -2585,7 +2710,8 @@ export default function MapScreen() {
             ) : (
               <DotMarker
                 key={user.id}
-                coordinate={layout.position}
+                coordinate={position}
+                parked={parked}
                 color={color}
                 presence={user.presence}
                 sharedInterests={user.shared_interests}
@@ -2593,7 +2719,7 @@ export default function MapScreen() {
                 // thing it draws — four of them stacked down a street is what
                 // made the map unreadable. The glyph inside the dot still says
                 // which interest it is, so only the word goes.
-                showCaption={!layout.crowded}
+                showCaption={!layout?.crowded}
                 zIndex={Z_STRANGER}
                 onPress={() => openSheet(user)}
               />
@@ -2615,13 +2741,19 @@ export default function MapScreen() {
 
           {/* Piles that could not be fanned apart without moving someone too far
               — which is what zooming out does to a pixel-sized fan. A number
-              instead, and a tap to go in and see who. */}
-          {markerLayout.clusters.filter((c) => isDrawable(c.position)).map((cluster) => (
+              instead, and a tap to go in and see who.
+              Slots, not badges: zooming back in empties a slot rather than
+              removing it, because a removed badge is the one that stayed on the
+              map on top of the faces it had been standing in for. An empty slot
+              parks on the owner's own point, where it is invisible, one pixel
+              wide and deaf to taps. See PARKED_MARKERS. */}
+          {badges.map((cluster, i) => (
             <ClusterMarker
-              key={cluster.key}
-              coordinate={cluster.position}
-              count={cluster.count}
-              onPress={() => zoomToCluster(cluster.anchor ?? cluster.position)}
+              key={`cluster-slot-${i}`}
+              coordinate={cluster ? cluster.position : displayCoords}
+              count={cluster ? cluster.count : 0}
+              parked={!cluster}
+              onPress={cluster ? () => zoomToCluster(cluster.anchor ?? cluster.position) : undefined}
             />
           ))}
 
@@ -2634,33 +2766,22 @@ export default function MapScreen() {
             username={selfProfile?.username ?? ''}
           />
 
-          {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => {
-            const first = authorStories[0];
-            return (
-              <Marker
-                key={`story-author-${authorId}`}
-                coordinate={{ latitude: first.latitude, longitude: first.longitude }}
-                anchor={{ x: 0.5, y: 1 }}
-                tracksViewChanges={false}
-                // Above the people markers, which now claim a zIndex of their
-                // own — a bubble is drawn above its point, so it covers nobody.
-                zIndex={Z_STORY}
-                onPress={() => openStoryViewer(authorStories)}
-              >
-                <StoryBubble story={first} count={authorStories.length} />
-              </Marker>
-            );
-          })}
+          {Array.from(storiesByAuthor.entries()).map(([authorId, authorStories]) => (
+            // Keyed by author *and* newest story, so a fresh story remounts
+            // the marker rather than reusing a stale frozen snapshot.
+            <StoryMarker
+              key={`story-author-${authorId}-${authorStories[0].id}`}
+              stories={authorStories}
+              onPress={() => openStoryViewer(authorStories)}
+            />
+          ))}
 
           {/* Approved club meetup pins — one per event, above story bubbles. */}
           {clubMeetups.map((meetup) => (
             <MeetupMarker
               key={`meetup-${meetup.id}`}
               meetup={meetup}
-              onPress={() => {
-                console.log('[Meetup] marker tapped:', meetup.id);
-                openMeetupSheet(meetup);
-              }}
+              onPress={() => openMeetupSheet(meetup)}
             />
           ))}
         </MapView>
@@ -2688,29 +2809,39 @@ export default function MapScreen() {
         </View>
       ) : null}
 
-      {/* User detail sheet — where zone audio lives now. */}
-      {selectedUser && (
-        <UserSheet
-          user={selectedUser}
-          sheetY={sheetY}
-          onDismiss={closeSheet}
-          onFriendChange={handleHiSent}
-          viewerCoords={displayCoords ?? null}
-          zoneRegion={
-            selectedUser.zone_region_id
-              ? regionOutlines.get(selectedUser.zone_region_id) ?? null
-              : null
-          }
-        />
+      {/* User detail sheet — kept mounted after first tap to avoid remount cost. */}
+      {sheetUser && (
+        <View
+          style={[StyleSheet.absoluteFill, { opacity: selectedUser ? 1 : 0 }]}
+          pointerEvents={selectedUser ? 'box-none' : 'none'}
+        >
+          <UserSheet
+            user={sheetUser}
+            sheetY={sheetY}
+            onDismiss={closeSheet}
+            onFriendChange={handleHiSent}
+            viewerCoords={displayCoords ?? null}
+            zoneRegion={
+              sheetUser.zone_region_id
+                ? regionOutlines.get(sheetUser.zone_region_id) ?? null
+                : null
+            }
+          />
+        </View>
       )}
 
-      {/* Club meetup detail sheet */}
-      {selectedMeetup && (
-        <MeetupSheet
-          meetup={selectedMeetup}
-          sheetY={sheetY}
-          onDismiss={closeMeetupSheet}
-        />
+      {/* Club meetup detail sheet — same pre-mount strategy. */}
+      {sheetMeetup && (
+        <View
+          style={[StyleSheet.absoluteFill, { opacity: selectedMeetup ? 1 : 0 }]}
+          pointerEvents={selectedMeetup ? 'box-none' : 'none'}
+        >
+          <MeetupSheet
+            meetup={sheetMeetup}
+            sheetY={sheetY}
+            onDismiss={closeMeetupSheet}
+          />
+        </View>
       )}
 
       {/* Full-screen story viewer */}
@@ -2724,7 +2855,7 @@ export default function MapScreen() {
         return (
           <StoryViewer
             stories={storyViewer.stories}
-            onClose={() => setStoryViewer(null)}
+            onClose={() => setOpenStories(null)}
             onReact={reactToStory}
             replyTo={replyTo}
             currentUserId={currentUserId}
@@ -2902,6 +3033,14 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /** What a marker draws while it is parked — see `PARKED_MARKERS`.
+   *
+   *  Not merely transparent: `opacity` hides the pixels but the rasterized
+   *  bitmap keeps its size, and a 52 px bitmap still swallows every tap that
+   *  lands on it, including the long-press that drops a story. One pixel has
+   *  nothing left to swallow. */
+  parkedMarker: { width: 1, height: 1 },
+
   // ── Cluster badge: a pile too tight to fan, shown as a headcount ──
   clusterWrap: {
     width: 52,

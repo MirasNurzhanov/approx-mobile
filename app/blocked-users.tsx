@@ -44,10 +44,10 @@ export default function BlockedUsersScreen() {
     setRefreshing(true);
     try {
       await refreshBlocked();
-    } catch {
-    } finally {
-      setRefreshing(false);
-    }
+    } catch {}
+    // The `catch` swallows everything, so this always runs. Deliberately not a
+    // `finally` — React Compiler bails on any component containing one.
+    setRefreshing(false);
   }, []);
 
   function handleUnblock(user: BlockedUserSummary) {
@@ -91,6 +91,8 @@ export default function BlockedUsersScreen() {
         <FlatList
           data={list}
           keyExtractor={(item) => String(item.id)}
+          windowSize={5}
+          initialNumToRender={8}
           contentContainerStyle={[styles.list, { paddingBottom: bottom + 32 }]}
           renderItem={({ item }) => (
             <Card style={styles.card}>

@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { Pressable, Text, ActivityIndicator, StyleSheet, type PressableProps } from 'react-native'
 import { radius, fonts } from '@/constants/theme'
 import type { ColorPalette } from '@/constants/theme'
@@ -77,8 +76,8 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const { colors } = useTheme()
-  const styles = useMemo(() => makeStyles(colors), [colors])
-  const labelColors = useMemo(() => makeLabelColors(colors), [colors])
+  const styles = makeStyles(colors)
+  const labelColors = makeLabelColors(colors)
   const isDisabled = disabled || loading
 
   return (

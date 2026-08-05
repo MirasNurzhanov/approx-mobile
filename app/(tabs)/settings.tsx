@@ -13,19 +13,14 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { useAuth } from '@/context/AuthContext';
-import {
-  startBackgroundLocationUpdates,
-  stopBackgroundLocationUpdates,
-  syncBackgroundLocationSharing,
-} from '@/services/backgroundLocation';
+import { syncBackgroundLocationSharing } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
-import { getPref, setPref } from '@/services/preferences';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import {
   refreshPrivacy,
@@ -50,7 +45,6 @@ import {
   IconMail,
   IconMoon,
   IconMusic,
-  IconPin,
   IconShield,
   IconSun,
   IconTrash,
@@ -110,7 +104,7 @@ function SettingsRow({
   last?: boolean;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const inner = (
     <View style={[styles.settingsRow, !last && styles.settingsRowBorder]}>
       {Icon && <Icon size={20} color={colors.t2} />}
@@ -154,6 +148,246 @@ function PrefSwitch({
   );
 }
 
+// ─── Sections ─────────────────────────────────────────────────────────────────
+// One component per card on the screen. The screen below owns the state and the
+// calls that change it; these only lay it out, which is what keeps the screen
+// readable as a list of sections rather than 350 lines of nested JSX.
+
+function LocationSharingSection({ settings, failed, onRetry, onSelect }: {
+  settings: ReturnType<typeof usePrivacySettings>['settings'];
+  failed: boolean;
+  onRetry: () => void;
+  onSelect: (mode: LocationSharing) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>LOCATION SHARING</Text>
+      {!settings ? (
+        <View style={styles.loadingWrap}>
+          {failed ? (
+            <Pressable onPress={onRetry} style={({ pressed }) => pressed && styles.pressed}>
+              <Text style={styles.modeNote}>
+                Couldn’t load your location setting. Tap to retry.
+              </Text>
+            </Pressable>
+          ) : (
+            <ActivityIndicator color={colors.teal} />
+          )}
+        </View>
+      ) : (
+        <>
+          <View style={styles.modeRow}>
+            {LOCATION_MODES.map((mode) => {
+              const selected = settings.location_sharing === mode.key;
+              return (
+                <Pressable
+                  key={mode.key}
+                  onPress={() => onSelect(mode.key)}
+                  style={({ pressed }) => [
+                    styles.modeCard,
+                    selected && styles.modeCardSelected,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <mode.Icon size={22} color={selected ? colors.teal : colors.t3} />
+                  <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
+                    {mode.label}
+                  </Text>
+                  <Text style={styles.modeSub}>{mode.sub}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {settings.is_private && (
+            <Text style={styles.modeNote}>
+              Your account is private — this only controls where you appear on the map.
+            </Text>
+          )}
+        </>
+      )}
+    </View>
+  );
+}
+
+function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
+  zoneActive: boolean | null;
+  zoneShape: string | null;
+  zoneSaving: boolean;
+  onToggleZone: (v: boolean) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>ZONE & LOCATION</Text>
+      <Card style={styles.rowsCard}>
+        {/* The zone is the circle that puts you on the map, not the music
+            that plays in it — this switch adds and removes the zone
+            itself. It was labelled "Sound zone", which made turning it off
+            look like a way to mute a track.
+
+            It used to *be* a way to mute a track: everything about the
+            music zone was gated on this flag, so removing the circle also
+            stopped friends hearing a song and stopped the earshot alerts.
+            The two are separate now. Music is switched off by clearing the
+            track in Zone Music. */}
+        <SettingsRow
+          icon={IconLocate}
+          label="Zone on the map"
+          right={
+            zoneActive === null ? (
+              <ActivityIndicator color={colors.t3} size="small" />
+            ) : (
+              <PrefSwitch value={zoneActive} onValueChange={onToggleZone} disabled={zoneSaving} />
+            )
+          }
+        />
+        {/* Switches first, then the rows that leave this screen — see the
+            note above SettingsRow. "Auto-play zone audio" used to sit in
+            this card too; nothing plays by itself any more, so the switch
+            had nothing left to turn off. */}
+        <SettingsRow
+          icon={IconLocate}
+          label="Zone size"
+          onPress={() => router.push('/zone-area')}
+          right={
+            <View style={styles.rowTrailing}>
+              {zoneShape ? <Text style={styles.rowTrailingText}>{zoneShape}</Text> : null}
+              <IconChevron size={16} color={colors.t3} />
+            </View>
+          }
+        />
+        <SettingsRow
+          icon={IconMusic}
+          label="Zone music"
+          last
+          onPress={() => router.push('/zone')}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+      </Card>
+    </View>
+  );
+}
+
+function PreferencesSection({ notifAllowed, onToggleNotifications, darkMode, onToggleTheme }: {
+  notifAllowed: boolean | null;
+  onToggleNotifications: (v: boolean) => void;
+  darkMode: boolean;
+  onToggleTheme: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>PREFERENCES</Text>
+      <Card style={styles.rowsCard}>
+        <SettingsRow
+          icon={IconBell}
+          label="Notifications"
+          right={
+            notifAllowed === null ? (
+              <ActivityIndicator color={colors.t3} size="small" />
+            ) : (
+              <PrefSwitch value={notifAllowed} onValueChange={onToggleNotifications} />
+            )
+          }
+        />
+        <SettingsRow
+          icon={IconMoon}
+          label="Dark mode"
+          right={<PrefSwitch value={darkMode} onValueChange={onToggleTheme} />}
+        />
+        <SettingsRow
+          icon={IconShield}
+          label="Privacy & safety"
+          onPress={() => router.push('/privacy')}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+        <SettingsRow
+          icon={IconLock}
+          label="Permissions"
+          onPress={() => router.push('/permissions')}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+        <SettingsRow
+          icon={IconBlocked}
+          label="Blocked users"
+          last
+          onPress={() => router.push('/blocked-users')}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+      </Card>
+    </View>
+  );
+}
+
+function SupportSection({ version, onSendFeedback }: {
+  version: string;
+  onSendFeedback: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>SUPPORT</Text>
+      <Card style={styles.rowsCard}>
+        <SettingsRow
+          icon={IconMail}
+          label="Send feedback"
+          onPress={onSendFeedback}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+        <SettingsRow
+          icon={IconInfo}
+          label="Version"
+          last
+          right={<Text style={styles.rowValue}>{version}</Text>}
+        />
+      </Card>
+    </View>
+  );
+}
+
+function AccountActions({ isSigningOut, onSignOut, onDeleteAccount }: {
+  isSigningOut: boolean;
+  onSignOut: () => void;
+  onDeleteAccount: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <>
+      <View style={styles.signOutWrap}>
+        <Button
+          label="Sign out"
+          icon={IconLogout}
+          variant="dangerTint"
+          size="lg"
+          fullWidth
+          loading={isSigningOut}
+          onPress={onSignOut}
+        />
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [
+          styles.deleteRow,
+          (pressed || isSigningOut) && styles.pressed,
+        ]}
+        // Teardown has already cleared the tokens by the time it navigates,
+        // so a delete fired mid-sign-out just 401s into the auth redirect.
+        disabled={isSigningOut}
+        onPress={onDeleteAccount}
+      >
+        <IconTrash size={16} color={colors.red} />
+        <Text style={styles.deleteText}>Delete account</Text>
+      </Pressable>
+    </>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 /** The one-line summary on the Zone size row, so the current shape is legible
  *  without opening the screen. */
@@ -180,7 +414,6 @@ export default function SettingsScreen() {
   const [zoneActive, setZoneActive] = useState<boolean | null>(null);
   const [zoneShape, setZoneShape] = useState<string | null>(null);
   const [zoneSaving, setZoneSaving] = useState(false);
-  const [bgLocation, setBgLocation] = useState(true);
   const [notifAllowed, setNotifAllowed] = useState<boolean | null>(null);
 
   const refreshNotifPermission = useCallback(async () => {
@@ -204,7 +437,6 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     refreshPrivacy().catch(() => setPrivacyFailed(true));
-    getPref('backgroundLocation').then(setBgLocation);
   }, []);
 
   // Re-read on every focus, not once per mount. This is a tab, so it stays
@@ -225,15 +457,12 @@ export default function SettingsScreen() {
   async function selectLocationSharing(mode: LocationSharing) {
     if (mode === settings?.location_sharing || saving) return;
     setSaving(true);
-    try {
+    await runBusy(async () => {
       await updatePrivacy({ location_sharing: mode });
       // Pausing must stop OS tracking now, not at the next app launch.
       await syncBackgroundLocationSharing();
-    } catch {
-      Alert.alert('Could not update', 'Your previous setting is still in effect.');
-    } finally {
-      setSaving(false);
-    }
+    }, () => setSaving(false))
+      .catch(() => Alert.alert('Could not update', 'Your previous setting is still in effect.'));
   }
 
   async function toggleZone(value: boolean) {
@@ -241,46 +470,13 @@ export default function SettingsScreen() {
     const prev = zoneActive;
     setZoneActive(value);
     setZoneSaving(true);
-    try {
-      await api.patch('/api/users/zone/', { zone_active: value });
-    } catch {
+    await runBusy(
+      () => api.patch('/api/users/zone/', { zone_active: value }),
+      () => setZoneSaving(false),
+    ).catch(() => {
       setZoneActive(prev);
       Alert.alert('Could not update zone', 'Please try again.');
-    } finally {
-      setZoneSaving(false);
-    }
-  }
-
-  async function toggleBgLocation(value: boolean) {
-    setBgLocation(value);
-    await setPref('backgroundLocation', value);
-
-    if (!value) {
-      await stopBackgroundLocationUpdates();
-      return;
-    }
-
-    let granted = false;
-    try {
-      const { status } = await Location.requestBackgroundPermissionsAsync();
-      granted = status === 'granted';
-    } catch {
-      granted = false;
-    }
-    if (!granted) {
-      setBgLocation(false);
-      await setPref('backgroundLocation', false);
-      Alert.alert(
-        'Permission needed',
-        'Allow background location access ("Always") in system settings so Aura can update your location while the app is closed.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-        ],
-      );
-      return;
-    }
-    await startBackgroundLocationUpdates();
+    });
   }
 
   async function toggleNotifications(value: boolean) {
@@ -349,203 +545,37 @@ export default function SettingsScreen() {
           {saving && <ActivityIndicator color={colors.teal} size="small" />}
         </View>
 
-        {/* Location sharing */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>LOCATION SHARING</Text>
-          {!settings ? (
-            <View style={styles.loadingWrap}>
-              {privacyFailed ? (
-                <Pressable
-                  onPress={() => {
-                    setPrivacyFailed(false);
-                    refreshPrivacy().catch(() => setPrivacyFailed(true));
-                  }}
-                  style={({ pressed }) => pressed && styles.pressed}
-                >
-                  <Text style={styles.modeNote}>
-                    Couldn’t load your location setting. Tap to retry.
-                  </Text>
-                </Pressable>
-              ) : (
-                <ActivityIndicator color={colors.teal} />
-              )}
-            </View>
-          ) : (
-            <>
-              <View style={styles.modeRow}>
-                {LOCATION_MODES.map((mode) => {
-                  const selected = settings.location_sharing === mode.key;
-                  return (
-                    <Pressable
-                      key={mode.key}
-                      onPress={() => selectLocationSharing(mode.key)}
-                      style={({ pressed }) => [
-                        styles.modeCard,
-                        selected && styles.modeCardSelected,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <mode.Icon size={22} color={selected ? colors.teal : colors.t3} />
-                      <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
-                        {mode.label}
-                      </Text>
-                      <Text style={styles.modeSub}>{mode.sub}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {settings.is_private && (
-                <Text style={styles.modeNote}>
-                  Your account is private — this only controls where you appear on the map.
-                </Text>
-              )}
-            </>
-          )}
-        </View>
+        <LocationSharingSection
+          settings={settings}
+          failed={privacyFailed}
+          onRetry={() => {
+            setPrivacyFailed(false);
+            refreshPrivacy().catch(() => setPrivacyFailed(true));
+          }}
+          onSelect={selectLocationSharing}
+        />
 
-        {/* Zone & location */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>ZONE & LOCATION</Text>
-          <Card style={styles.rowsCard}>
-            {/* The zone is the circle that puts you on the map, not the music
-                that plays in it — this switch adds and removes the zone
-                itself. It was labelled "Sound zone", which made turning it off
-                look like a way to mute a track.
+        <ZoneSection
+          zoneActive={zoneActive}
+          zoneShape={zoneShape}
+          zoneSaving={zoneSaving}
+          onToggleZone={toggleZone}
+        />
 
-                It used to *be* a way to mute a track: everything about the
-                music zone was gated on this flag, so removing the circle also
-                stopped friends hearing a song and stopped the earshot alerts.
-                The two are separate now. Music is switched off by clearing the
-                track in Zone Music. */}
-            <SettingsRow
-              icon={IconLocate}
-              label="Zone on the map"
-              right={
-                zoneActive === null ? (
-                  <ActivityIndicator color={colors.t3} size="small" />
-                ) : (
-                  <PrefSwitch value={zoneActive} onValueChange={toggleZone} disabled={zoneSaving} />
-                )
-              }
-            />
-            <SettingsRow
-              icon={IconPin}
-              label="Background location"
-              right={<PrefSwitch value={bgLocation} onValueChange={toggleBgLocation} />}
-            />
-            {/* Switches first, then the rows that leave this screen — see the
-                note above SettingsRow. "Auto-play zone audio" used to sit in
-                this card too; nothing plays by itself any more, so the switch
-                had nothing left to turn off. */}
-            <SettingsRow
-              icon={IconLocate}
-              label="Zone size"
-              onPress={() => router.push('/zone-area')}
-              right={
-                <View style={styles.rowTrailing}>
-                  {zoneShape ? <Text style={styles.rowTrailingText}>{zoneShape}</Text> : null}
-                  <IconChevron size={16} color={colors.t3} />
-                </View>
-              }
-            />
-            <SettingsRow
-              icon={IconMusic}
-              label="Zone music"
-              last
-              onPress={() => router.push('/zone')}
-              right={<IconChevron size={16} color={colors.t3} />}
-            />
-          </Card>
-        </View>
+        <PreferencesSection
+          notifAllowed={notifAllowed}
+          onToggleNotifications={toggleNotifications}
+          darkMode={themeMode === 'dark'}
+          onToggleTheme={toggleTheme}
+        />
 
-        {/* Preferences */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>PREFERENCES</Text>
-          <Card style={styles.rowsCard}>
-            <SettingsRow
-              icon={IconBell}
-              label="Notifications"
-              right={
-                notifAllowed === null ? (
-                  <ActivityIndicator color={colors.t3} size="small" />
-                ) : (
-                  <PrefSwitch value={notifAllowed} onValueChange={toggleNotifications} />
-                )
-              }
-            />
-            <SettingsRow
-              icon={IconMoon}
-              label="Dark mode"
-              right={<PrefSwitch value={themeMode === 'dark'} onValueChange={toggleTheme} />}
-            />
-            <SettingsRow
-              icon={IconShield}
-              label="Privacy & safety"
-              onPress={() => router.push('/privacy')}
-              right={<IconChevron size={16} color={colors.t3} />}
-            />
-            <SettingsRow
-              icon={IconLock}
-              label="Permissions"
-              onPress={() => router.push('/permissions')}
-              right={<IconChevron size={16} color={colors.t3} />}
-            />
-            <SettingsRow
-              icon={IconBlocked}
-              label="Blocked users"
-              last
-              onPress={() => router.push('/blocked-users')}
-              right={<IconChevron size={16} color={colors.t3} />}
-            />
-          </Card>
-        </View>
+        <SupportSection version={version} onSendFeedback={sendFeedback} />
 
-        {/* Support */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>SUPPORT</Text>
-          <Card style={styles.rowsCard}>
-            <SettingsRow
-              icon={IconMail}
-              label="Send feedback"
-              onPress={sendFeedback}
-              right={<IconChevron size={16} color={colors.t3} />}
-            />
-            <SettingsRow
-              icon={IconInfo}
-              label="Version"
-              last
-              right={<Text style={styles.rowValue}>{version}</Text>}
-            />
-          </Card>
-        </View>
-
-        {/* Sign out */}
-        <View style={styles.signOutWrap}>
-          <Button
-            label="Sign out"
-            icon={IconLogout}
-            variant="dangerTint"
-            size="lg"
-            fullWidth
-            loading={isSigningOut}
-            onPress={confirmLogout}
-          />
-        </View>
-
-        {/* Delete account */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.deleteRow,
-            (pressed || isSigningOut) && styles.pressed,
-          ]}
-          // Teardown has already cleared the tokens by the time it navigates,
-          // so a delete fired mid-sign-out just 401s into the auth redirect.
-          disabled={isSigningOut}
-          onPress={confirmDeleteAccount}
-        >
-          <IconTrash size={16} color={colors.red} />
-          <Text style={styles.deleteText}>Delete account</Text>
-        </Pressable>
+        <AccountActions
+          isSigningOut={isSigningOut}
+          onSignOut={confirmLogout}
+          onDeleteAccount={confirmDeleteAccount}
+        />
       </ScrollView>
 
       {primer}

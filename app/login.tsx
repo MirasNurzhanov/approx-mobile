@@ -14,6 +14,7 @@ import {
 import { router } from 'expo-router';
 
 import { useAuth } from '@/context/AuthContext';
+import { runBusy } from '@/services/busy';
 import { lightColors as L } from '@/constants/theme';
 import { fonts } from '@/constants/theme';
 
@@ -31,13 +32,10 @@ export default function LoginScreen() {
   async function handleLogin() {
     if (!email || !password) return;
     setSubmitting(true);
-    try {
-      await login(email, password);
-    } catch {
-      Alert.alert('Login failed', 'Invalid email or password');
-    } finally {
-      setSubmitting(false);
-    }
+    await runBusy(
+      () => login(email, password),
+      () => setSubmitting(false),
+    ).catch(() => Alert.alert('Login failed', 'Invalid email or password'));
   }
 
   return (

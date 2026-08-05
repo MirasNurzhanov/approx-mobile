@@ -6,7 +6,6 @@ import {
   Alert,
   Dimensions,
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -17,10 +16,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -49,6 +50,187 @@ const SCREEN_W  = Dimensions.get('window').width;
 const CARD_PAD  = 16;
 const CARD_GAP  = 12;
 const CARD_W    = (SCREEN_W - CARD_PAD * 2 - CARD_GAP) / 2;
+
+// ─── Pieces ───────────────────────────────────────────────────────────────────
+
+function AvatarPicker({ pictureUrl, initial, bgColor, uploading, onPick }: {
+  pictureUrl?: string;
+  initial: string;
+  bgColor: string;
+  uploading: boolean;
+  onPick: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <>
+      <TouchableOpacity style={styles.avatarWrap} onPress={onPick} activeOpacity={0.85} disabled={uploading}>
+        <View style={[styles.avatarRing, { borderColor: bgColor + '55' }]}>
+          <View style={[styles.avatar, { backgroundColor: bgColor }]}>
+            {pictureUrl
+              ? <Image source={{ uri: pictureUrl }} style={styles.avatarImage} />
+              : <Text style={styles.avatarInitial}>{initial}</Text>
+            }
+            {uploading && (
+              <View style={styles.avatarUploadOverlay}>
+                <ActivityIndicator color="#fff" size="small" />
+              </View>
+            )}
+          </View>
+        </View>
+        <View style={styles.cameraBadge}>
+          <Ionicons name="camera" size={12} color="#fff" />
+        </View>
+      </TouchableOpacity>
+      <Text style={styles.avatarHint}>Tap to change photo</Text>
+    </>
+  );
+}
+
+function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone }: {
+  visible: boolean;
+  draft: string | null;
+  onDraftChange: (key: string | null) => void;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onCancel}
+    >
+      <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
+        <View style={styles.modalHandle} />
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+            <Text style={styles.modalCancel}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>Profession</Text>
+          <TouchableOpacity onPress={onDone} hitSlop={10}>
+            <Text style={styles.modalDone}>Done</Text>
+          </TouchableOpacity>
+        </View>
+
+        <FlatList
+          data={PROFESSIONS}
+          keyExtractor={(item) => item.key}
+          numColumns={2}
+          windowSize={5}
+          initialNumToRender={8}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.profGrid}
+          columnWrapperStyle={{ gap: CARD_GAP }}
+          ItemSeparatorComponent={() => <View style={{ height: CARD_GAP }} />}
+          renderItem={({ item }) => {
+            const sel = draft === item.key;
+            return (
+              <TouchableOpacity
+                onPress={() => onDraftChange(sel ? null : item.key)}
+                style={[styles.profCard, { width: CARD_W }, sel && styles.profCardSel]}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityState={{ selected: sel }}
+                accessibilityLabel={item.label}
+              >
+                <Text style={styles.profEmoji}>{item.emoji}</Text>
+                <Text style={[styles.profCardLabel, sel && styles.profCardLabelSel]} numberOfLines={2}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+    </Modal>
+  );
+}
+
+function NationalityPickerModal({ visible, draft, query, countries, onDraftChange, onQueryChange, onCancel, onDone }: {
+  visible: boolean;
+  draft: string | null;
+  query: string;
+  countries: typeof COUNTRIES;
+  onDraftChange: (code: string | null) => void;
+  onQueryChange: (q: string) => void;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onCancel}
+    >
+      <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
+        <View style={styles.modalHandle} />
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+            <Text style={styles.modalCancel}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>Nationality</Text>
+          <TouchableOpacity onPress={onDone} hitSlop={10}>
+            <Text style={styles.modalDone}>Done</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color={colors.t3} />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={onQueryChange}
+            placeholder="Search countries..."
+            placeholderTextColor={colors.t3}
+            selectionColor={colors.teal}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => onQueryChange('')} hitSlop={10}>
+              <Ionicons name="close-circle" size={18} color={colors.t3} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <FlatList
+          data={countries}
+          keyExtractor={(item) => item.code}
+          windowSize={5}
+          initialNumToRender={8}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 32 }}
+          renderItem={({ item }) => {
+            const sel = draft === item.code;
+            return (
+              <TouchableOpacity
+                onPress={() => onDraftChange(sel ? null : item.code)}
+                style={[styles.natRow, sel && styles.natRowSel]}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityState={{ selected: sel }}
+                accessibilityLabel={item.name}
+              >
+                <Text style={styles.natFlag}>{flagEmoji(item.code)}</Text>
+                <Text style={[styles.natName, sel && styles.natNameSel]}>{item.name}</Text>
+                {sel && <Ionicons name="checkmark" size={18} color={colors.teal} />}
+              </TouchableOpacity>
+            );
+          }}
+          ItemSeparatorComponent={() => <View style={styles.natSep} />}
+        />
+      </View>
+    </Modal>
+  );
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function EditProfileScreen() {
@@ -108,7 +290,7 @@ export default function EditProfileScreen() {
 
   async function uploadProfilePicture(uri: string) {
     setUploading(true);
-    try {
+    await runBusy(async () => {
       const filename = uri.split('/').pop() ?? 'photo.jpg';
       const ext = /\.(\w+)$/.exec(filename)?.[1]?.toLowerCase() ?? 'jpeg';
       const type = ext === 'png' ? 'image/png' : 'image/jpeg';
@@ -118,17 +300,15 @@ export default function EditProfileScreen() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setProfile(data);
-    } catch (e: any) {
-      Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.');
-    } finally {
-      setUploading(false);
-    }
+    }, () => setUploading(false)).catch((e: any) =>
+      Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.'),
+    );
   }
 
   async function save() {
     if (!username.trim() || saving) return;
     setSaving(true);
-    try {
+    await runBusy(async () => {
       const payload: Record<string, any> = {
         username: username.trim(),
         bio: bio.trim(),
@@ -150,12 +330,10 @@ export default function EditProfileScreen() {
       origProfession.current  = savedProf;
       origNationality.current = savedNat;
       router.back();
-    } catch (e: any) {
+    }, () => setSaving(false)).catch((e: any) => {
       const msg = e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.';
       Alert.alert('Error', msg);
-    } finally {
-      setSaving(false);
-    }
+    });
   }
 
   // ── Derived display values ─────────────────────────────────────────────────
@@ -197,26 +375,13 @@ export default function EditProfileScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {/* ── Avatar ── */}
-            <TouchableOpacity style={styles.avatarWrap} onPress={pickImage} activeOpacity={0.85} disabled={uploading}>
-              <View style={[styles.avatarRing, { borderColor: bgColor + '55' }]}>
-                <View style={[styles.avatar, { backgroundColor: bgColor }]}>
-                  {profile?.profile_picture
-                    ? <Image source={{ uri: profile.profile_picture }} style={styles.avatarImage} />
-                    : <Text style={styles.avatarInitial}>{initial}</Text>
-                  }
-                  {uploading && (
-                    <View style={styles.avatarUploadOverlay}>
-                      <ActivityIndicator color="#fff" size="small" />
-                    </View>
-                  )}
-                </View>
-              </View>
-              <View style={styles.cameraBadge}>
-                <Ionicons name="camera" size={12} color="#fff" />
-              </View>
-            </TouchableOpacity>
-            <Text style={styles.avatarHint}>Tap to change photo</Text>
+            <AvatarPicker
+              pictureUrl={profile?.profile_picture}
+              initial={initial}
+              bgColor={bgColor}
+              uploading={uploading}
+              onPick={pickImage}
+            />
 
             {/* ── Username ── */}
             <Text style={styles.fieldLabel}>Username</Text>
@@ -296,127 +461,24 @@ export default function EditProfileScreen() {
         </KeyboardAvoidingView>
       )}
 
-      {/* ── Profession Picker Modal ── */}
-      <Modal
+      <ProfessionPickerModal
         visible={showProfPicker}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowProfPicker(false)}
-      >
-        <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
-          <View style={styles.modalHandle} />
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowProfPicker(false)} hitSlop={10}>
-              <Text style={styles.modalCancel}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Profession</Text>
-            <TouchableOpacity
-              onPress={() => { setProfession(draftProf); setShowProfPicker(false); }}
-              hitSlop={10}
-            >
-              <Text style={styles.modalDone}>Done</Text>
-            </TouchableOpacity>
-          </View>
+        draft={draftProf}
+        onDraftChange={setDraftProf}
+        onCancel={() => setShowProfPicker(false)}
+        onDone={() => { setProfession(draftProf); setShowProfPicker(false); }}
+      />
 
-          <FlatList
-            data={PROFESSIONS}
-            keyExtractor={(item) => item.key}
-            numColumns={2}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.profGrid}
-            columnWrapperStyle={{ gap: CARD_GAP }}
-            ItemSeparatorComponent={() => <View style={{ height: CARD_GAP }} />}
-            renderItem={({ item }) => {
-              const sel = draftProf === item.key;
-              return (
-                <TouchableOpacity
-                  onPress={() => setDraftProf(sel ? null : item.key)}
-                  style={[styles.profCard, { width: CARD_W }, sel && styles.profCardSel]}
-                  activeOpacity={0.75}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: sel }}
-                  accessibilityLabel={item.label}
-                >
-                  <Text style={styles.profEmoji}>{item.emoji}</Text>
-                  <Text style={[styles.profCardLabel, sel && styles.profCardLabelSel]} numberOfLines={2}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            }}
-          />
-        </View>
-      </Modal>
-
-      {/* ── Nationality Picker Modal ── */}
-      <Modal
+      <NationalityPickerModal
         visible={showNatPicker}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowNatPicker(false)}
-      >
-        <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
-          <View style={styles.modalHandle} />
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => { setShowNatPicker(false); setNatQuery(''); }} hitSlop={10}>
-              <Text style={styles.modalCancel}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Nationality</Text>
-            <TouchableOpacity
-              onPress={() => { setNationality(draftNat); setShowNatPicker(false); setNatQuery(''); }}
-              hitSlop={10}
-            >
-              <Text style={styles.modalDone}>Done</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color={colors.t3} />
-            <TextInput
-              style={styles.searchInput}
-              value={natQuery}
-              onChangeText={setNatQuery}
-              placeholder="Search countries..."
-              placeholderTextColor={colors.t3}
-              selectionColor={colors.teal}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-            />
-            {natQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setNatQuery('')} hitSlop={10}>
-                <Ionicons name="close-circle" size={18} color={colors.t3} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <FlatList
-            data={filteredCountries}
-            keyExtractor={(item) => item.code}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: 32 }}
-            renderItem={({ item }) => {
-              const sel = draftNat === item.code;
-              return (
-                <TouchableOpacity
-                  onPress={() => setDraftNat(sel ? null : item.code)}
-                  style={[styles.natRow, sel && styles.natRowSel]}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: sel }}
-                  accessibilityLabel={item.name}
-                >
-                  <Text style={styles.natFlag}>{flagEmoji(item.code)}</Text>
-                  <Text style={[styles.natName, sel && styles.natNameSel]}>{item.name}</Text>
-                  {sel && <Ionicons name="checkmark" size={18} color={colors.teal} />}
-                </TouchableOpacity>
-              );
-            }}
-            ItemSeparatorComponent={() => <View style={styles.natSep} />}
-          />
-        </View>
-      </Modal>
+        draft={draftNat}
+        query={natQuery}
+        countries={filteredCountries}
+        onDraftChange={setDraftNat}
+        onQueryChange={setNatQuery}
+        onCancel={() => { setShowNatPicker(false); setNatQuery(''); }}
+        onDone={() => { setNationality(draftNat); setShowNatPicker(false); setNatQuery(''); }}
+      />
 
     </View>
   );

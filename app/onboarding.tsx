@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fonts, radius } from '@/constants/theme';
+import { markOnboardingSeen } from '@/services/onboarding';
 
 const { width } = Dimensions.get('window');
 
@@ -63,6 +64,9 @@ export default function OnboardingScreen() {
     if (index < SLIDES.length - 1) {
       flatRef.current?.scrollToIndex({ index: index + 1, animated: true });
     } else {
+      // Recorded here rather than awaited: the write is what stops the intro
+      // reappearing after a sign-out, and nobody should watch a spinner for it.
+      markOnboardingSeen();
       router.replace('/welcome');
     }
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -91,7 +91,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export default function MarketScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
   const [auraPoints, setAuraPoints] = useState<number | null>(null);

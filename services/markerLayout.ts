@@ -57,19 +57,50 @@ export const SELF_CLEAR_PX = (34 + MARKER_PX) / 2;
 export const SELF_KEY = 'self';
 
 /**
- * The hard ceiling on how far the fan may move a marker.
+ * The hard floor under the fan's radius, in pixels.
  *
- * The fan is sized in pixels, which is what keeps it legible at every zoom —
- * but a pixel is worth more metres the further you zoom out, so left uncapped
- * the same 39 px nudge becomes a kilometre. Two things break at that point: the
- * marker stops describing where its owner is, and anyone standing inside a
- * sound zone gets pushed outside the circle they are audibly within.
+ * Whatever else constrains the ring, it may never draw tighter than this on
+ * screen. This is the invariant that stops a marker being drawn on top of the
+ * pile's centre, and it is stated in *pixels* because every version of that
+ * bug came from stating it in metres.
  *
- * So the fan is capped, and when the cap leaves too little room to separate a
- * pile, the pile is drawn as a count instead. Zooming out therefore trades
- * individuals for a number rather than for a fiction.
+ * Both caps this file has carried were real-world distances: a flat 80 m
+ * ceiling, and the sound-zone boundary in `fanCapMeters`. A distance in metres
+ * shrinks in pixel terms exactly as you zoom out, so past some zoom each of
+ * them was smaller than the ring it was capping — the whole pile collapsed
+ * onto its centre, and when that centre was the owner, every friend nearby
+ * rendered on top of the person looking at the map. Not "nudged further than
+ * ideal": teleported onto them.
+ *
+ * A pixel floor cannot fail that way, because the thing being protected — two
+ * markers not overlapping — is itself measured in pixels.
  */
-export const FAN_MAX_M = 80;
+export const MIN_FAN_PX = SELF_CLEAR_PX;
+
+/**
+ * The fan's displacement budget: how far it may move a marker from where its
+ * owner actually stands before it gives up and counts them instead.
+ *
+ * This is really the zoom threshold, wearing a distance's clothes.
+ *
+ * The ring's radius is a fixed number of *pixels*, so the metres it costs grow
+ * as you zoom out. Worse, the collision box is pixels too — zoomed far enough
+ * out it spans a city, so friends who are genuinely kilometres apart merge
+ * into a single pile, and the fan lays them out in a tidy ring around that
+ * pile's centre. When the owner is in the pile, that centre is the owner: half
+ * the city's friends redrawn as a huddle around your own marker.
+ *
+ * That is the teleporting bug, and no pixel floor can fix it — the ring is
+ * correct on screen and false about the world at the same time. The only
+ * honest move past this point is to stop moving people: nobody is drawn
+ * somewhere they are not, and a count appears where they actually are.
+ *
+ * Set generously on purpose. Displacement is only ever the ring's ~39 px, so
+ * this binds solely at the far end; individual faces survive until the
+ * viewport spans roughly ten kilometres, well past the "zoomed out a bit"
+ * range where counting instead of drawing people read as them vanishing.
+ */
+export const FAN_MAX_M = 500;
 
 export function metersPerDegLng(latitude: number): number {
   // Guard the poles: cos(90°) is 0 and would send the offset to infinity.
@@ -127,8 +158,21 @@ export interface ClusterResult {
 
 export interface MarkerLayout {
   /** Markers drawn individually, by key. A key that is absent was folded into
-   *  a cluster — its owner must not also be drawn. */
+   *  a cluster — its owner must not also be drawn. The owner's own key is
+   *  never absent. */
   placed: Map<string, FanResult>;
+  /**
+   * Headcount badges for piles too spread out to fan without lying.
+   *
+   * Only ever produced past `FAN_MAX_M` — that is, when zoomed far enough out
+   * that separating the pile would mean drawing people hundreds of metres or
+   * kilometres from where they stand. Members of a counted pile are absent
+   * from `placed`, deliberately: the alternative is not "showing them", it is
+   * showing them somewhere they are not.
+   *
+   * The owner is never counted and never absent. They are the one position on
+   * this map that can be checked against the world outside the phone.
+   */
   clusters: ClusterResult[];
 }
 
@@ -139,9 +183,20 @@ export interface MarkerLayout {
  * spare. Being inside someone's sound zone is an audible fact, so a marker that
  * the fan pushed across the circle's edge would contradict what the user can
  * hear. Zones the point is already outside impose nothing.
+ *
+ * `Infinity` when nothing constrains it — never a flat metres ceiling, which
+ * is what used to stand in for "don't fan too far" and had no geographic
+ * meaning at all.
+ *
+ * What comes back here is still a real-world distance, so it still shrinks on
+ * screen as you zoom out. That is fine now and was not before: the caller
+ * floors it at `MIN_FAN_PX`, so a zone too small on screen to contain anything
+ * visibly can no longer squeeze the pile onto its own centre. Read this as
+ * "how far geography allows", not "how far is legible" — the second question
+ * belongs to the floor.
  */
 export function fanCapMeters(center: GeoPoint, zones: ZoneArea[]): number {
-  let cap = FAN_MAX_M;
+  let cap = Infinity;
   for (const zone of zones) {
     const d = roughMeters(center, zone);
     if (d >= zone.radius) continue;
@@ -158,25 +213,30 @@ export function ringRadiusPx(count: number): number {
 }
 
 /**
- * Decide where every marker goes: fanned apart, or replaced by a count.
+ * Decide where every marker goes: fanned apart, at a spacing that reads the
+ * same on screen at every zoom.
  *
  * `metersPerPx` converts the pixel thresholds above into map distance at the
- * current zoom, so a fan separates by the same amount on screen however far in
- * you are — and zooming in shrinks how far each marker sits from the truth.
+ * current zoom, so the ring keeps a constant *pixel* radius however far out
+ * you are — the real-world distance it corresponds to grows as you zoom out,
+ * which is expected: a ring that instead held its real-world size would
+ * shrink to nothing on screen long before it held its pixel size wrong.
  *
- * Two rules survive every zoom level:
+ * Three rules survive every zoom level:
  *
- *  - **The owner never moves.** When a pile contains them they keep their real
- *    position and everyone else rings around it. Your own marker is the one
- *    position on this map you can check against the world outside the phone,
- *    and it is the centre of your own zone — nudging it would put your avatar
- *    off-centre inside your own circle. They are never folded into a count
- *    either: "you" is not a statistic.
- *  - **Nobody is moved further than the cap.** If separating a pile would cost
- *    more than that, the pile becomes one badge with a number on it. That is
- *    the zoomed-out case: a count is true, whereas a fan that flings people
- *    across a neighbourhood — or out of a sound zone they are standing in — is
- *    not.
+ *  - **The owner never moves, and is never counted.** When a pile contains
+ *    them they keep their real position and everyone else rings around it.
+ *    Your own marker is the one position on this map you can check against the
+ *    world outside the phone, and it is the centre of your own zone — nudging
+ *    it would put your avatar off-centre inside your own circle.
+ *  - **Nobody is ever drawn on top of the owner.** While the fan runs, the
+ *    ring is floored at `MIN_FAN_PX`; past `FAN_MAX_M` the fan stops running
+ *    at all. Between them there is no zoom, and no zone geometry, at which a
+ *    friend can be drawn at the owner's own coordinates.
+ *  - **A marker is never displaced further than `FAN_MAX_M`.** Beyond that the
+ *    pile is counted where it stands instead of being spread around a centre.
+ *    Zooming out therefore trades faces for a number — never for a fiction
+ *    about where people are.
  */
 export function layoutMarkers(
   points: FanInput[],
@@ -262,22 +322,67 @@ export function layoutMarkers(
       ? Math.max(SELF_CLEAR_PX, ringRadiusPx(others.length))
       : ringRadiusPx(others.length);
     const wantM = wantPx * metersPerPx;
-    const capM = fanCapMeters(center, zones);
 
-    if (wantM > capM) {
+    // Zoomed out far enough that fanning this pile would mean drawing people
+    // hundreds of metres from where they are. Count them instead, at their own
+    // centre — nobody is moved, so nobody is claimed to be somewhere they are
+    // not, and in particular nobody is swept into a ring around the owner.
+    if (wantM > FAN_MAX_M) {
+      // The people being counted, not the pile: with the owner in it the pile's
+      // centre *is* the owner, and a badge pinned there would say "these
+      // friends are on top of you" — the same lie the fan told by putting them
+      // there. Their own centroid is where they actually are.
+      const spot = self
+        ? {
+            latitude: others.reduce((s, p) => s + p.latitude, 0) / others.length,
+            longitude: others.reduce((s, p) => s + p.longitude, 0) / others.length,
+          }
+        : center;
+      // …unless that lands on the owner's marker anyway, which it does when
+      // they really are standing together — or near enough that the gap is a
+      // few pixels at this zoom. Then it is nudged out to clear the owner,
+      // *along the line to the people it counts* so it still points the right
+      // way, with a leader line back to the spot it stands in for.
+      const clearM = MIN_FAN_PX * metersPerPx;
+      const north = (spot.latitude - center.latitude) * M_PER_DEG;
+      const east = (spot.longitude - center.longitude) * metersPerDegLng(center.latitude);
+      const away = Math.hypot(north, east);
+      const coversOwner = self != null && away < clearM;
       clusters.push({
-        key: badgeKey(center),
+        key: badgeKey(spot),
         count: others.length,
-        // A badge stands for a group rather than claiming to be one person's
-        // position, so moving it clear of the owner's marker costs nothing —
-        // and it has to move, because the owner's marker is staying put.
-        position: self ? offsetByMeters(center, SELF_CLEAR_PX * metersPerPx, 0) : center,
-        anchor: self ? center : undefined,
+        position: !coversOwner
+          ? spot
+          : away > 0
+            ? offsetByMeters(center, (north / away) * clearM, (east / away) * clearM)
+            // Exactly co-located: no direction to preserve, so pick one.
+            : offsetByMeters(center, clearM, 0),
+        anchor: coversOwner ? spot : undefined,
       });
       continue;
     }
 
-    const radiusM = wantM;
+    // A zone may pull the ring in, but only so far. `fanCapMeters` is a
+    // real-world distance and so shrinks in pixel terms as you zoom out; below
+    // `MIN_FAN_PX` on screen it has stopped describing anything a viewer can
+    // see and starts stacking the pile onto its own centre.
+    //
+    // The floor is itself held to `wantM`, so it can only ever rescue an
+    // over-tight cap — never push a pile *wider* than its ideal spacing. Small
+    // piles ask for less than `MIN_FAN_PX` (a ring of four wants 31 px), and
+    // moving those further from where people actually are, to satisfy a floor
+    // meant for a different problem, would be its own small lie. The practical
+    // effect is that a zone only ever binds on piles of six or more, where the
+    // ideal ring is wider than the floor; below that the floor wins, which is
+    // the right way round — a circle drawn a few pixels off is a smaller
+    // problem than a friend drawn on top of you.
+    //
+    // Where the owner is in the pile `wantPx` is at least `SELF_CLEAR_PX`, so
+    // the floor lands on the full `MIN_FAN_PX` and the "never on top of the
+    // owner" guarantee holds unconditionally.
+    const floorM = Math.min(wantM, MIN_FAN_PX * metersPerPx);
+    const radiusM = Math.max(Math.min(wantM, fanCapMeters(center, zones)), floorM);
+
     others.forEach((p, i) => {
       // Start at the top and go clockwise.
       const angle = (2 * Math.PI * i) / others.length - Math.PI / 2;

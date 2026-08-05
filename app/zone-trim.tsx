@@ -13,12 +13,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { TrimSlider } from '@/components/TrimSlider';
 import { ZonePlayer } from '@/components/ZonePlayer';
 import { fonts, radius, type } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
-import { fmtTime, loadZonePresets, trackTitle, type ZonePreset } from '@/services/zoneAudio';
+import { fmtTime, trackTitle } from '@/services/zoneAudio';
 
 // Which part of the track goes round and round.
 //
@@ -53,7 +54,6 @@ export default function ZoneTrimScreen() {
   const { top, bottom } = useSafeAreaInsets();
 
   const [zone, setZone] = useState<ZoneState | null>(null);
-  const [presets, setPresets] = useState<ZonePreset[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -68,20 +68,16 @@ export default function ZoneTrimScreen() {
   const [saved, setSaved] = useState<{ start: number; end: number | null }>({ start: 0, end: null });
 
   useEffect(() => {
-    Promise.allSettled([
-      api.get<ZoneState>('/api/users/zone/'),
-      loadZonePresets(),
-    ]).then(([zoneRes, presetList]) => {
-      if (zoneRes.status === 'fulfilled') {
-        const z = zoneRes.value.data;
-        setZone(z);
-        setStart(z.zone_track_start_ms ?? 0);
-        setEnd(z.zone_track_end_ms ?? null);
-        setSaved({ start: z.zone_track_start_ms ?? 0, end: z.zone_track_end_ms ?? null });
-      }
-      if (presetList.status === 'fulfilled') setPresets(presetList.value);
-      setLoading(false);
-    });
+    api.get<ZoneState>('/api/users/zone/').then((r) => {
+      const z = r.data;
+      setZone(z);
+      setStart(z.zone_track_start_ms ?? 0);
+      setEnd(z.zone_track_end_ms ?? null);
+      setSaved({ start: z.zone_track_start_ms ?? 0, end: z.zone_track_end_ms ?? null });
+      // Swallowed rather than surfaced: `zone` stays null, which is the state
+      // the "no track yet" empty card below already renders. Without it a
+      // failed request is an unhandled rejection.
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   // Until the file reports its length there is no scale to draw handles on, so
@@ -96,7 +92,7 @@ export default function ZoneTrimScreen() {
 
   async function save() {
     setSaving(true);
-    try {
+    await runBusy(async () => {
       const r = await api.patch<ZoneState>('/api/users/zone/', {
         zone_track_start_ms: Math.round(start),
         // A window covering the whole track is stored as "no window" — that is
@@ -113,16 +109,14 @@ export default function ZoneTrimScreen() {
         end: r.data.zone_track_end_ms ?? null,
       });
       router.back();
-    } catch (e: any) {
+    }, () => setSaving(false)).catch((e: any) =>
       Alert.alert(
         'Could not save the loop',
         e?.response?.data?.zone_track_end_ms?.[0] ??
         e?.response?.data?.detail ??
         'Please try again.',
-      );
-    } finally {
-      setSaving(false);
-    }
+      ),
+    );
   }
 
   function reset() {
@@ -139,7 +133,7 @@ export default function ZoneTrimScreen() {
   }
 
   const url = zone?.zone_audio_url ?? null;
-  const title = zone?.zone_apple_title || (url ? trackTitle(url, presets) : 'Zone audio');
+  const title = zone?.zone_apple_title || (url ? trackTitle(url) : 'Zone audio');
   const loopLength = Math.max(0, effectiveEnd - start);
 
   return (

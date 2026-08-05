@@ -1,1 +1,25 @@
-{ "recommendations": ["expo.vscode-expo-tools"] }
+{
+  "recommendations": ["expo.vscode-expo-tools", "dbaeumer.vscode-eslint"],
+
+  // The Java tooling has nothing to do in a React Native / Expo workspace. The
+  // Android half is built by Gradle via `npx expo run:android`, never by the
+  // language server, and the only .java / .kt files present belong to
+  // third-party modules under node_modules or to the generated `android/`
+  // folder. Left enabled they index that library source and report classpath
+  // and lint problems against code this project does not own.
+  //
+  // Listing them here stops VS Code recommending them and flags them in the
+  // Extensions view. It does not switch them off on its own — to do that, open
+  // the Extensions view, find each one, and choose "Disable (Workspace)", which
+  // keeps them available for your actual Java projects.
+  "unwantedRecommendations": [
+    "redhat.java",
+    "oracle.oracle-java",
+    "vscjava.vscode-java-pack",
+    "vscjava.vscode-java-debug",
+    "vscjava.vscode-java-dependency",
+    "vscjava.vscode-java-test",
+    "vscjava.vscode-maven",
+    "vscjava.vscode-gradle"
+  ]
+}

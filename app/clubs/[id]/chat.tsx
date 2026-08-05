@@ -721,6 +721,211 @@ function MeetupProposalModal({
   );
 }
 
+/**
+ * Message history, live socket, sender hydration and send/attach — everything
+ * the transport layer of the screen needs. Kept separate from the proposal
+ * form (below): a proposal posts over HTTP and comes back down this same
+ * socket like any other message, but composing one has nothing to do with how
+ * messages are fetched, paginated or sent.
+ */
+function useClubChat(
+  clubId: number,
+  router: ReturnType<typeof useRouter>,
+  ensurePermission: (key: 'camera') => Promise<boolean>,
+) {
+  const [messages, setMessages] = useState<ClubMessage[]>([]);
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [wsReady, setWsReady] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+
+  const currentUserIdRef = useRef<number | null>(null);
+  const senderCache = useRef<Map<number, { username: string; avatar?: string }>>(new Map());
+  const ws = useRef<WebSocket | null>(null);
+  const flatListRef = useRef<FlatList>(null);
+
+  function cacheSender(msg: ClubMessage) {
+    if (msg.sender_id > 0 && msg.sender_username) {
+      senderCache.current.set(msg.sender_id, { username: msg.sender_username, avatar: msg.sender_avatar });
+    }
+  }
+
+  function hydrate(msg: ClubMessage): ClubMessage {
+    if (msg.sender_username) return msg;
+    const cached = senderCache.current.get(msg.sender_id);
+    if (!cached) return msg;
+    return { ...msg, sender_username: cached.username, sender_avatar: cached.avatar };
+  }
+
+  // ── Current user id ───────────────────────────────────────────────────────
+  useEffect(() => {
+    api.get<{ id: number | string }>('/api/users/profile/')
+      .then((r) => { currentUserIdRef.current = Number(r.data.id); })
+      .catch(() => {});
+  }, []);
+
+  // ── History ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/`)
+      .then((r) => {
+        const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
+        const msgs = raw.map((m) => normalise(m));
+        msgs.forEach(cacheSender);
+        setMessages(msgs);
+        if (raw.length === 0) setHasMore(false);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [clubId]);
+
+  // ── Infinite scroll up ────────────────────────────────────────────────────
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingMore || !hasMore || messages.length === 0) return;
+    const oldestId = messages[0].id;
+    setLoadingMore(true);
+    try {
+      const r = await api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/?before=${oldestId}`);
+      const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
+      if (raw.length === 0) { setHasMore(false); return; }
+      const older = raw.map((m) => normalise(m));
+      older.forEach(cacheSender);
+      setMessages((prev) => [...older, ...prev]);
+    } catch {} finally { setLoadingMore(false); }
+  }, [clubId, loadingMore, hasMore, messages]);
+
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    if (e.nativeEvent.contentOffset.y < 60 && hasMore && !loadingMore) loadOlderMessages();
+  }
+
+  // ── WebSocket ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let active = true;
+
+    async function connect() {
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token || !active) return;
+      const socket = new WebSocket(`${WS_BASE}/ws/clubs/${clubId}/?token=${token}`);
+
+      socket.onopen = () => {
+        if (!active) { socket.close(); return; }
+        ws.current = socket;
+        setWsReady(true);
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const raw: RawMsg = JSON.parse(event.data);
+          const incoming = hydrate(normalise(raw));
+          // Allow proposals through even without text/image
+          if (!incoming.text && !incoming.image && incoming.message_type !== 'meetup_proposal') return;
+          cacheSender(incoming);
+
+          setMessages((prev) => {
+            if (incoming.id && prev.some((m) => m.id === incoming.id && !m.pending)) return prev;
+            const isFromMe = incoming.sender_id === currentUserIdRef.current;
+            if (isFromMe) {
+              for (let i = prev.length - 1; i >= 0; i--) {
+                if (prev[i].pending && prev[i].text === incoming.text) {
+                  const updated = [...prev];
+                  updated[i] = incoming;
+                  return updated;
+                }
+              }
+            }
+            return [...prev, incoming];
+          });
+        } catch {}
+      };
+
+      socket.onclose = (event) => {
+        if (!active) return;
+        setWsReady(false);
+        if (event.code === 4003) {
+          Alert.alert('Removed from club', 'You are no longer a member of this club.', [
+            { text: 'OK', onPress: () => router.replace('/(tabs)/chat' as any) },
+          ]);
+        } else if (event.code === 4001) {
+          router.back();
+        }
+      };
+
+      socket.onerror = () => { if (active) setWsReady(false); };
+    }
+
+    connect();
+    return () => {
+      active = false;
+      ws.current?.close();
+      ws.current = null;
+    };
+  }, [clubId]);
+
+  // ── Scroll to bottom ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (messages.length > 0 && !loadingMore) {
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+    }
+  }, [messages.length]);
+
+  // ── Send text / image ─────────────────────────────────────────────────────
+  function sendText() {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setText('');
+    const tempId = `pending-${Date.now()}`;
+    setMessages((prev) => [...prev, {
+      id: tempId, text: trimmed,
+      sender_id: currentUserIdRef.current ?? -1,
+      created_at: new Date().toISOString(), pending: true,
+    }]);
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ content: trimmed }));
+    } else {
+      api.post<RawMsg>(`/api/clubs/${clubId}/messages/`, { content: trimmed })
+        .then((r) => {
+          const confirmed = normalise(r.data);
+          setMessages((prev) => prev.map((m) => m.id === tempId ? confirmed : m));
+        })
+        .catch(() => {});
+    }
+  }
+
+  function sendImage(asset: ImagePicker.ImagePickerAsset) {
+    const tempId = `temp-img-${Date.now()}`;
+    setMessages((prev) => [...prev, {
+      id: tempId, image: asset.uri,
+      sender_id: currentUserIdRef.current ?? -1,
+      created_at: new Date().toISOString(), pending: true,
+    }]);
+    // Straight to Cloudinary, then only the URL to Django — the server
+    // broadcasts it to the club socket group like any other message.
+    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
+      .then((imageUrl) => api.post(`/api/clubs/${clubId}/messages/`, { image_url: imageUrl }))
+      .catch(() => {});
+  }
+
+  async function handleAttach() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'] as any, allowsEditing: true, quality: 0.8,
+    });
+    if (!result.canceled) sendImage(result.assets[0]);
+  }
+
+  async function handleCamera() {
+    if (!(await ensurePermission('camera'))) return;
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'] as any, allowsEditing: true, quality: 0.8,
+    });
+    if (!result.canceled) sendImage(result.assets[0]);
+  }
+
+  return {
+    messages, setMessages, text, setText, loading, wsReady, loadingMore,
+    flatListRef, currentUserIdRef, hydrate, onScroll, sendText, handleAttach, handleCamera,
+  };
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 /**
  * Composing a meetup proposal: the form, the map picker behind it, and the two

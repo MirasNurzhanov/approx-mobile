@@ -346,6 +346,19 @@ export default function ClubDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actioning, setActioning] = useState(false);
 
+  // Re-derive from the cache whenever the route's clubId changes. The
+  // useState initializers above only run once, on this instance's first
+  // mount — if the screen is reused for a different club (a param-only
+  // navigation, not a fresh push) rather than remounted, `club` would
+  // otherwise keep showing the previous club while `clubId` has already
+  // moved on.
+  useEffect(() => {
+    const c = _clubCache.get(clubId);
+    setClub(c?.club ?? null);
+    setMembers(c?.members ?? []);
+    setLoading(c === undefined);
+  }, [clubId]);
+
   const fetchMembers = useCallback(async () => {
     try {
       const res = await clubsApi.members(clubId);
@@ -368,7 +381,10 @@ export default function ClubDetailScreen() {
     const meId = meRes.status === 'fulfilled' ? meRes.value.data.id : null;
     if (meId) setCurrentUserId(meId);
 
-    if (clubRes.status === 'fulfilled') {
+    // `fulfilled` only means the request didn't reject — an empty body still
+    // resolves with `data: null`, and caching that would poison every later
+    // visit to this club with a club-shaped `null`.
+    if (clubRes.status === 'fulfilled' && clubRes.value.data) {
       let clubData = clubRes.value.data;
       if (meId && !clubData.my_role && !clubData.is_member) {
         const myMembership = fetchedMembers.find((m) => Number(m.user.id) === Number(meId));

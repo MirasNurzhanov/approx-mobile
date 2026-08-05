@@ -27,8 +27,25 @@ import { AppState, type AppStateStatus, Platform } from 'react-native';
 /** Icon names registered under the plugin in app.json. Keep the two in step. */
 export type AppIconName = 'light' | 'dark';
 
-/** What `getAppIcon()` reports when the primary icon is in use. */
+/** What `getAppIcon()` reports when the primary icon is in use.
+ *
+ *  It never reports the primary icon by name. On Android it reads the launching
+ *  component and returns whatever follows `MainActivity` in it — an empty
+ *  suffix, meaning the plain activity rather than one of the aliases, comes
+ *  back as this. So a freshly installed build always answers `DEFAULT`, however
+ *  well that icon matches the theme. */
 const DEFAULT_ICON = 'DEFAULT';
+
+/** The icon shipped as `icon` in app.json, which is the one `DEFAULT_ICON`
+ *  stands for. Keep the two in step: mapping it to the wrong theme makes the
+ *  no-op guard below fire exactly backwards. */
+const PRIMARY_ICON: AppIconName = 'light';
+
+/** `getAppIcon()`, answered in the same vocabulary `setAppIcon` is asked in. */
+function inUseIcon(icons: { getAppIcon: () => string }): string {
+  const name = icons.getAppIcon();
+  return name === DEFAULT_ICON ? PRIMARY_ICON : name;
+}
 
 let desired: AppIconName | null = null;
 let subscription: { remove: () => void } | null = null;
@@ -79,9 +96,20 @@ export function applyPendingAppIcon(): void {
   if (!icons) return;
 
   try {
-    // Skip a no-op swap. On Android this matters a great deal: calling
-    // setAppIcon with the icon already in use would still restart the app.
-    if (icons.getAppIcon() === desired) {
+    // Skip a no-op swap. On Android this matters a great deal: `setAppIcon`
+    // does not merely restart the app, it calls `moveTaskToBack` and then kills
+    // the process outright half a second later. Asking for the icon already in
+    // use costs the user their session for no change at all.
+    //
+    // Compare on `inUseIcon`, not on the raw reading. `getAppIcon()` reports
+    // the primary icon as `DEFAULT` rather than as 'light', so the raw
+    // comparison was false for every light-themed user on a fresh install:
+    // 'DEFAULT' !== 'light', so the guard let a swap through that changed
+    // nothing, and the app was killed the first time it was backgrounded —
+    // which the OS permission dialog at login is enough to do. It then came
+    // back with the 'light' alias explicitly enabled, so the reading matched
+    // from then on and it never happened again. Crashes once, fine ever after.
+    if (inUseIcon(icons) === desired) {
       desired = null;
       return;
     }
@@ -132,9 +160,7 @@ export function currentAppIcon(): AppIconName | null {
   const icons = nativeIcons();
   if (!icons) return null;
   try {
-    const name = icons.getAppIcon();
-    // The primary icon is the light one — see `icon` in app.json.
-    if (name === DEFAULT_ICON) return 'light';
+    const name = inUseIcon(icons);
     return name === 'dark' || name === 'light' ? name : null;
   } catch {
     return null;

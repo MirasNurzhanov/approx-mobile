@@ -104,6 +104,33 @@ describe('app icon', () => {
     expect(setAppIcon).not.toHaveBeenCalled();
   });
 
+  // Regression coverage for "it crashes out once, then the next run is fine".
+  //
+  // `getAppIcon()` never names the primary icon — a build whose plain
+  // MainActivity is the launcher answers 'DEFAULT', not 'light'. The no-op
+  // guard used to compare that raw reading against the queued name, so for a
+  // light-themed user on a fresh install it read 'DEFAULT' !== 'light' and let
+  // a swap through that changed nothing. Android's `setAppIcon` backgrounds the
+  // app and kills the process 500ms later, so the first backgrounding — the OS
+  // permission dialog at login will do it — looked exactly like a crash. The
+  // 'light' alias was enabled on the way out, so every run after that read
+  // 'light', matched, and behaved.
+  //
+  // Every other test here queues 'dark', which is why this went unnoticed.
+  it('does not swap when the theme already matches the primary icon', () => {
+    getAppIcon.mockReturnValue('DEFAULT');
+    appIcon.setDesiredAppIcon('light');
+    emit('background');
+    expect(setAppIcon).not.toHaveBeenCalled();
+  });
+
+  it('still swaps away from the primary icon when the theme differs', () => {
+    getAppIcon.mockReturnValue('DEFAULT');
+    appIcon.setDesiredAppIcon('dark');
+    emit('background');
+    expect(setAppIcon).toHaveBeenCalledWith('dark');
+  });
+
   it('does not re-apply on a second backgrounding', () => {
     appIcon.setDesiredAppIcon('dark');
     emit('background');

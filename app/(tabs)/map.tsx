@@ -242,6 +242,36 @@ const Z_CLUSTER = 6;
 const Z_STORY   = 7;
 const Z_MEETUP  = 8;
 
+// ─── PARKED_MARKERS ───────────────────────────────────────────────────────────
+/*
+ * Why markers on this map are parked instead of unmounted.
+ *
+ * `react-native-maps` cannot reliably remove a child from the native map under
+ * the New Architecture. Fabric's interop layer loses track of custom children
+ * (`MapView → Marker → custom view`), logs `removeViewAt: view already removed
+ * from parent!`, and the removal never reaches `MapView.removeFeatureAt` — so
+ * the marker stays on the GoogleMap forever, long after React has forgotten it.
+ * Upstream: react-native-maps#5736, open, still present in 1.26.x, so upgrading
+ * is not the way out. `newArchEnabled: false` would be, at the cost of the rest
+ * of the app.
+ *
+ * The layout is what makes this visible. Pinching folds people into a headcount
+ * and opens them out again, and each fold unmounts a handful of markers: zoom
+ * out and the faces stay behind under the new badge, zoom back in and the badge
+ * stays behind on top of the faces. That second one is the bug as reported —
+ * "the number is still on the map" — and `layoutMarkers` was never at fault.
+ *
+ * So nothing this layout controls is ever unmounted. A marker with no one to
+ * draw goes transparent and shrinks to `parkedMarker`, keeping its slot in the
+ * child list; badges and leader lines come from fixed pools of slots that grow
+ * but never shrink. React then only ever *updates* map children while the
+ * camera moves, and update is the path that works.
+ *
+ * Markers do still unmount when someone leaves `visibleNearby` entirely, which
+ * is a poll-rate event rather than a per-frame one. Same latent bug, far rarer;
+ * worth pooling too if stale faces ever show up.
+ */
+
 const REL_LABEL: Record<Relationship, string> = {
   stranger:  'Nearby',
   hi_sent:   'Hi Sent',
@@ -377,7 +407,7 @@ function distanceBand(m?: number): string | null {
  * overlap, and you already know your own half of it.
  */
 function DotMarker({
-  coordinate, color, presence, zIndex, sharedInterests, showCaption = true, onPress,
+  coordinate, color, presence, zIndex, sharedInterests, showCaption = true, parked, onPress,
 }: {
   coordinate: { latitude: number; longitude: number };
   color: string;
@@ -388,6 +418,9 @@ function DotMarker({
   /** False when this dot shares its spot with others — the glyph stays, the
    *  word under it goes. See `FanResult.crowded`. */
   showCaption?: boolean;
+  /** This person is inside a headcount badge right now. Drawn as nothing rather
+   *  than unmounted — see `PARKED_MARKERS`. */
+  parked?: boolean;
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
@@ -411,8 +444,9 @@ function DotMarker({
     // `primary` belongs here with the rest: the marker freezes its own bitmap
     // once settled, so an interest that arrives on a later poll — the first
     // one can land before the interest data does — would otherwise never be
-    // drawn at all.
-  }, [color, online, primary, extra, captionText]);
+    // drawn at all. `parked` for the same reason: the dot has to redraw as the
+    // empty spacer on the way in, and as itself on the way back out.
+  }, [color, online, primary, extra, captionText, parked]);
 
   // The glyph needs a bigger core to sit in than a bare point does, and the
   // caption makes the marker taller than its halo — so the anchor moves off
@@ -425,16 +459,20 @@ function DotMarker({
       coordinate={coordinate}
       anchor={{ x: 0.5, y: (haloH / 2) / totalH }}
       tracksViewChanges={settling}
+      opacity={parked ? 0 : 1}
       zIndex={zIndex}
       accessibilityLabel={
-        primary
-          ? `Someone nearby who also likes ${primary}${extra > 0 ? `, and ${extra} more shared` : ''}`
-          : 'Someone nearby with a shared interest'
+        parked
+          ? undefined
+          : primary
+            ? `Someone nearby who also likes ${primary}${extra > 0 ? `, and ${extra} more shared` : ''}`
+            : 'Someone nearby with a shared interest'
       }
-      onPress={onPress}
+      onPress={parked ? undefined : onPress}
     >
-      {/* Android clips marker children to their parent box when it rasterizes,
-          so the halo and the caption both have to live inside this column. */}
+      {parked ? <View style={styles.parkedMarker} /> : (
+      /* Android clips marker children to their parent box when it rasterizes,
+         so the halo and the caption both have to live inside this column. */
       <View style={styles.dotColumn}>
         <View style={[styles.dotWrap, { width: haloH, height: haloH }]}>
           {/* Two discs, not one: a wide faint bloom and a tighter brighter one,
@@ -469,6 +507,7 @@ function DotMarker({
           </View>
         ) : null}
       </View>
+      )}
     </Marker>
   );
 }
@@ -488,6 +527,9 @@ interface AvatarMarkerProps {
   /** Appended to the caption in the ring colour — "· zone" when they are
    *  broadcasting, which is the one thing worth walking towards. */
   captionTag?: string;
+  /** This person is inside a headcount badge right now. Drawn as nothing rather
+   *  than unmounted — see `PARKED_MARKERS`. */
+  parked?: boolean;
   onPress?: () => void;
 }
 
@@ -505,6 +547,7 @@ function AvatarMarker({
   motion,
   caption,
   captionTag,
+  parked,
   onPress,
 }: AvatarMarkerProps) {
   const { colors } = useTheme();
@@ -514,15 +557,11 @@ function AvatarMarker({
   // after the first nearby fetch).
   // Seeded from `loadedAvatars`, which is why avatars stopped blinking.
   //
-  // A marker unmounts whenever its owner is folded into a headcount badge —
-  // pinching, or a poll that nudges two people within overlap distance — and
-  // remounts when the pile opens again. A fresh mount meant `imageReady` went
-  // back to false, so a picture already sitting in the image cache was drawn as
-  // a blank ring and then filled in. Repeat that through a pinch and every
-  // avatar on screen flickers.
-  //
-  // Remembering which URIs have decoded at least once makes a remount cheap:
-  // the ring comes back already wearing its face.
+  // Being folded into a headcount badge no longer unmounts this marker — it
+  // parks, see `PARKED_MARKERS` — so `imageReady` survives a pinch outright.
+  // `loadedAvatars` still earns its keep for the mounts that remain: someone
+  // walking back into `visibleNearby` comes back already wearing their face
+  // instead of flashing a blank ring while a cached picture decodes again.
   const [imageReady, setImageReady] = useState(() => !uri || loadedAvatars.has(uri));
   const [imageFailed, setImageFailed] = useState(false);
   const [ringSettling, setRingSettling] = useState(true);
@@ -539,8 +578,9 @@ function AvatarMarker({
     return () => clearTimeout(t);
     // Presence changes the bitmap too, so it re-arms tracking — but keyed on
     // the boolean, not the object, so a poll that returns an equal presence
-    // does not re-rasterize every avatar on the map.
-  }, [ringColor, online]);
+    // does not re-rasterize every avatar on the map. Parking is a bitmap change
+    // as well: the ring has to redraw as the empty spacer, and back again.
+  }, [ringColor, online, parked]);
 
   // The trail is decorative and hidden from assistive tech, so the state it
   // conveys is spelled out here instead — motion must never be carried by the
@@ -562,12 +602,14 @@ function AvatarMarker({
       coordinate={coordinate}
       anchor={{ x: 0.5, y: anchorY }}
       tracksViewChanges={!imageReady || ringSettling}
+      opacity={parked ? 0 : 1}
       zIndex={zIndex}
-      accessibilityLabel={label}
-      onPress={onPress}
+      accessibilityLabel={parked ? undefined : label}
+      onPress={parked ? undefined : onPress}
     >
-      {/* Column wrapper: Android clips marker children to the parent box when
-          it rasterizes, so the caption has to live inside it. */}
+      {parked ? <View style={styles.parkedMarker} /> : (
+      /* Column wrapper: Android clips marker children to the parent box when
+         it rasterizes, so the caption has to live inside it. */
       <View style={styles.avatarMarkerWrap}>
         <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
           {uri && !imageFailed ? (
@@ -606,6 +648,7 @@ function AvatarMarker({
           </View>
         ) : null}
       </View>
+      )}
     </Marker>
   );
 }
@@ -691,12 +734,15 @@ function MusicZoneBadge({ center, radius, mine, label, color }: {
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  // Same reason as ClusterMarker: let it draw, then freeze the raster.
+  // Same reason as ClusterMarker: let it draw, then freeze the raster — and
+  // re-arm on every input that changes what the chip says, or a zone resized or
+  // recoloured mid-session keeps drawing the label it first froze.
   const [settling, setSettling] = useState(true);
   useEffect(() => {
+    setSettling(true);
     const t = setTimeout(() => setSettling(false), 400);
     return () => clearTimeout(t);
-  }, [radius]);
+  }, [radius, label, color]);
 
   return (
     <Marker
@@ -722,36 +768,53 @@ function MusicZoneBadge({ center, radius, mine, label, color }: {
   );
 }
 
-function ClusterMarker({ coordinate, count, onPress }: {
+function ClusterMarker({ coordinate, count, parked, onPress }: {
   coordinate: { latitude: number; longitude: number };
   count: number;
+  /** Slot currently standing in for no pile — see `PARKED_MARKERS`. */
+  parked?: boolean;
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   // Same reason as DotMarker: freeze the raster, but not before it has drawn.
+  //
+  // `setSettling(true)` is the point of the effect. Without it the badge froze
+  // its first bitmap for good: a pile that gained or lost someone kept drawing
+  // its old number, because the timer below had already fired and nothing ever
+  // re-armed tracking. Parking re-arms it too — a slot that goes quiet has to
+  // redraw as the empty spacer, or it keeps a headcount's worth of tap target
+  // sitting on the map.
   const [settling, setSettling] = useState(true);
   useEffect(() => {
+    setSettling(true);
     const t = setTimeout(() => setSettling(false), 400);
     return () => clearTimeout(t);
-  }, [count]);
+  }, [count, parked]);
 
   return (
     <Marker
       coordinate={coordinate}
       anchor={{ x: 0.5, y: 0.5 }}
       tracksViewChanges={settling}
+      opacity={parked ? 0 : 1}
       zIndex={Z_CLUSTER}
-      onPress={onPress}
-      accessibilityLabel={`${count} ${count === 1 ? 'person' : 'people'} here. Zoom in to see them.`}
+      onPress={parked ? undefined : onPress}
+      accessibilityLabel={
+        parked ? undefined : `${count} ${count === 1 ? 'person' : 'people'} here. Zoom in to see them.`
+      }
     >
-      <View style={styles.clusterWrap}>
-        <View style={styles.clusterBloom} />
-        <View style={styles.clusterBadge}>
-          <IconPeople size={12} color={colors.teal} />
-          <Text style={styles.clusterCount}>{count}</Text>
+      {parked ? (
+        <View style={styles.parkedMarker} />
+      ) : (
+        <View style={styles.clusterWrap}>
+          <View style={styles.clusterBloom} />
+          <View style={styles.clusterBadge}>
+            <IconPeople size={12} color={colors.teal} />
+            <Text style={styles.clusterCount}>{count}</Text>
+          </View>
         </View>
-      </View>
+      )}
     </Marker>
   );
 }
@@ -1856,6 +1919,40 @@ export default function MapScreen() {
     return layoutMarkers(points, metersPerPx, zoneAreas);
   }, [visibleNearby, displayCoords, zoomDelta, mapH, zoneAreas]);
 
+  /** Badges and leader lines the map is currently holding open.
+   *
+   * Both come and go with the zoom, and neither may be unmounted to do it — see
+   * `PARKED_MARKERS`. So each renders from a fixed run of slots, and the run
+   * only ever grows: a slot with nothing to draw parks rather than leaving.
+   * High-water marks live in refs because they are derived from the render they
+   * are used in — setting state here would only re-render to reach the same
+   * number, and both are bounded by the piles a screen can hold. */
+  const badgeSlots = useRef(0);
+  const leaderSlots = useRef(0);
+
+  /** Badge, or nothing, for each slot. Drawable filter first, so an unusable
+   *  coordinate parks its slot instead of shifting every badge after it. */
+  const badges = useMemo(() => {
+    const drawable = markerLayout.clusters.filter((c) => isDrawable(c.position));
+    badgeSlots.current = Math.max(badgeSlots.current, drawable.length);
+    return Array.from({ length: badgeSlots.current }, (_, i) => drawable[i] ?? null);
+  }, [markerLayout]);
+
+  /** Leader lines: the dashes from a moved marker back to where its owner
+   *  really is, and from a nudged badge back to the pile it counts. */
+  const leaders = useMemo(() => {
+    const lines = [
+      ...Array.from(markerLayout.placed.values()),
+      ...markerLayout.clusters,
+    ]
+      // Both ends validated: a single bad coordinate in a Polyline is enough to
+      // bring the native map down.
+      .filter((item) => item.anchor && isDrawable(item.anchor) && isDrawable(item.position))
+      .map((item) => [item.anchor!, item.position]);
+    leaderSlots.current = Math.max(leaderSlots.current, lines.length);
+    return Array.from({ length: leaderSlots.current }, (_, i) => lines[i] ?? null);
+  }, [markerLayout]);
+
   /** Marker position for someone, falling back to their true point before the
    *  viewport is measured on the first frame. */
   const posFor = useCallback(
@@ -2539,30 +2636,33 @@ export default function MapScreen() {
 
           {/* Leader lines back to the spot a moved marker really occupies.
               Without them the fan would quietly claim that people sitting at
-              one table are tens of metres apart. Drawn under the markers. */}
-          {[
-            ...Array.from(markerLayout.placed.entries()).map(([key, fan]) => ({ key, ...fan })),
-            ...markerLayout.clusters,
-          ].map((item) =>
-            // Both ends validated: a single bad coordinate in a Polyline is
-            // enough to bring the native map down.
-            item.anchor && isDrawable(item.anchor) && isDrawable(item.position) ? (
-              <Polyline
-                key={`leader-${item.key}`}
-                coordinates={[item.anchor, item.position]}
-                strokeColor="rgba(244,244,246,0.28)"
-                strokeWidth={1}
-                lineDashPattern={[3, 3]}
-                zIndex={2}
-              />
-            ) : null,
-          )}
+              one table are tens of metres apart. Drawn under the markers.
+              Slotted, and a spare slot collapses onto the owner's own point in
+              full transparency rather than unmounting — see PARKED_MARKERS. */}
+          {leaders.map((line, i) => (
+            <Polyline
+              key={`leader-slot-${i}`}
+              coordinates={line ?? [displayCoords, displayCoords]}
+              strokeColor={line ? 'rgba(244,244,246,0.28)' : 'transparent'}
+              strokeWidth={1}
+              lineDashPattern={[3, 3]}
+              zIndex={2}
+            />
+          ))}
 
           {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
             // Absent from `placed` means this person was folded into a headcount
-            // badge. Drawing them as well would put two of them on the map.
+            // badge. Drawing them as well would put two of them on the map — so
+            // the marker parks: transparent, untappable, still mounted. The
+            // unmount it replaces is the one that left a face behind under the
+            // badge on every pinch. See PARKED_MARKERS.
             const layout = markerLayout.placed.get(`u-${user.id}`);
-            if (!layout || !isDrawable(layout.position)) return null;
+            const truePos = { latitude: user.latitude, longitude: user.longitude };
+            const parked = !layout || !isDrawable(layout.position);
+            // Nowhere legal to stand at all: the one case still worth skipping,
+            // since a Marker needs a coordinate the native map can survive.
+            if (parked && !isDrawable(truePos)) return null;
+            const position = parked ? truePos : layout!.position;
 
             const uid = Number(user.id);
             const isFriend = friendIds.has(uid);
@@ -2575,7 +2675,8 @@ export default function MapScreen() {
             return isFriend || isConnected ? (
               <AvatarMarker
                 key={user.id}
-                coordinate={layout.position}
+                coordinate={position}
+                parked={parked}
                 uri={user.profile_picture}
                 username={user.username}
                 ringColor={color}
@@ -2583,12 +2684,12 @@ export default function MapScreen() {
                 motion={user.motion_class}
                 // Dropped when this marker shares its spot: the fan separates
                 // rings, and a name chip is wider than the ring it hangs under.
-                caption={layout.crowded ? undefined : user.username}
+                caption={layout?.crowded ? undefined : user.username}
                 // Friends and connections both have zone access. The tag
                 // marks a track you can play, so it follows the track rather
                 // than the map-zone switch.
                 captionTag={
-                  !layout.crowded && (isFriend || isConnected) && user.zone_audio_url ? 'zone' : undefined
+                  !layout?.crowded && (isFriend || isConnected) && user.zone_audio_url ? 'zone' : undefined
                 }
                 zIndex={Z_FRIEND}
                 onPress={() => openSheet(user)}
@@ -2596,7 +2697,8 @@ export default function MapScreen() {
             ) : (
               <DotMarker
                 key={user.id}
-                coordinate={layout.position}
+                coordinate={position}
+                parked={parked}
                 color={color}
                 presence={user.presence}
                 sharedInterests={user.shared_interests}
@@ -2604,7 +2706,7 @@ export default function MapScreen() {
                 // thing it draws — four of them stacked down a street is what
                 // made the map unreadable. The glyph inside the dot still says
                 // which interest it is, so only the word goes.
-                showCaption={!layout.crowded}
+                showCaption={!layout?.crowded}
                 zIndex={Z_STRANGER}
                 onPress={() => openSheet(user)}
               />
@@ -2626,13 +2728,19 @@ export default function MapScreen() {
 
           {/* Piles that could not be fanned apart without moving someone too far
               — which is what zooming out does to a pixel-sized fan. A number
-              instead, and a tap to go in and see who. */}
-          {markerLayout.clusters.filter((c) => isDrawable(c.position)).map((cluster) => (
+              instead, and a tap to go in and see who.
+              Slots, not badges: zooming back in empties a slot rather than
+              removing it, because a removed badge is the one that stayed on the
+              map on top of the faces it had been standing in for. An empty slot
+              parks on the owner's own point, where it is invisible, one pixel
+              wide and deaf to taps. See PARKED_MARKERS. */}
+          {badges.map((cluster, i) => (
             <ClusterMarker
-              key={cluster.key}
-              coordinate={cluster.position}
-              count={cluster.count}
-              onPress={() => zoomToCluster(cluster.anchor ?? cluster.position)}
+              key={`cluster-slot-${i}`}
+              coordinate={cluster ? cluster.position : displayCoords}
+              count={cluster ? cluster.count : 0}
+              parked={!cluster}
+              onPress={cluster ? () => zoomToCluster(cluster.anchor ?? cluster.position) : undefined}
             />
           ))}
 
@@ -2912,6 +3020,14 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /** What a marker draws while it is parked — see `PARKED_MARKERS`.
+   *
+   *  Not merely transparent: `opacity` hides the pixels but the rasterized
+   *  bitmap keeps its size, and a 52 px bitmap still swallows every tap that
+   *  lands on it, including the long-press that drops a story. One pixel has
+   *  nothing left to swallow. */
+  parkedMarker: { width: 1, height: 1 },
+
   // ── Cluster badge: a pile too tight to fan, shown as a headcount ──
   clusterWrap: {
     width: 52,

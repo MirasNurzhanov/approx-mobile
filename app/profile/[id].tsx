@@ -211,8 +211,8 @@ function InterestsSection({ interests }: { interests: Interest[] }) {
             </View>
           )}
           <View style={styles.chipWrap}>
-            {group.items.map((tag, i) => (
-              <View key={i} style={styles.chip}>
+            {group.items.map((tag) => (
+              <View key={tag.name} style={styles.chip}>
                 <Text style={styles.chipText}>{tag.name}</Text>
               </View>
             ))}

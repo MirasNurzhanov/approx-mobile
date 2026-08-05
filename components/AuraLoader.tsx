@@ -1,5 +1,5 @@
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { fonts } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -15,18 +15,28 @@ export function AuraLoader() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const coreScale = useRef(new Animated.Value(1)).current;
+  // Created once and never replaced. `useState` with an initialiser rather than
+  // a ref, because a ref would have to be read back during render to reach the
+  // values, which is what React Compiler refuses to optimise around.
+  const [coreScale] = useState(() => new Animated.Value(1));
 
-  const particleAnims = useRef(
-    Array.from({ length: N_PARTICLES }, () => new Animated.Value(0)),
-  ).current;
+  // Each carries the id it is keyed by. Assigned once, in the initialiser, so
+  // it is fixed for the life of the component rather than re-derived from a
+  // loop position on every render.
+  const [particleAnims] = useState(() =>
+    Array.from({ length: N_PARTICLES }, (_, i) => ({
+      id:    `particle-${i}`,
+      value: new Animated.Value(0),
+    })),
+  );
 
-  const ringAnims = useRef(
-    Array.from({ length: 3 }, () => ({
+  const [ringAnims] = useState(() =>
+    Array.from({ length: 3 }, (_, i) => ({
+      id:      `ring-${i}`,
       scale:   new Animated.Value(1),
       opacity: new Animated.Value(0.55),
     })),
-  ).current;
+  );
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -51,7 +61,7 @@ export function AuraLoader() {
     coreLoop.start();
 
     // ── Particles ─────────────────────────────────────────────────────────────
-    particleAnims.forEach((anim, i) => {
+    particleAnims.forEach(({ value: anim }, i) => {
       const t = setTimeout(() => {
         Animated.loop(
           Animated.sequence([
@@ -103,24 +113,29 @@ export function AuraLoader() {
     });
 
     return () => {
-      timers.forEach(clearTimeout);
+      // Every stagger timer above is collected in `timers`, so this releases
+      // all of them. Spelled as a call rather than `forEach(clearTimeout)` so
+      // it is unambiguous that each id is cleared.
+      for (const t of timers) clearTimeout(t);
       coreLoop.stop();
       coreScale.stopAnimation();
-      particleAnims.forEach((a) => a.stopAnimation());
+      particleAnims.forEach(({ value }) => value.stopAnimation());
       ringAnims.forEach(({ scale, opacity }) => {
         scale.stopAnimation();
         opacity.stopAnimation();
       });
     };
-  }, []);
+    // All three arrays are built once in their initialisers, so listing them
+    // documents the capture without ever re-running this effect.
+  }, [coreScale, particleAnims, ringAnims]);
 
   return (
     <View style={styles.root}>
       <View style={styles.stage}>
         {/* Wave rings */}
-        {ringAnims.map(({ scale, opacity }, i) => (
+        {ringAnims.map(({ id, scale, opacity }, i) => (
           <Animated.View
-            key={i}
+            key={id}
             style={[
               styles.ring,
               {
@@ -133,13 +148,13 @@ export function AuraLoader() {
         ))}
 
         {/* Particles */}
-        {particleAnims.map((anim, i) => {
+        {particleAnims.map(({ id, value: anim }, i) => {
           const angle = (2 * Math.PI * i) / N_PARTICLES;
           const tx = anim.interpolate({ inputRange: [0, 1], outputRange: [0, DISTANCE * Math.cos(angle)] });
           const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [0, DISTANCE * Math.sin(angle)] });
           return (
             <Animated.View
-              key={i}
+              key={id}
               style={[
                 styles.particle,
                 {

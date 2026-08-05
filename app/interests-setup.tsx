@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Animated,
   ActivityIndicator,
@@ -88,7 +88,7 @@ function FloatingBubble({
   reduceMotion: boolean;
   onPress: () => void;
 }) {
-  const anim    = useRef(new Animated.Value(0)).current;
+  const [anim]  = useState(() => new Animated.Value(0));
   const variant = variantFor(index);
 
   useEffect(() => {
@@ -114,7 +114,9 @@ function FloatingBubble({
       clearTimeout(timer);
       loop.stop();
     };
-  }, []);
+    // `anim` is built once and `index` is fixed for a mounted bubble, so this
+    // still runs exactly once per bubble.
+  }, [anim, index]);
 
   const { size, color, label, icon, x, y } = category;
   const hasPicks  = picked > 0;

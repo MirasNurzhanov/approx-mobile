@@ -1,4 +1,5 @@
-import { iconForInterest, IconStar } from '@/components/ui/icons';
+import { IconStar } from '@/components/ui/icons';
+import { iconForInterest } from '@/components/ui/interestIcons';
 
 import seed from '../../scripts/interests_seed.json';
 

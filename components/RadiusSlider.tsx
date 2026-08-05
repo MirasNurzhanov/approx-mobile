@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { fonts, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -115,8 +115,8 @@ export function RadiusSlider({
   // server's stored radius landing after the first render, or the a11y
   // actions. Without this the thumb sits at its initial position forever.
   useEffect(() => {
-    if (dragging.value) return;
-    position.value = withSpring(valueToPosition(value, min, max), SPRING);
+    if (dragging.get()) return;
+    position.set(withSpring(valueToPosition(value, min, max), SPRING));
   }, [value, min, max, position, dragging]);
 
   const emit = useCallback((t: number, commit: boolean) => {
@@ -147,18 +147,18 @@ export function RadiusSlider({
     // because you strayed above the bar is not a rule anyone would guess.
     .shouldCancelWhenOutside(false)
     .onBegin(() => {
-      dragging.value = true;
-      scale.value = withSpring(1.15, SPRING);
+      dragging.set(true);
+      scale.set(withSpring(1.15, SPRING));
     })
     .onUpdate((e) => {
       const t = Math.max(0, Math.min(1, (e.x - THUMB / 2) / travel));
-      position.value = t;
-      runOnJS(emit)(t, false);
+      position.set(t);
+      scheduleOnRN(emit, t, false);
     })
-    .onEnd(() => { runOnJS(emit)(position.value, true); })
+    .onEnd(() => { scheduleOnRN(emit, position.get(), true); })
     .onFinalize(() => {
-      dragging.value = false;
-      scale.value = withSpring(1, SPRING);
+      dragging.set(false);
+      scale.set(withSpring(1, SPRING));
     });
 
   // A tap anywhere on the track jumps there, so a big change does not require
@@ -167,19 +167,19 @@ export function RadiusSlider({
     .enabled(!disabled)
     .onEnd((e) => {
       const t = Math.max(0, Math.min(1, (e.x - THUMB / 2) / travel));
-      position.value = withSpring(t, SPRING);
-      runOnJS(emit)(t, true);
+      position.set(withSpring(t, SPRING));
+      scheduleOnRN(emit, t, true);
     });
 
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateX: position.value * travel },
-      { scale: scale.value },
+      { translateX: position.get() * travel },
+      { scale: scale.get() },
     ],
   }));
 
   const fillStyle = useAnimatedStyle(() => ({
-    width: position.value * travel + THUMB / 2,
+    width: position.get() * travel + THUMB / 2,
   }));
 
   return (
@@ -203,7 +203,7 @@ export function RadiusSlider({
         const next = snap(Math.max(min, Math.min(max,
           value + (e.nativeEvent.actionName === 'increment' ? step : -step),
         )));
-        position.value = withSpring(valueToPosition(next, min, max), SPRING);
+        position.set(withSpring(valueToPosition(next, min, max), SPRING));
         onChange(next);
         onCommit(next);
       }}

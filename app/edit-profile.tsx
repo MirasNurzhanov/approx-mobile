@@ -282,9 +282,11 @@ export default function EditProfileScreen() {
   const [draftNat,  setDraftNat]  = useState<string | null>(null);
   const [natQuery,  setNatQuery]  = useState('');
 
-  // Track server-loaded values to decide what to PATCH and whether nationality is locked
+  // Track server-loaded values to decide what to PATCH and whether nationality
+  // is locked. Profession stays a ref — only `save` ever reads it. Nationality
+  // is state, because the lock it drives is read while rendering the field.
   const origProfession  = useRef<string | null>(null);
-  const origNationality = useRef<string | null>(null);
+  const [origNationality, setOrigNationality] = useState<string | null>(null);
 
   useEffect(() => {
     api.get<Profile>('/api/users/profile/')
@@ -297,7 +299,7 @@ export default function EditProfileScreen() {
         setProfession(prof);
         setNationality(nat);
         origProfession.current  = prof;
-        origNationality.current = nat;
+        setOrigNationality(nat);
       })
       .catch((e) => console.log('[EditProfile] fetch error:', e?.response?.status))
       .finally(() => setLoading(false));
@@ -344,7 +346,7 @@ export default function EditProfileScreen() {
         payload.profession = profession;
       }
       // Nationality can only be set once: only include when original was null and user chose one
-      if (origNationality.current === null && nationality !== null) {
+      if (origNationality === null && nationality !== null) {
         payload.nationality = nationality;
       }
       const { data } = await api.patch<Profile>('/api/users/profile/', payload);
@@ -355,7 +357,7 @@ export default function EditProfileScreen() {
       setProfession(savedProf);
       setNationality(savedNat);
       origProfession.current  = savedProf;
-      origNationality.current = savedNat;
+      setOrigNationality(savedNat);
       router.back();
     }, () => setSaving(false)).catch((e: any) => {
       const msg = e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.';
@@ -366,7 +368,7 @@ export default function EditProfileScreen() {
   // ── Derived display values ─────────────────────────────────────────────────
   const professionLabel    = profession ? PROFESSIONS.find(p => p.key === profession)?.label ?? profession : null;
   const nationalityCountry = nationality ? COUNTRIES.find(c => c.code === nationality) : null;
-  const nationalityLocked  = origNationality.current !== null;
+  const nationalityLocked  = origNationality !== null;
   const filteredCountries  = natQuery.trim()
     ? COUNTRIES.filter(c => c.name.toLowerCase().includes(natQuery.trim().toLowerCase()))
     : COUNTRIES;

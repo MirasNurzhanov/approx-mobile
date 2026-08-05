@@ -2,10 +2,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { fonts, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -116,8 +116,8 @@ export function TrimSlider({
   // side one render later, which is fine for text but not for a thumb.
   const startX = useSharedValue(0);
   const endX = useSharedValue(0);
-  startX.value = toX(startMs);
-  endX.value = toX(endMs);
+  startX.set(toX(startMs));
+  endX.set(toX(endMs));
 
   const emit = useCallback((xStart: number, xEnd: number, commit: boolean) => {
     const start = Math.round((xStart / travel) * safeDuration);
@@ -149,35 +149,35 @@ export function TrimSlider({
     .enabled(!disabled)
     .activeOffsetX([-6, 6])
     .shouldCancelWhenOutside(false)
-    .onBegin(() => { grabbedAt.value = startX.value; })
+    .onBegin(() => { grabbedAt.set(startX.get()); })
     .onUpdate((e) => {
       // Clamped against the other handle, not just the track: the two cannot
       // cross, and cannot close to a stutter.
-      startX.value = Math.max(
-        0, Math.min(grabbedAt.value + e.translationX, endX.value - minGap),
-      );
-      runOnJS(emit)(startX.value, endX.value, false);
+      startX.set(Math.max(
+        0, Math.min(grabbedAt.get() + e.translationX, endX.get() - minGap),
+      ));
+      scheduleOnRN(emit, startX.get(), endX.get(), false);
     })
-    .onEnd(() => { runOnJS(emit)(startX.value, endX.value, true); });
+    .onEnd(() => { scheduleOnRN(emit, startX.get(), endX.get(), true); });
 
   const dragEnd = Gesture.Pan()
     .enabled(!disabled)
     .activeOffsetX([-6, 6])
     .shouldCancelWhenOutside(false)
-    .onBegin(() => { grabbedAt.value = endX.value; })
+    .onBegin(() => { grabbedAt.set(endX.get()); })
     .onUpdate((e) => {
-      endX.value = Math.min(
-        travel, Math.max(grabbedAt.value + e.translationX, startX.value + minGap),
-      );
-      runOnJS(emit)(startX.value, endX.value, false);
+      endX.set(Math.min(
+        travel, Math.max(grabbedAt.get() + e.translationX, startX.get() + minGap),
+      ));
+      scheduleOnRN(emit, startX.get(), endX.get(), false);
     })
-    .onEnd(() => { runOnJS(emit)(startX.value, endX.value, true); });
+    .onEnd(() => { scheduleOnRN(emit, startX.get(), endX.get(), true); });
 
-  const startStyle = useAnimatedStyle(() => ({ transform: [{ translateX: startX.value }] }));
-  const endStyle = useAnimatedStyle(() => ({ transform: [{ translateX: endX.value }] }));
+  const startStyle = useAnimatedStyle(() => ({ transform: [{ translateX: startX.get() }] }));
+  const endStyle = useAnimatedStyle(() => ({ transform: [{ translateX: endX.get() }] }));
   const selectionStyle = useAnimatedStyle(() => ({
-    left: startX.value + THUMB / 2,
-    width: Math.max(0, endX.value - startX.value),
+    left: startX.get() + THUMB / 2,
+    width: Math.max(0, endX.get() - startX.get()),
   }));
 
   const playheadX = positionMs != null ? toX(positionMs) + THUMB / 2 : null;

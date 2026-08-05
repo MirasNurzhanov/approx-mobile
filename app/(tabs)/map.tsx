@@ -20,16 +20,18 @@ import {
 import { Image } from 'expo-image';
 import MapView, { Circle, Marker, Polygon, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, {
-    runOnJS,
     useAnimatedStyle,
     useSharedValue,
     withSpring,
     type SharedValue,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { navArcClearance, Speedometer } from '@/components/Speedometer';
-import { REACTIONS, StoryViewer } from '@/components/StoryViewer';
+import { navArcClearance } from '@/components/navArc';
+import { Speedometer } from '@/components/Speedometer';
+import { REACTIONS } from '@/components/storyReactions';
+import { StoryViewer } from '@/components/StoryViewer';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import {
@@ -47,9 +49,9 @@ import {
     IconPeople,
     IconPin,
     IconSearch,
-    iconForInterest,
     type IconComponent,
 } from '@/components/ui/icons';
+import { iconForInterest } from '@/components/ui/interestIcons';
 import { ZonePlayer } from '@/components/ZonePlayer';
 import { mapStyleFor } from '@/constants/mapStyle';
 import {
@@ -1251,7 +1253,7 @@ function MeetupSheet({
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
-  const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.get() }] }));
 
   function openDirections() {
     const label = encodeURIComponent(meetup.title);
@@ -1335,7 +1337,7 @@ function UserSheet({
   const router = useRouter();
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: sheetY.value }],
+    transform: [{ translateY: sheetY.get() }],
   }));
 
   const rel         = user.relationship ?? 'stranger';
@@ -1534,8 +1536,8 @@ function UserSheet({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.chipRow}
             >
-              {user.shared_interests.map((tag, i) => (
-                <View key={i} style={styles.chip}>
+              {user.shared_interests.map((tag) => (
+                <View key={tag} style={styles.chip}>
                   <Text style={styles.chipText}>{tag}</Text>
                 </View>
               ))}
@@ -1635,10 +1637,12 @@ export default function MapScreen() {
   const [clubMeetups, setClubMeetups]   = useState<ClubMeetup[]>([]);
   const [selectedMeetup, setSelectedMeetup] = useState<ClubMeetup | null>(null);
 
-  // Refs that hold the last non-null selection — lets us keep the sheet
-  // components mounted between taps instead of unmounting on every dismiss.
-  const lastUserRef   = useRef<NearbyUser | null>(null);
-  const lastMeetupRef = useRef<ClubMeetup | null>(null);
+  // The last non-null selection — lets us keep the sheet components mounted
+  // between taps instead of unmounting on every dismiss. State rather than a
+  // ref, because render reads it back to decide what stays mounted, and a ref
+  // read during render is what stops the compiler optimising this screen.
+  const [sheetUser, setSheetUser]     = useState<NearbyUser | null>(null);
+  const [sheetMeetup, setSheetMeetup] = useState<ClubMeetup | null>(null);
 
   const [followRequested, setFollowRequested] = useState(false);
   const [locating, setLocating]       = useState(false);
@@ -1673,8 +1677,13 @@ export default function MapScreen() {
   const followingRef       = useRef(false);
   const watchRef           = useRef<Location.LocationSubscription | null>(null);
   const startingWatchRef   = useRef(false);
-  coordsRef.current = coords;
-  currentUserIdRef.current = currentUserId;
+  // Both mirror state for the polling and location callbacks further down.
+  // Declared above every effect that reads them, so on any commit where both
+  // run this one lands first.
+  useEffect(() => {
+    coordsRef.current = coords;
+    currentUserIdRef.current = currentUserId;
+  });
 
   const sheetY = useSharedValue(SHEET_H);
   const reduceMotion = useReduceMotion();
@@ -1710,8 +1719,12 @@ export default function MapScreen() {
   // Losing location mid-follow now stops it in the same render; before, the
   // camera stayed locked to a position that would never update again until an
   // effect noticed and re-rendered.
+  // `following` itself is still derived in render, so the condition above still
+  // holds the moment the permission drops. Only the ref mirror — read by
+  // `stopFollowing`, which both gestures and taps reach after a commit — waits
+  // for the effect. The handlers that need it sooner still set it themselves.
   const following = followRequested && locationGranted;
-  followingRef.current = following;
+  useEffect(() => { followingRef.current = following; });
 
   // Stories deleted from the archive screen vanish here immediately instead of
   // waiting for the next poll.
@@ -1970,34 +1983,44 @@ export default function MapScreen() {
    * Both come and go with the zoom, and neither may be unmounted to do it — see
    * `PARKED_MARKERS`. So each renders from a fixed run of slots, and the run
    * only ever grows: a slot with nothing to draw parks rather than leaving.
-   * High-water marks live in refs because they are derived from the render they
-   * are used in — setting state here would only re-render to reach the same
-   * number, and both are bounded by the piles a screen can hold. */
-  const badgeSlots = useRef(0);
-  const leaderSlots = useRef(0);
+   * The high-water marks are state rather than refs: they are read back while
+   * rendering to size the run, and a ref read during render is what stops the
+   * compiler optimising this screen. Raising one during render re-runs this
+   * component before anything is painted, and since a mark only ever grows —
+   * bounded by the piles a screen can hold — it settles in one extra pass. */
+  const [badgeSlots, setBadgeSlots] = useState(0);
+  const [leaderSlots, setLeaderSlots] = useState(0);
 
   /** Badge, or nothing, for each slot. Drawable filter first, so an unusable
    *  coordinate parks its slot instead of shifting every badge after it. */
-  const badges = useMemo(() => {
-    const drawable = markerLayout.clusters.filter((c) => isDrawable(c.position));
-    badgeSlots.current = Math.max(badgeSlots.current, drawable.length);
-    return Array.from({ length: badgeSlots.current }, (_, i) => drawable[i] ?? null);
-  }, [markerLayout]);
+  const drawableBadges = useMemo(
+    () => markerLayout.clusters.filter((c) => isDrawable(c.position)),
+    [markerLayout],
+  );
+  if (drawableBadges.length > badgeSlots) setBadgeSlots(drawableBadges.length);
+  const badges = useMemo(
+    () => Array.from({ length: badgeSlots }, (_, i) => drawableBadges[i] ?? null),
+    [drawableBadges, badgeSlots],
+  );
 
   /** Leader lines: the dashes from a moved marker back to where its owner
    *  really is, and from a nudged badge back to the pile it counts. */
-  const leaders = useMemo(() => {
-    const lines = [
+  const leaderLines = useMemo(
+    () => [
       ...Array.from(markerLayout.placed.values()),
       ...markerLayout.clusters,
     ]
       // Both ends validated: a single bad coordinate in a Polyline is enough to
       // bring the native map down.
       .filter((item) => item.anchor && isDrawable(item.anchor) && isDrawable(item.position))
-      .map((item) => [item.anchor!, item.position]);
-    leaderSlots.current = Math.max(leaderSlots.current, lines.length);
-    return Array.from({ length: leaderSlots.current }, (_, i) => lines[i] ?? null);
-  }, [markerLayout]);
+      .map((item) => [item.anchor!, item.position]),
+    [markerLayout],
+  );
+  if (leaderLines.length > leaderSlots) setLeaderSlots(leaderLines.length);
+  const leaders = useMemo(
+    () => Array.from({ length: leaderSlots }, (_, i) => leaderLines[i] ?? null),
+    [leaderLines, leaderSlots],
+  );
 
   /** Marker position for someone, falling back to their true point before the
    *  viewport is measured on the first frame. */
@@ -2054,7 +2077,7 @@ export default function MapScreen() {
   }, []);
 
   function openStoryViewer(authorStories: Story[]) {
-    sheetY.value = SHEET_H;
+    sheetY.set(SHEET_H);
     setOpenUser(null);
     setSelectedMeetup(null);
     setOpenStories(authorStories);
@@ -2289,26 +2312,26 @@ export default function MapScreen() {
   function openSheet(user: NearbyUser) {
     setSelectedMeetup(null);
     setOpenUser(user);
-    sheetY.value = withSpring(0, SPRING_CFG);
+    sheetY.set(withSpring(0, SPRING_CFG));
   }
 
   function closeSheet() {
-    sheetY.value = withSpring(SHEET_H, SPRING_CFG, (done) => {
-      if (done) runOnJS(setOpenUser)(null);
-    });
+    sheetY.set(withSpring(SHEET_H, SPRING_CFG, (done) => {
+      if (done) scheduleOnRN(setOpenUser, null);
+    }));
   }
 
   function openMeetupSheet(meetup: ClubMeetup) {
     setOpenStories(null);
     setOpenUser(null);
     setSelectedMeetup(meetup);
-    sheetY.value = withSpring(0, SPRING_CFG);
+    sheetY.set(withSpring(0, SPRING_CFG));
   }
 
   function closeMeetupSheet() {
-    sheetY.value = withSpring(SHEET_H, SPRING_CFG, (done) => {
-      if (done) runOnJS(setSelectedMeetup)(null);
-    });
+    sheetY.set(withSpring(SHEET_H, SPRING_CFG, (done) => {
+      if (done) scheduleOnRN(setSelectedMeetup, null);
+    }));
   }
 
   // ── Locate / follow ─────────────────────────────────────────────────────────
@@ -2479,11 +2502,12 @@ export default function MapScreen() {
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
 
-  // Keep last non-null selection cached so the sheets stay mounted.
-  if (selectedUser)   lastUserRef.current   = selectedUser;
-  if (selectedMeetup) lastMeetupRef.current = selectedMeetup;
-  const sheetUser   = lastUserRef.current;
-  const sheetMeetup = lastMeetupRef.current;
+  // Keep last non-null selection cached so the sheets stay mounted. Caught
+  // during render, not from an effect: the sheet has to have its content on the
+  // first painted frame, or opening it flashes an empty panel. Both conditions
+  // go false on the retry, so this settles in one extra pass.
+  if (selectedUser && selectedUser !== sheetUser) setSheetUser(selectedUser);
+  if (selectedMeetup && selectedMeetup !== sheetMeetup) setSheetMeetup(selectedMeetup);
 
   return (
     <View style={styles.container}>
@@ -2617,9 +2641,11 @@ export default function MapScreen() {
               it is instead of as a band stretched around the planet. Regions
               that do not cross come back as a single piece, unchanged. */}
           {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
-            ? selfZoneRings.map((piece, i) => (
+            ? selfZoneRings.map((piece) => (
                 <Polygon
-                  key={`self-zone-${i}`}
+                  // Keyed on where the piece starts: the split is deterministic,
+                  // so a piece keeps its identity until the region itself moves.
+                  key={`self-zone-${piece[0].latitude},${piece[0].longitude}`}
                   coordinates={piece}
                   fillColor={withAlpha(colors.purple, 0.05)}
                   strokeColor={withAlpha(colors.purple, 0.35)}

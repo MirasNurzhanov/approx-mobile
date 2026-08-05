@@ -859,12 +859,17 @@ function useClubChat(
       ws.current?.close();
       ws.current = null;
     };
-  }, [clubId]);
+    // expo-router's `router` is a module singleton, so it never changes and
+    // listing it cannot reconnect the socket.
+  }, [clubId, router]);
 
   // ── Scroll to bottom ──────────────────────────────────────────────────────
   useEffect(() => {
     if (messages.length > 0 && !loadingMore) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+      // Cleared on re-run and on unmount: messages can land faster than the
+      // 50ms delay, and every superseded timer would otherwise still fire.
+      const t = setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+      return () => clearTimeout(t);
     }
   }, [messages.length]);
 

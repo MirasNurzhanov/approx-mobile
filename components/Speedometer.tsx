@@ -15,6 +15,7 @@ import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
+import { NAV_ARC_R_OUT } from '@/components/navArc';
 import { IconSwift, type IconComponent } from '@/components/ui/icons';
 import { useScrollNav } from '@/context/ScrollNavContext';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
@@ -30,7 +31,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 // ─── Geometry ─────────────────────────────────────────────────────────────────
 const { width: W } = Dimensions.get('window');
-const R_OUT  = W / 2 - 4;
+const R_OUT  = NAV_ARC_R_OUT;
 const R_IN   = R_OUT * 0.5;
 const R_ICO  = (R_OUT + R_IN) / 2;
 const SVG_W  = W;
@@ -42,30 +43,6 @@ const SLIM_H = 56; // slim tab bar row height
 
 const SPRING = { damping: 18, stiffness: 150, mass: 0.9 };
 const FADE   = { duration: 200, easing: Easing.out(Easing.cubic) };
-
-/**
- * How far above the safe-area inset a control of `width`, inset `fromRight`
- * points from the right edge, has to sit to clear the nav arc.
- *
- * Takes the control's whole footprint rather than a single x on purpose: the
- * arc rises toward the middle of the screen, so a control near the right edge
- * is tallest under its *inner* edge. Measuring at its centre leaves the arc
- * cutting through the bottom corner nearest the middle.
- *
- * Measured against the expanded arc, not the collapsed slim bar: overshooting
- * while collapsed only leaves a larger gap, whereas undershooting overlaps.
- */
-export function navArcClearance(fromRight: number, width: number): number {
-  const centre = W / 2;
-  const near = fromRight;          // the control's right side
-  const far = fromRight + width;   // its left side
-  // Closest the footprint gets to the arc's apex, where the arc is tallest.
-  const d =
-    near <= centre && far >= centre
-      ? 0
-      : Math.min(Math.abs(centre - near), Math.abs(centre - far));
-  return d >= R_OUT ? 0 : Math.sqrt(R_OUT * R_OUT - d * d);
-}
 
 // ─── Badge indices ────────────────────────────────────────────────────────────
 const CHAT_IDX = 2; // 'Chat' is index 2
@@ -266,57 +243,64 @@ export function Speedometer() {
   // Sync needle when route changes. The shared value is Reanimated's, not
   // React's, so driving it from an effect is the point of the effect.
   useEffect(() => {
-    needleAngle.value = animate(SECTIONS[activeIdx].mid, true);
-  }, [activeIdx, animate]);
+    needleAngle.set(animate(SECTIONS[activeIdx].mid, true));
+  }, [activeIdx, animate, needleAngle]);
 
   // Animate transition when collapsed state or safeBottom changes
+  // Declared above the effect that reads it, so on any commit where both run
+  // this one lands first and that read sees the current inset.
   const safeBottomRef = useRef(safeBottom);
-  safeBottomRef.current = safeBottom;
+  const collapsedRef = useRef(collapsed);
+  useEffect(() => {
+    safeBottomRef.current = safeBottom;
+    collapsedRef.current = collapsed;
+  });
 
   useEffect(() => {
-    // Immediate layout update for safeBottom change (no spring)
-    containerH.value = collapsed
-      ? SLIM_H + safeBottom
-      : SVG_H + safeBottom;
-  }, [safeBottom]);
+    // Immediate layout update for safeBottom change (no spring). `collapsed` is
+    // read through the ref rather than depended on: the effect below already
+    // owns collapse, and letting it re-run this one would snap the bar to its
+    // new height first and swallow that animation.
+    containerH.set(collapsedRef.current ? SLIM_H + safeBottom : SVG_H + safeBottom);
+  }, [safeBottom, containerH]);
 
   useEffect(() => {
-    containerH.value = animate(
+    containerH.set(animate(
       collapsed ? SLIM_H + safeBottomRef.current : SVG_H + safeBottomRef.current,
       true,
-    );
-    collapseProgress.value = animate(collapsed ? 1 : 0, false);
-  }, [collapsed]);
+    ));
+    collapseProgress.set(animate(collapsed ? 1 : 0, false));
+  }, [collapsed, animate, containerH, collapseProgress]);
 
   function handlePress(idx: number) {
     // The needle still moves on the press, so the arc answers the tap at once.
     // Which wedge is *lit* follows the route, since that is what it reports —
     // lighting it here as well meant a failed navigation left the arc claiming
     // to be somewhere the app never went.
-    needleAngle.value = animate(SECTIONS[idx].mid, true);
+    needleAngle.set(animate(SECTIONS[idx].mid, true));
     router.navigate(SECTIONS[idx].route as any);
   }
 
   const lineProps = useAnimatedProps(() => {
-    const r = (needleAngle.value * Math.PI) / 180;
+    const r = (needleAngle.get() * Math.PI) / 180;
     return { x2: CX + NEEDLE * Math.cos(r), y2: CY - NEEDLE * Math.sin(r) };
   });
 
   const dotProps = useAnimatedProps(() => {
-    const r = (needleAngle.value * Math.PI) / 180;
+    const r = (needleAngle.get() * Math.PI) / 180;
     return { cx: CX + NEEDLE * Math.cos(r), cy: CY - NEEDLE * Math.sin(r) };
   });
 
   const containerStyle = useAnimatedStyle(() => ({
-    height: containerH.value,
+    height: containerH.get(),
   }));
 
   const svgFadeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(collapseProgress.value, [0, 1], [1, 0], Extrapolation.CLAMP),
+    opacity: interpolate(collapseProgress.get(), [0, 1], [1, 0], Extrapolation.CLAMP),
   }));
 
   const slimFadeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(collapseProgress.value, [0, 1], [0, 1], Extrapolation.CLAMP),
+    opacity: interpolate(collapseProgress.get(), [0, 1], [0, 1], Extrapolation.CLAMP),
   }));
 
   return (
@@ -340,7 +324,7 @@ export function Speedometer() {
 
               {SECTIONS.map((s, i) => (
                 <Path
-                  key={i}
+                  key={s.name}
                   d={sectorPath(s.start, s.end)}
                   fill={i === activeIdx ? colors.teal : colors.surface}
                   // Used to be a flat "#000000" at 2px — a hard black ring
@@ -373,7 +357,7 @@ export function Speedometer() {
             const badge = badgeFor(i, chatBadge, alertsBadge);
             return (
               <Pressable
-                key={i}
+                key={s.name}
                 onPress={() => handlePress(i)}
                 style={[styles.iconBtn, { left: pos.x - 26, top: pos.y - 24 }]}
                 hitSlop={10}
@@ -427,7 +411,7 @@ export function Speedometer() {
               const badge = badgeFor(i, chatBadge, alertsBadge);
               return (
                 <Pressable
-                  key={i}
+                  key={s.name}
                   onPress={() => handlePress(i)}
                   style={styles.slimBtn}
                   hitSlop={10}

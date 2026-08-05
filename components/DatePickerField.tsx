@@ -22,11 +22,13 @@ import {
 
 import { fonts, lightColors as L, radius } from '@/constants/theme';
 
-export const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
-export const MONTH_KEYS = ['01','02','03','04','05','06','07','08','09','10','11','12'];
-export const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Module-local: nothing outside this file reads the wheels' contents, and an
+// exported non-component would cost the file its Fast Refresh boundary.
+const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+const MONTH_KEYS = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const CURRENT_YEAR = new Date().getFullYear();
-export const YEARS = Array.from({ length: 100 }, (_, i) => String(CURRENT_YEAR - i));
+const YEARS = Array.from({ length: 100 }, (_, i) => String(CURRENT_YEAR - i));
 
 const ITEM_H = 44;
 

@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  type PanResponderInstance,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
@@ -23,18 +24,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { REACTIONS } from '@/components/storyReactions';
 import { Avatar } from '@/components/ui/Avatar';
 import { Scrim } from '@/components/ui/Scrim';
 import {
   IconBookmark,
   IconChevron,
   IconClose,
-  IconFunny,
-  IconInsight,
-  IconLike,
   IconPin,
-  IconStar,
-  type IconComponent,
 } from '@/components/ui/icons';
 import { fonts, radius, type } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -61,14 +58,7 @@ import { encodeStoryReply } from '@/services/storyReply';
 
 export const STORY_DURATION_MS = 7_000;
 
-export const REACTIONS: { type: ReactionType; Icon: IconComponent }[] = [
-  { type: 'like',        Icon: IconLike },
-  { type: 'funny',       Icon: IconFunny },
-  { type: 'helpful',     Icon: IconInsight },
-  { type: 'interesting', Icon: IconStar },
-];
-
-export function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return 'just now';
@@ -78,7 +68,7 @@ export function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export function timeLeft(expiresAt: string): string {
+function timeLeft(expiresAt: string): string {
   const diff = new Date(expiresAt).getTime() - Date.now();
   if (diff <= 0) return 'expired';
   const hrs = Math.floor(diff / 3_600_000);
@@ -94,7 +84,7 @@ function ProgressBar({ active, past, progress }: {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const style = useAnimatedStyle(() => {
-    const pct = active ? progress.value : past ? 1 : 0;
+    const pct = active ? progress.get() : past ? 1 : 0;
     return { width: `${pct * 100}%` };
   });
   return (
@@ -137,8 +127,10 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     setIndex(i);
   }
 
+  // Read only from the pan handler and the auto-advance timer, both of which
+  // run after the commit this effect follows.
   const goToRef = useRef(goTo);
-  goToRef.current = goTo;
+  useEffect(() => { goToRef.current = goTo; });
 
   // Auto-advance, paused while the reply input is focused.
   useEffect(() => {
@@ -146,25 +138,34 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
       cancelAnimation(progress);
       return;
     }
-    progress.value = 0;
-    progress.value = withTiming(1, { duration: STORY_DURATION_MS });
+    progress.set(0);
+    progress.set(withTiming(1, { duration: STORY_DURATION_MS }));
     const timer = setTimeout(() => goToRef.current(indexRef.current + 1), STORY_DURATION_MS);
     return () => {
       cancelAnimation(progress);
       clearTimeout(timer);
     };
-  }, [index, replyFocused]);
+  }, [index, replyFocused, progress]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy),
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dx < -40) goToRef.current(indexRef.current + 1);
-        else if (gs.dx > 40) goToRef.current(indexRef.current - 1);
-      },
-    })
-  ).current;
+  // Built once, in an effect rather than during render. The handlers have to
+  // read `.current` to stay on the live story, and the compiler counts every
+  // ref read reachable from a render-time call as a render-time read — which a
+  // `useRef`/`useState` initialiser is. Inside an effect it is simply allowed.
+  // Costs one extra render on mount; the gesture is live well before a finger
+  // can arrive, since the viewer fades in first.
+  const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
+  useEffect(() => {
+    setPanResponder(
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gs) =>
+          Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy),
+        onPanResponderRelease: (_, gs) => {
+          if (gs.dx < -40) goToRef.current(indexRef.current + 1);
+          else if (gs.dx > 40) goToRef.current(indexRef.current - 1);
+        },
+      }),
+    );
+  }, []);
 
   const story = stories[index];
   if (!story) return null;
@@ -217,7 +218,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   return (
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={styles.svContainer} {...panResponder.panHandlers}>
+      <View style={styles.svContainer} {...(panResponder?.panHandlers ?? {})}>
         {/* Background — photo fills the screen; a text-only story gets a soft
             vertical wash rather than flat black, which read as a dead screen. */}
         <View style={[StyleSheet.absoluteFill, styles.svBackdrop]} />
@@ -256,8 +257,8 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
         {/* Progress bars, flush to the top edge where a story's are expected
             to be. They used to sit in a rounded translucent box of their own. */}
         <View style={[styles.svProgressRow, { top: top + 8 }]} pointerEvents="none">
-          {stories.map((_, i) => (
-            <ProgressBar key={i} active={i === index} past={i < index} progress={progress} />
+          {stories.map((s, i) => (
+            <ProgressBar key={s.id} active={i === index} past={i < index} progress={progress} />
           ))}
         </View>
 

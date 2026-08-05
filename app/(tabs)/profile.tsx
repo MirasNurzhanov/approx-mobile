@@ -36,10 +36,10 @@ import {
   IconLogout,
   IconPencil,
   IconSound,
-  iconForInterest,
   type IconComponent,
   type IconProps,
 } from '@/components/ui/icons';
+import { iconForInterest } from '@/components/ui/interestIcons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -314,10 +314,10 @@ export default function ProfileScreen() {
                   </View>
                 )}
                 <View style={styles.chipWrap}>
-                  {group.items.map((tag, i) => {
+                  {group.items.map((tag) => {
                     const Icon = iconForInterest(tag.name);
                     return (
-                      <View key={i} style={styles.chip}>
+                      <View key={tag.name} style={styles.chip}>
                         <Icon size={14} color={colors.t2} />
                         <Text style={styles.chipText}>{tag.name}</Text>
                       </View>

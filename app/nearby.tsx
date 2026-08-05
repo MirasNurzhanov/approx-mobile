@@ -18,9 +18,9 @@ import { Card } from '@/components/ui/Card';
 import { IconBack } from '@/components/ui/icons';
 import {
   RelationshipBadge,
-  relationshipLabel,
   type Relationship,
 } from '@/components/ui/RelationshipBadge';
+import { relationshipLabel } from '@/components/ui/relationshipLabel';
 import { fonts, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';

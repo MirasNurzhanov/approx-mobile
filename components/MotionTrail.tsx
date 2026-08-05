@@ -63,7 +63,10 @@ export function MotionTrail({ path, reduceMotion = false }: Props) {
 
     segments.push(
       <Polyline
-        key={i}
+        // The path is a sliding window — points leave the front as new ones
+        // arrive — so an index would hand each segment's identity to its
+        // neighbour on every poll. Its two endpoints identify it instead.
+        key={`${path[i - 1].latitude},${path[i - 1].longitude}-${path[i].latitude},${path[i].longitude}`}
         coordinates={[path[i - 1], path[i]]}
         strokeColor={`rgba(${TRAIL_RGB},${SEGMENT_OPACITY[idx]})`}
         strokeWidth={SEGMENT_WIDTH[idx]}

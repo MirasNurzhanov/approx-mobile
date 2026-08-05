@@ -197,9 +197,11 @@ function ZonePreview({ mapRef, themeMode, mode, region, coords, previewCoords, p
           {/* One polygon per piece, not per ring: a region straddling the
               dateline is cut in two at ±180 so it draws as an island group
               rather than as a band around the planet. */}
-          {mode === 'region' && previewRings.map((piece, i) => (
+          {mode === 'region' && previewRings.map((piece) => (
             <Polygon
-              key={i}
+              // Keyed on where the piece starts: the split is deterministic, so
+              // a piece keeps its identity until the region itself changes.
+              key={`${piece[0].latitude},${piece[0].longitude}`}
               coordinates={piece}
               fillColor="rgba(139,92,246,0.12)"
               strokeColor="rgba(139,92,246,0.55)"

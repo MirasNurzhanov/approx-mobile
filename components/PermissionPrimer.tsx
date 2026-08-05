@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -93,8 +93,10 @@ export function usePermissionPrimer() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [pending, setPending] = useState<Pending | null>(null);
+  // Mirrors `pending` for the two callbacks below. Both are driven by a tap on
+  // the sheet, so they cannot run before this effect has caught the ref up.
   const pendingRef = useRef<Pending | null>(null);
-  pendingRef.current = pending;
+  useEffect(() => { pendingRef.current = pending; });
 
   const settle = useCallback((granted: boolean) => {
     pendingRef.current?.resolve(granted);

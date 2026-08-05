@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { hostOf, type ProfileLink } from '@/services/links';
-import { iconForPlatform, platformName } from '@/components/ui/platformIcons';
+import { iconForPlatform, platformName } from '@/components/ui/platformMeta';
 import { fonts, radius, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';

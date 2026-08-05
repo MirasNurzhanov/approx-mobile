@@ -67,9 +67,11 @@ export function useZonePlayback({
   const soundRef = useRef<Audio.Sound | null>(null);
   /** Same reason as `rangeRef`: the status callback is bound once at load. */
   const onDurationRef = useRef(onDuration);
-  onDurationRef.current = onDuration;
   const onPositionRef = useRef(onPosition);
-  onPositionRef.current = onPosition;
+  useEffect(() => {
+    onDurationRef.current = onDuration;
+    onPositionRef.current = onPosition;
+  });
   /** Set on unmount so a load that is still in flight unloads itself instead
    *  of playing into a screen that is gone. */
   const goneRef = useRef(false);
@@ -126,7 +128,7 @@ export function useZonePlayback({
   // autoplay out was that sound should never outlive the intent to hear it.
   const focused = useIsFocused();
   const focusedRef = useRef(true);
-  focusedRef.current = focused;
+  useEffect(() => { focusedRef.current = focused; });
   useEffect(() => { if (!focused) pause(); }, [focused, pause]);
 
   useEffect(() => {
@@ -142,7 +144,7 @@ export function useZonePlayback({
    *  is precisely wrong in a trim editor, where the whole point is that the
    *  window moves while the sound is playing. */
   const rangeRef = useRef({ startMs, endMs });
-  rangeRef.current = { startMs, endMs };
+  useEffect(() => { rangeRef.current = { startMs, endMs }; });
 
   const onStatus = useCallback((status: AVPlaybackStatus) => {
     if (!status.isLoaded) {

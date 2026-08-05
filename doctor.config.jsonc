@@ -1,0 +1,15 @@
+{
+  "$schema": "https://react.doctor/schema/config.json",
+
+  // `venv/` is a Python virtualenv — installed third-party packages, not this
+  // app's source. It is the Python equivalent of `node_modules/`, which the
+  // scanner already skips, and it is gitignored for the same reason.
+  //
+  // This is scan *scope*, not rule suppression: `ignore.files` decides what
+  // counts as our source, while `ignore.rules` — which would actually switch a
+  // rule off — is deliberately not used here. Every rule stays fully active on
+  // every real source file.
+  "ignore": {
+    "files": ["venv/**"]
+  }
+}

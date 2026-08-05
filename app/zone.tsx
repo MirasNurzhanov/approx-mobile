@@ -90,7 +90,11 @@ interface ZoneState {
 
 /** Decorative level meter on the upload tile. Fixed shape: it stands for
  *  "audio goes here", it is not a reading of anything. */
-const WAVE = [7, 13, 22, 15, 28, 20, 34, 24, 16, 27, 11, 20, 31, 18, 9, 15, 24, 13, 7, 17];
+// Bar heights carry an id because several repeat, so the height alone cannot
+// identify a bar. Built once at module scope — the waveform is decorative and
+// fixed, so these ids are stable for the life of the app.
+const WAVE = [7, 13, 22, 15, 28, 20, 34, 24, 16, 27, 11, 20, 31, 18, 9, 15, 24, 13, 7, 17]
+  .map((h, i) => ({ id: `wave-${i}`, h }));
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 // One component per band of the screen. The screen owns the zone state and the
@@ -420,11 +424,11 @@ function UploadSection({ isUpload, uploading, uploadPct, title, onPick, onRemove
           {/* Decorative while idle; while uploading the same bars fill left
               to right, so the tile becomes its own progress meter. */}
           <View style={styles.wave}>
-            {WAVE.map((h, i) => {
+            {WAVE.map(({ id, h }, i) => {
               const reached = uploading && (i / WAVE.length) * 100 <= (uploadPct ?? 0);
               return (
                 <View
-                  key={i}
+                  key={id}
                   style={[
                     styles.waveBar,
                     { height: h },

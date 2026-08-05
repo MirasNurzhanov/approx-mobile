@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Animated, Dimensions, StyleSheet, View } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
@@ -35,7 +35,7 @@ const CONFIGS: Config[] = Array.from({ length: COUNT }, (_, i) => {
 });
 
 function Particle({ cfg }: { cfg: Config }) {
-  const progress = useRef(new Animated.Value(cfg.phase)).current;
+  const [progress] = useState(() => new Animated.Value(cfg.phase));
 
   useEffect(() => {
     Animated.loop(
@@ -55,7 +55,9 @@ function Particle({ cfg }: { cfg: Config }) {
         })
       ).start();
     });
-  }, []);
+    // All three are fixed for the life of a Particle: `progress` is built once
+    // in the initialiser, and `cfg` comes from a module-level array.
+  }, [progress, cfg.duration, cfg.phase]);
 
   const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [0, cfg.dx] });
   const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [0, cfg.dy] });

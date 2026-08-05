@@ -27,11 +27,13 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggleTheme = () => {
-    setThemeMode((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
-      return next;
-    });
+    // `next` is computed here rather than from inside the updater, and the
+    // write happens before the setter, because React is free to call a state
+    // updater more than once — which would have repeated the save. One value
+    // feeds both the store and the state, so the two cannot disagree.
+    const next = themeMode === 'dark' ? 'light' : 'dark';
+    AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
+    setThemeMode(next);
   };
 
   // Two things outside React have to follow the theme too.

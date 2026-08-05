@@ -369,11 +369,16 @@ export default function MessagesScreen() {
       ws.current?.close();
       ws.current = null;
     };
-  }, [id]);
+    // `username` is a route param, so it is fixed for the life of this screen —
+    // listing it never reconnects the socket in practice.
+  }, [id, username]);
 
   useEffect(() => {
     if (messages.length > 0) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+      // Cleared on re-run and on unmount: messages can land faster than the
+      // 50ms delay, and every superseded timer would otherwise still fire.
+      const t = setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+      return () => clearTimeout(t);
     }
   }, [messages.length]);
 

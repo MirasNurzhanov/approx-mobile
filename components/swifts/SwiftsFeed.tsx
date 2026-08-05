@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SwiftCard } from '@/components/swifts/SwiftCard';
-import { navArcClearance } from '@/components/Speedometer';
+import { navArcClearance } from '@/components/navArc';
 import { fonts } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -108,8 +108,10 @@ export function SwiftsFeed() {
   }, [load]);
 
   // Stable identity: FlatList warns and misbehaves if this changes per render.
-  const handleViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+  // Held by `useState` rather than a ref, since reading a ref back during
+  // render is what stops React Compiler optimising this component.
+  const [handleViewableItemsChanged] = useState(() => {
+    return ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
       if (first?.index != null) {
         setActiveIndex(first.index);
@@ -118,8 +120,8 @@ export function SwiftsFeed() {
         // the prop afterwards.
         setPausedId(null);
       }
-    },
-  ).current;
+    };
+  });
 
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
     setHeight(e.nativeEvent.layout.height);

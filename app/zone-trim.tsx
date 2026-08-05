@@ -115,9 +115,10 @@ export default function ZoneTrimScreen() {
         e?.response?.data?.detail ??
         'Please try again.',
       );
-    } finally {
-      setSaving(false);
     }
+    // Reached on both paths: the `catch` alerts and stops there. Not a
+    // `finally` — React Compiler bails on any component containing one.
+    setSaving(false);
   }
 
   function reset() {

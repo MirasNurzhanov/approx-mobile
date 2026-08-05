@@ -89,7 +89,7 @@ export function ProfileLinkRow({ link }: { link: ProfileLink }) {
 
 export function ProfileLinks({ links }: { links: ProfileLink[] }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   if (!links.length) return null;
   return (
     <View style={styles.wrap}>

@@ -72,7 +72,7 @@ function ActionRow({ icon: Icon, label, onPress }: {
   onPress: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <Pressable
       style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
@@ -159,8 +159,10 @@ export default function ProfileScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchAll();
-    setRefreshing(false);
+    // Promise `.finally`, as on the focus effect above: same guarantee that the
+    // spinner stops on rejection, but React Compiler can compile it — a
+    // `try/finally` statement makes it bail on this whole screen.
+    await fetchAll().finally(() => setRefreshing(false));
   }, [fetchAll]);
 
   async function pickImage() {
@@ -191,9 +193,10 @@ export default function ProfileScreen() {
         setProfile(data);
       } catch (e: any) {
         Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.');
-      } finally {
-        setUploading(false);
       }
+      // Reached either way: the `catch` handles every failure. Not a `finally`,
+      // because React Compiler bails on any component containing one.
+      setUploading(false);
     }
   }
 

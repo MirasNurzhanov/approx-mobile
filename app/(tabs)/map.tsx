@@ -6,7 +6,6 @@ import {
     ActivityIndicator,
     Alert,
     AppState,
-    Image,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -19,7 +18,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import { Image } from 'expo-image';
 import MapView, { Circle, Marker, Polygon, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import Animated, {
     runOnJS,
@@ -394,6 +393,34 @@ function distanceBand(m?: number): string | null {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /**
+ * `tracksViewChanges` for a marker whose bitmap depends on `key`.
+ *
+ * react-native-maps rasterizes a marker's children and then freezes the result,
+ * so anything that changes what the marker should look like has to re-arm
+ * tracking or it keeps drawing the picture it froze first.
+ *
+ * Phrased as "the key I last settled on is not the key I am drawing now", which
+ * means a changed key re-arms tracking in the *same* render that changes it.
+ * The older shape — a flag flipped back to true inside an effect — repainted
+ * every affected marker a second time on every poll, and on a busy map that is
+ * a full extra rasterization pass for each of them.
+ */
+function useMarkerSettle(key: string, settleMs = 400) {
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSettledKey(key), settleMs);
+    return () => clearTimeout(t);
+  }, [key, settleMs]);
+
+  return {
+    settling: settledKey !== key,
+    /** For markers that know they have finished drawing before the timer. */
+    markSettled: () => setSettledKey(key),
+  };
+}
+
+/**
  * A matched stranger.
  *
  * They stay anonymous — no photo, no name, nothing to screenshot — but not
@@ -436,17 +463,14 @@ function DotMarker({
   /** The word under the dot. Suppressed in a pile — see `showCaption`. */
   const captionText = showCaption ? primary : undefined;
 
-  const [settling, setSettling] = useState(true);
-  useEffect(() => {
-    setSettling(true);
-    const t = setTimeout(() => setSettling(false), 400);
-    return () => clearTimeout(t);
-    // `primary` belongs here with the rest: the marker freezes its own bitmap
-    // once settled, so an interest that arrives on a later poll — the first
-    // one can land before the interest data does — would otherwise never be
-    // drawn at all. `parked` for the same reason: the dot has to redraw as the
-    // empty spacer on the way in, and as itself on the way back out.
-  }, [color, online, primary, extra, captionText, parked]);
+  // `primary` belongs in the key with the rest: the marker freezes its own
+  // bitmap once settled, so an interest that arrives on a later poll — the
+  // first one can land before the interest data does — would otherwise never be
+  // drawn at all. `parked` for the same reason: the dot has to redraw as the
+  // empty spacer on the way in, and as itself on the way back out.
+  const { settling } = useMarkerSettle(
+    `${color}|${online}|${primary}|${extra}|${captionText}|${parked}`,
+  );
 
   // The glyph needs a bigger core to sit in than a bare point does, and the
   // caption makes the marker taller than its halo — so the anchor moves off
@@ -562,25 +586,23 @@ function AvatarMarker({
   // `loadedAvatars` still earns its keep for the mounts that remain: someone
   // walking back into `visibleNearby` comes back already wearing their face
   // instead of flashing a blank ring while a cached picture decodes again.
-  const [imageReady, setImageReady] = useState(() => !uri || loadedAvatars.has(uri));
-  const [imageFailed, setImageFailed] = useState(false);
-  const [ringSettling, setRingSettling] = useState(true);
-
+  // Tagged with the uri it describes rather than reset by an effect when the
+  // uri changes. The effect version was a render late, so a marker whose
+  // picture changed showed the previous person's face inside the new ring for
+  // a frame before blanking.
+  const [load, setLoad] = useState<{ uri?: string; ready: boolean; failed: boolean }>(
+    () => ({ uri, ready: !uri || loadedAvatars.has(uri), failed: false }),
+  );
+  const loadIsCurrent = load.uri === uri;
+  const imageReady  = loadIsCurrent ? load.ready  : !uri || loadedAvatars.has(uri);
+  const imageFailed = loadIsCurrent ? load.failed : false;
   const online = presence?.is_online;
 
-  useEffect(() => {
-    setImageReady(!uri || loadedAvatars.has(uri));
-    setImageFailed(false);
-  }, [uri]);
-  useEffect(() => {
-    setRingSettling(true);
-    const t = setTimeout(() => setRingSettling(false), 400);
-    return () => clearTimeout(t);
-    // Presence changes the bitmap too, so it re-arms tracking — but keyed on
-    // the boolean, not the object, so a poll that returns an equal presence
-    // does not re-rasterize every avatar on the map. Parking is a bitmap change
-    // as well: the ring has to redraw as the empty spacer, and back again.
-  }, [ringColor, online, parked]);
+  // Presence changes the bitmap too, so it re-arms tracking — but keyed on the
+  // boolean, not the object, so a poll that returns an equal presence does not
+  // re-rasterize every avatar on the map. Parking is a bitmap change as well:
+  // the ring has to redraw as the empty spacer, and back again.
+  const { settling: ringSettling } = useMarkerSettle(`${ringColor}|${online}|${parked}`);
 
   // The trail is decorative and hidden from assistive tech, so the state it
   // conveys is spelled out here instead — motion must never be carried by the
@@ -618,9 +640,9 @@ function AvatarMarker({
               style={{ width: inner, height: inner, borderRadius: inner / 2 }}
               onLoad={() => {
                 loadedAvatars.add(uri);
-                setTimeout(() => setImageReady(true), 250);
+                setTimeout(() => setLoad({ uri, ready: true, failed: false }), 250);
               }}
-              onError={() => { setImageFailed(true); setImageReady(true); }}
+              onError={() => setLoad({ uri, ready: true, failed: true })}
             />
           ) : (
             <View
@@ -670,9 +692,14 @@ function SelfMarker({ coordinate, uri, username }: {
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [imageReady, setImageReady] = useState(!uri);
-  const [imageFailed, setImageFailed] = useState(false);
-  useEffect(() => { setImageReady(!uri); setImageFailed(false); }, [uri]);
+  // Same shape as AvatarMarker: the load state carries the uri it belongs to,
+  // so changing your own picture is not a reset an effect has to perform.
+  const [load, setLoad] = useState<{ uri?: string; ready: boolean; failed: boolean }>(
+    () => ({ uri, ready: !uri, failed: false }),
+  );
+  const loadIsCurrent = load.uri === uri;
+  const imageReady  = loadIsCurrent ? load.ready  : !uri;
+  const imageFailed = loadIsCurrent ? load.failed : false;
 
   return (
     <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={!imageReady}>
@@ -684,9 +711,9 @@ function SelfMarker({ coordinate, uri, username }: {
               style={styles.selfAvatar}
               onLoad={() => {
                 loadedAvatars.add(uri);
-                setTimeout(() => setImageReady(true), 250);
+                setTimeout(() => setLoad({ uri, ready: true, failed: false }), 250);
               }}
-              onError={() => { setImageFailed(true); setImageReady(true); }}
+              onError={() => setLoad({ uri, ready: true, failed: true })}
             />
           ) : (
             <View style={[styles.selfAvatar, styles.selfInitialWrap]}>
@@ -737,12 +764,7 @@ function MusicZoneBadge({ center, radius, mine, label, color }: {
   // Same reason as ClusterMarker: let it draw, then freeze the raster — and
   // re-arm on every input that changes what the chip says, or a zone resized or
   // recoloured mid-session keeps drawing the label it first froze.
-  const [settling, setSettling] = useState(true);
-  useEffect(() => {
-    setSettling(true);
-    const t = setTimeout(() => setSettling(false), 400);
-    return () => clearTimeout(t);
-  }, [radius, label, color]);
+  const { settling } = useMarkerSettle(`${radius}|${label}|${color}`);
 
   return (
     <Marker
@@ -779,18 +801,13 @@ function ClusterMarker({ coordinate, count, parked, onPress }: {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   // Same reason as DotMarker: freeze the raster, but not before it has drawn.
   //
-  // `setSettling(true)` is the point of the effect. Without it the badge froze
-  // its first bitmap for good: a pile that gained or lost someone kept drawing
-  // its old number, because the timer below had already fired and nothing ever
-  // re-armed tracking. Parking re-arms it too — a slot that goes quiet has to
-  // redraw as the empty spacer, or it keeps a headcount's worth of tap target
-  // sitting on the map.
-  const [settling, setSettling] = useState(true);
-  useEffect(() => {
-    setSettling(true);
-    const t = setTimeout(() => setSettling(false), 400);
-    return () => clearTimeout(t);
-  }, [count, parked]);
+  // Re-arming is the point. Without it the badge froze its first bitmap for
+  // good: a pile that gained or lost someone kept drawing its old number,
+  // because the timer had already fired and nothing ever re-armed tracking.
+  // Parking is in the key too — a slot that goes quiet has to redraw as the
+  // empty spacer, or it keeps a headcount's worth of tap target sitting on the
+  // map.
+  const { settling } = useMarkerSettle(`${count}|${parked}`);
 
   return (
     <Marker
@@ -821,7 +838,7 @@ function ClusterMarker({ coordinate, count, parked, onPress }: {
 
 function StoryBubble({ story, count, onAvatarLoad }: { story: Story; count: number; onAvatarLoad?: () => void }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const avatarBg = avatarBgColor(story.author.username);
 
   const reactions = story.reactions ?? {};
@@ -878,18 +895,12 @@ function StoryMarker({ stories, onPress }: { stories: Story[]; onPress: () => vo
   // until the image load fires (or a fallback timeout for letter avatars and
   // failed loads), and re-track for a beat whenever the bubble's content
   // changes so new stories and reaction counts actually repaint.
-  const [tracks, setTracks] = useState(true);
   const signature = `${first.id}:${stories.length}:${first.author.profile_picture ?? ''}:${JSON.stringify(first.reactions ?? {})}`;
-
-  useEffect(() => {
-    setTracks(true);
-    const fallback = setTimeout(() => setTracks(false), 3000);
-    return () => clearTimeout(fallback);
-  }, [signature]);
+  const { settling: tracks, markSettled } = useMarkerSettle(signature, 3000);
 
   // One frame after load isn't enough on Android — give the draw a moment
   // before freezing the snapshot.
-  const settle = useCallback(() => { setTimeout(() => setTracks(false), 300); }, []);
+  const settle = () => { setTimeout(markSettled, 300); };
 
   return (
     <Marker
@@ -940,7 +951,7 @@ function LocateButton({
   onPress: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const following = state === 'following';
 
   // The icon carries the state as a shape — a filled centre when tracking, a
@@ -985,7 +996,7 @@ function TopBar({
   onList: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top } = useSafeAreaInsets();
   return (
     <View style={[styles.topBar, { paddingTop: top + 6 }]}>
@@ -1103,9 +1114,10 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
       onClose();
     } catch {
       Alert.alert('Failed to post', 'Please try again.');
-    } finally {
-      setPosting(false);
     }
+    // Both paths land here — the `catch` rethrows nothing — so the button
+    // re-enables without a `finally`, which React Compiler cannot compile.
+    setPosting(false);
   }
 
   return (
@@ -1139,7 +1151,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
           <Text style={styles.charCount}>{text.length}/280</Text>
           {photoUri ? (
             <View style={styles.photoPreviewContainer}>
-              <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
+              <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" />
               <TouchableOpacity style={styles.removePhotoBtn} onPress={() => setPhotoUri(null)} hitSlop={8}>
                 <IconClose size={14} color={colors.t1} />
               </TouchableOpacity>
@@ -1188,7 +1200,7 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
 // ─── Meetup Marker ────────────────────────────────────────────────────────────
 function MeetupMarker({ meetup, onPress }: { meetup: ClubMeetup; onPress: () => void }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <Marker
       coordinate={{ latitude: meetup.latitude, longitude: meetup.longitude }}
@@ -1222,7 +1234,7 @@ function MeetupSheet({
   onDismiss: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.value }] }));
 
@@ -1321,14 +1333,17 @@ function UserSheet({
   const relLabelColor = isFriend ? colors.blue : isConnected ? colors.orange : colors.t2;
   const dist          = fmtDistance(user.distance);
 
-  // The sheet stays mounted when tapping straight to another marker, so the
-  // sent state must reset per user.
-  const [requestSent, setRequestSent] = useState(false);
-  useEffect(() => { setRequestSent(false); }, [user.id]);
+  // The sheet stays mounted when tapping straight to another marker, so "sent"
+  // has to mean "sent to *this* person". Recording who it was sent to says that
+  // outright, instead of a boolean that an effect has to remember to clear —
+  // and the old version cleared it a render late, so tapping from someone you
+  // had just messaged to someone new showed "Sent" under the new name first.
+  const [sentTo, setSentTo] = useState<number | null>(null);
+  const requestSent = sentTo === user.id;
 
   function sendFriendRequest() {
     api.post(`/api/friends/request/${user.id}/`)
-      .then(() => setRequestSent(true))
+      .then(() => setSentTo(user.id))
       .catch((e) => console.log('[Friend Request] error:', e?.response?.status, JSON.stringify(e?.response?.data)));
   }
 
@@ -1582,7 +1597,10 @@ export default function MapScreen() {
   const [nearby, setNearby]           = useState<NearbyUser[]>([]);
   const [permState, setPermState]     = useState<PermissionState | null>(null);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
-  const [selectedUser, setSelectedUser] = useState<NearbyUser | null>(null);
+  /** Who the sheet was opened for. The row shown is read back out of the live
+   *  list below, so an open sheet follows each poll on its own. */
+  const [openUser, setOpenUser] = useState<NearbyUser | null>(null);
+  const selectedUser = openUser ? (nearby.find((u) => u.id === openUser.id) ?? openUser) : null;
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
@@ -1591,7 +1609,13 @@ export default function MapScreen() {
   const [hiToast, setHiToast]           = useState(false);
   const [locationToast, setLocationToast] = useState(false);
   const [stories, setStories]           = useState<Story[]>([]);
-  const [storyViewer, setStoryViewer]   = useState<{ stories: Story[] } | null>(null);
+  /** Which stories the viewer was opened on. Each one is read back out of the
+   *  live list below, so reactions and refetches show through without the
+   *  viewer's copy having to be patched to match. */
+  const [openStories, setOpenStories]   = useState<Story[] | null>(null);
+  const storyViewer = openStories
+    ? { stories: openStories.map((s) => stories.find((f) => f.id === s.id) ?? s) }
+    : null;
   const [createStoryCoord, setCreateStoryCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [clubMeetups, setClubMeetups]   = useState<ClubMeetup[]>([]);
   const [selectedMeetup, setSelectedMeetup] = useState<ClubMeetup | null>(null);
@@ -1601,7 +1625,7 @@ export default function MapScreen() {
   const lastUserRef   = useRef<NearbyUser | null>(null);
   const lastMeetupRef = useRef<ClubMeetup | null>(null);
 
-  const [following, setFollowing]     = useState(false);
+  const [followRequested, setFollowRequested] = useState(false);
   const [locating, setLocating]       = useState(false);
 
   const coordsRef          = useRef(coords);
@@ -1636,7 +1660,6 @@ export default function MapScreen() {
   const startingWatchRef   = useRef(false);
   coordsRef.current = coords;
   currentUserIdRef.current = currentUserId;
-  followingRef.current = following;
 
   const sheetY = useSharedValue(SHEET_H);
   const reduceMotion = useReduceMotion();
@@ -1666,6 +1689,14 @@ export default function MapScreen() {
   }, []);
   const locationState = permissions.location?.state ?? permState;
   const locationGranted = locationState === 'granted';
+
+  // Following depends on the permission that feeds it, so it is stated as a
+  // condition rather than a flag some effect has to switch off afterwards.
+  // Losing location mid-follow now stops it in the same render; before, the
+  // camera stayed locked to a position that would never update again until an
+  // effect noticed and re-rendered.
+  const following = followRequested && locationGranted;
+  followingRef.current = following;
 
   // Stories deleted from the archive screen vanish here immediately instead of
   // waiting for the next poll.
@@ -1993,7 +2024,7 @@ export default function MapScreen() {
       const { users, stories, meetups } = r.data;
       setNearby(users);
       setStories(stories);
-      stories.forEach(s => { if (s.image) ExpoImage.prefetch(s.image); });
+      stories.forEach(s => { if (s.image) Image.prefetch(s.image); });
       const now = Date.now();
       setClubMeetups(meetups.filter((e) => new Date(e.expires_at).getTime() > now));
     } catch {}
@@ -2001,9 +2032,9 @@ export default function MapScreen() {
 
   function openStoryViewer(authorStories: Story[]) {
     sheetY.value = SHEET_H;
-    setSelectedUser(null);
+    setOpenUser(null);
     setSelectedMeetup(null);
-    setStoryViewer({ stories: authorStories });
+    setOpenStories(authorStories);
   }
 
   async function reactToStory(storyId: number, reaction: ReactionType) {
@@ -2017,7 +2048,8 @@ export default function MapScreen() {
         if (!wasActive) updated[reaction] = (updated[reaction] ?? 0) + 1;
         return { ...s, reactions: updated, user_reaction: wasActive ? null : reaction };
       };
-      setStoryViewer((prev) => prev ? { stories: prev.stories.map(applyReaction) } : prev);
+      // Only the master list is patched: the open viewer reads its rows out of
+      // it, so it picks the reaction up from here without a copy of its own.
       setStories((prev) => prev.map(applyReaction));
       await fetchMapData();
     } catch (error: any) {
@@ -2128,9 +2160,11 @@ export default function MapScreen() {
       );
     } catch (e: any) {
       console.log('[Map] location watch failed:', e?.message);
-    } finally {
-      startingWatchRef.current = false;
     }
+    // Always reached — the `catch` only logs — so the re-entrancy guard is
+    // released on both paths without a `finally`, which React Compiler cannot
+    // compile and which would cost this screen its auto-memoization.
+    startingWatchRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -2221,37 +2255,25 @@ export default function MapScreen() {
 
 
 
-  // Keep the open sheet in sync with the latest nearby fetch
-  useEffect(() => {
-    if (!selectedUser) return;
-    const fresh = nearby.find((u) => u.id === selectedUser.id);
-    if (fresh) setSelectedUser(fresh);
-  }, [nearby]);
-
-  // Keep the open story viewer in sync with the latest stories fetch
-  useEffect(() => {
-    if (!storyViewer) return;
-    setStoryViewer((prev) => {
-      if (!prev) return prev;
-      return { stories: prev.stories.map((s) => stories.find((f) => f.id === s.id) ?? s) };
-    });
-  }, [stories]);
+  // The sheet and the story viewer used to be re-synced here after every fetch.
+  // Both now read their rows out of the live lists as they render, so there is
+  // nothing left to copy across.
 
   function openSheet(user: NearbyUser) {
     setSelectedMeetup(null);
-    setSelectedUser(user);
+    setOpenUser(user);
     sheetY.value = withSpring(0, SPRING_CFG);
   }
 
   function closeSheet() {
     sheetY.value = withSpring(SHEET_H, SPRING_CFG, (done) => {
-      if (done) runOnJS(setSelectedUser)(null);
+      if (done) runOnJS(setOpenUser)(null);
     });
   }
 
   function openMeetupSheet(meetup: ClubMeetup) {
-    setStoryViewer(null);
-    setSelectedUser(null);
+    setOpenStories(null);
+    setOpenUser(null);
     setSelectedMeetup(meetup);
     sheetY.value = withSpring(0, SPRING_CFG);
   }
@@ -2300,7 +2322,7 @@ export default function MapScreen() {
   const stopFollowing = useCallback((reason: 'gesture' | 'tap') => {
     if (!followingRef.current) return;
     followingRef.current = false;
-    setFollowing(false);
+    setFollowRequested(false);
     announce(
       reason === 'gesture'
         ? 'Stopped following your location, map moved'
@@ -2341,12 +2363,6 @@ export default function MapScreen() {
     centerOnSelf(displayCoords, false);
   }, [following, displayCoords, centerOnSelf]);
 
-  // Losing permission while following leaves the camera locked to a position
-  // that will never update again.
-  useEffect(() => {
-    if (!locationGranted && following) setFollowing(false);
-  }, [locationGranted, following]);
-
   async function explainUnavailable() {
     // The primer already covers both shapes of this: the reason plus the OS
     // dialog while we may still ask, and the reason plus Linking.openSettings()
@@ -2376,7 +2392,7 @@ export default function MapScreen() {
     // Set before the re-render: stopFollowing reads the ref, and onPanDrag can
     // fire a frame ahead of the state update.
     followingRef.current = true;
-    setFollowing(true);
+    setFollowRequested(true);
     announce('Following your location');
   }
 
@@ -2842,7 +2858,7 @@ export default function MapScreen() {
         return (
           <StoryViewer
             stories={storyViewer.stories}
-            onClose={() => setStoryViewer(null)}
+            onClose={() => setOpenStories(null)}
             onReact={reactToStory}
             replyTo={replyTo}
             currentUserId={currentUserId}

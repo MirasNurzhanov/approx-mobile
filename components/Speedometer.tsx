@@ -196,7 +196,11 @@ export function Speedometer() {
   const { colors }        = useTheme();
   const styles            = useMemo(() => makeStyles(colors), [colors]);
 
-  const [activeIdx, setActiveIdx] = useState(() => matchSection(pathname));
+  // Which wedge is lit is a pure function of the route, so it is worked out
+  // here rather than mirrored into state by an effect — that version repainted
+  // the whole arc a second time on every navigation, with the old wedge still
+  // lit in between.
+  const activeIdx = matchSection(pathname);
   const [chatBadge, setChatBadge] = useState(0);
   // Same store the Alerts tab inside Chat reads, so the wedge badge and the tab
   // badge can never disagree.
@@ -259,12 +263,11 @@ export function Speedometer() {
   const containerH       = useSharedValue(SVG_H + safeBottom);
   const collapseProgress = useSharedValue(0); // 0 = full speedometer, 1 = slim bar
 
-  // Sync needle when route changes
+  // Sync needle when route changes. The shared value is Reanimated's, not
+  // React's, so driving it from an effect is the point of the effect.
   useEffect(() => {
-    const idx = matchSection(pathname);
-    setActiveIdx(idx);
-    needleAngle.value = animate(SECTIONS[idx].mid, true);
-  }, [pathname, animate]);
+    needleAngle.value = animate(SECTIONS[activeIdx].mid, true);
+  }, [activeIdx, animate]);
 
   // Animate transition when collapsed state or safeBottom changes
   const safeBottomRef = useRef(safeBottom);
@@ -286,8 +289,11 @@ export function Speedometer() {
   }, [collapsed]);
 
   function handlePress(idx: number) {
+    // The needle still moves on the press, so the arc answers the tap at once.
+    // Which wedge is *lit* follows the route, since that is what it reports —
+    // lighting it here as well meant a failed navigation left the arc claiming
+    // to be somewhere the app never went.
     needleAngle.value = animate(SECTIONS[idx].mid, true);
-    setActiveIdx(idx);
     router.navigate(SECTIONS[idx].route as any);
   }
 

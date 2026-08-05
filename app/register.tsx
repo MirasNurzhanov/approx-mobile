@@ -310,9 +310,10 @@ export default function RegisterScreen() {
       } else {
         setErrors({ non_field_errors: ['Registration failed. Please try again.'] });
       }
-    } finally {
-      setSubmitting(false);
     }
+    // Reached on both paths: the `catch` records the errors and stops there.
+    // Not a `finally` — React Compiler bails on any component containing one.
+    setSubmitting(false);
   }
 
   const fe = (field: string) => errors[field]?.[0];

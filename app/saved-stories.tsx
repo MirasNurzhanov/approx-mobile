@@ -4,13 +4,13 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { StoryViewer } from '@/components/StoryViewer';
@@ -59,7 +59,7 @@ function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPre
   onLongPress: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const caption = story.content ?? story.text;
   return (
     <Pressable
@@ -68,7 +68,7 @@ function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPre
       onLongPress={onLongPress}
     >
       {story.image ? (
-        <Image source={{ uri: story.image }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <Image source={{ uri: story.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
       ) : (
         <View style={styles.cardTextOnly}>
           <Text style={styles.cardTextContent} numberOfLines={6}>{caption}</Text>
@@ -109,11 +109,142 @@ function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPre
 // ─── Empty state ──────────────────────────────────────────────────────────────
 function EmptyState({ title, message }: { title: string; message: string }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={styles.emptyWrap}>
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptyMessage}>{message}</Text>
+    </View>
+  );
+}
+
+// ─── Header ───────────────────────────────────────────────────────────────────
+/** Back/Select in the normal state, Cancel/Select-all once you are picking. */
+function ArchiveHeader({ selectMode, selectedCount, canSelect, allSelected, onBack, onEnterSelect, onExitSelect, onToggleSelectAll }: {
+  selectMode: boolean;
+  selectedCount: number;
+  canSelect: boolean;
+  allSelected: boolean;
+  onBack: () => void;
+  onEnterSelect: () => void;
+  onExitSelect: () => void;
+  onToggleSelectAll: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.header}>
+      {selectMode ? (
+        <Pressable onPress={onExitSelect} hitSlop={12}>
+          <Text style={styles.headerAction}>Cancel</Text>
+        </Pressable>
+      ) : (
+        <Pressable
+          style={({ pressed }) => [pressed && styles.pressed]}
+          onPress={onBack}
+          hitSlop={12}
+        >
+          <IconBack size={22} color={colors.t1} />
+        </Pressable>
+      )}
+      <Text style={styles.title}>
+        {selectMode ? `${selectedCount} selected` : 'My stories'}
+      </Text>
+      {selectMode ? (
+        <Pressable onPress={onToggleSelectAll} hitSlop={12} disabled={!canSelect}>
+          <Text style={[styles.headerAction, !canSelect && styles.headerActionDisabled]}>
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </Text>
+        </Pressable>
+      ) : (
+        <Pressable onPress={onEnterSelect} hitSlop={12} disabled={!canSelect}>
+          <Text style={[styles.headerAction, !canSelect && styles.headerActionDisabled]}>
+            Select
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+// ─── Tab bar ──────────────────────────────────────────────────────────────────
+/** Underline style, matching Messages. */
+function ArchiveTabs({ tabs, activeTab, onSelect }: {
+  tabs: { key: Tab; label: string; count: number | null }[];
+  activeTab: Tab;
+  onSelect: (tab: Tab) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={styles.tabBar}>
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.key;
+        return (
+          <Pressable
+            key={tab.key}
+            style={[styles.tabItem, isActive && styles.tabItemActive]}
+            onPress={() => onSelect(tab.key)}
+          >
+            <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+              {tab.label}
+            </Text>
+            {tab.count !== null && tab.count > 0 && (
+              <View style={[styles.tabBadge, isActive && styles.tabBadgeActive]}>
+                <Text style={[styles.tabBadgeText, isActive && styles.tabBadgeTextActive]}>
+                  {tab.count}
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── Select-mode action bar ───────────────────────────────────────────────────
+function SelectionBar({ activeTab, selectedCount, deleting, canClear, bottom, onClearAll, onDeleteSelected }: {
+  activeTab: Tab;
+  selectedCount: number;
+  deleting: boolean;
+  canClear: boolean;
+  bottom: number;
+  onClearAll: () => void;
+  onDeleteSelected: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={[styles.actionBar, { paddingBottom: bottom + 14 }]}>
+      <Pressable
+        style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+        onPress={onClearAll}
+        disabled={deleting || !canClear}
+      >
+        <Text style={styles.clearBtnText}>Clear all</Text>
+      </Pressable>
+      <Pressable
+        style={({ pressed }) => [
+          styles.deleteBtn,
+          (selectedCount === 0 || deleting) && styles.deleteBtnDisabled,
+          pressed && styles.pressed,
+        ]}
+        onPress={onDeleteSelected}
+        disabled={selectedCount === 0 || deleting}
+      >
+        {deleting ? (
+          <ActivityIndicator color={colors.t1} size="small" />
+        ) : (
+          <>
+            <IconTrash size={16} color={selectedCount === 0 ? colors.t3 : colors.t1} />
+            <Text style={[styles.deleteBtnText, selectedCount === 0 && styles.deleteBtnTextDisabled]}>
+              {activeTab === 'mine' ? 'Delete' : 'Remove'}
+              {selectedCount > 0 ? ` (${selectedCount})` : ''}
+            </Text>
+          </>
+        )}
+      </Pressable>
     </View>
   );
 }
@@ -183,9 +314,10 @@ export default function SavedStoriesScreen() {
       await (activeTab === 'mine' ? refreshMine() : refreshSaved());
     } catch {
       // Offline or server error — the cached list stays on screen.
-    } finally {
-      setRefreshing(false);
     }
+    // The `catch` swallows everything, so this always runs. Deliberately not a
+    // `finally` — React Compiler bails on any component containing one.
+    setRefreshing(false);
   }, [activeTab]);
 
   const onEndReached = useCallback(async () => {
@@ -193,10 +325,9 @@ export default function SavedStoriesScreen() {
     setLoadingMore(true);
     try {
       await (activeTab === 'mine' ? loadMoreMine() : loadMoreSaved());
-    } catch {
-    } finally {
-      setLoadingMore(false);
-    }
+    } catch {}
+    // The `catch` swallows everything, so this always runs.
+    setLoadingMore(false);
   }, [activeTab, list, total, loadingMore]);
 
   async function runDelete(ids: number[]) {
@@ -211,9 +342,9 @@ export default function SavedStoriesScreen() {
         activeTab === 'mine' ? 'Could not delete' : 'Could not remove',
         'Something went wrong and nothing was removed. Please try again.',
       );
-    } finally {
-      setDeleting(false);
     }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setDeleting(false);
   }
 
   function confirmDeleteSelected() {
@@ -250,9 +381,9 @@ export default function SavedStoriesScreen() {
         exitSelectMode();
       } catch {
         Alert.alert('Could not clear', 'Something went wrong and nothing was removed. Please try again.');
-      } finally {
-        setDeleting(false);
       }
+      // Reached on both paths: the `catch` alerts and stops there.
+      setDeleting(false);
     };
     if (activeTab === 'mine') {
       Alert.alert(
@@ -284,63 +415,18 @@ export default function SavedStoriesScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        {selectMode ? (
-          <Pressable onPress={exitSelectMode} hitSlop={12}>
-            <Text style={styles.headerAction}>Cancel</Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            style={({ pressed }) => [pressed && styles.pressed]}
-            onPress={() => router.back()}
-            hitSlop={12}
-          >
-            <IconBack size={22} color={colors.t1} />
-          </Pressable>
-        )}
-        <Text style={styles.title}>
-          {selectMode ? `${selected.size} selected` : 'My stories'}
-        </Text>
-        {selectMode ? (
-          <Pressable onPress={toggleSelectAll} hitSlop={12} disabled={loaded.length === 0}>
-            <Text style={[styles.headerAction, loaded.length === 0 && styles.headerActionDisabled]}>
-              {allSelected ? 'Deselect all' : 'Select all'}
-            </Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={enterSelectMode} hitSlop={12} disabled={loaded.length === 0}>
-            <Text style={[styles.headerAction, loaded.length === 0 && styles.headerActionDisabled]}>
-              Select
-            </Text>
-          </Pressable>
-        )}
-      </View>
+      <ArchiveHeader
+        selectMode={selectMode}
+        selectedCount={selected.size}
+        canSelect={loaded.length > 0}
+        allSelected={allSelected}
+        onBack={() => router.back()}
+        onEnterSelect={enterSelectMode}
+        onExitSelect={exitSelectMode}
+        onToggleSelectAll={toggleSelectAll}
+      />
 
-      {/* Tab bar — underline style (matches Messages) */}
-      <View style={styles.tabBar}>
-        {TABS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          return (
-            <Pressable
-              key={tab.key}
-              style={[styles.tabItem, isActive && styles.tabItemActive]}
-              onPress={() => switchTab(tab.key)}
-            >
-              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                {tab.label}
-              </Text>
-              {tab.count !== null && tab.count > 0 && (
-                <View style={[styles.tabBadge, isActive && styles.tabBadgeActive]}>
-                  <Text style={[styles.tabBadgeText, isActive && styles.tabBadgeTextActive]}>
-                    {tab.count}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </View>
+      <ArchiveTabs tabs={TABS} activeTab={activeTab} onSelect={switchTab} />
 
       {firstLoad ? (
         <View style={styles.loadingWrap}>
@@ -394,38 +480,16 @@ export default function SavedStoriesScreen() {
         />
       )}
 
-      {/* Select-mode action bar */}
       {selectMode && (
-        <View style={[styles.actionBar, { paddingBottom: bottom + 14 }]}>
-          <Pressable
-            style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
-            onPress={confirmClearAll}
-            disabled={deleting || loaded.length === 0}
-          >
-            <Text style={styles.clearBtnText}>Clear all</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.deleteBtn,
-              (selected.size === 0 || deleting) && styles.deleteBtnDisabled,
-              pressed && styles.pressed,
-            ]}
-            onPress={confirmDeleteSelected}
-            disabled={selected.size === 0 || deleting}
-          >
-            {deleting ? (
-              <ActivityIndicator color={colors.t1} size="small" />
-            ) : (
-              <>
-                <IconTrash size={16} color={selected.size === 0 ? colors.t3 : colors.t1} />
-                <Text style={[styles.deleteBtnText, selected.size === 0 && styles.deleteBtnTextDisabled]}>
-                  {activeTab === 'mine' ? 'Delete' : 'Remove'}
-                  {selected.size > 0 ? ` (${selected.size})` : ''}
-                </Text>
-              </>
-            )}
-          </Pressable>
-        </View>
+        <SelectionBar
+          activeTab={activeTab}
+          selectedCount={selected.size}
+          deleting={deleting}
+          canClear={loaded.length > 0}
+          bottom={bottom}
+          onClearAll={confirmClearAll}
+          onDeleteSelected={confirmDeleteSelected}
+        />
       )}
 
       {/* Story viewer — reactions shown read-only (reacting needs proximity) */}

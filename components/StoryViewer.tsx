@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -15,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import Animated, {
   cancelAnimation,
   useAnimatedStyle,
@@ -92,7 +92,7 @@ function ProgressBar({ active, past, progress }: {
   progress: SharedValue<number>;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const style = useAnimatedStyle(() => {
     const pct = active ? progress.value : past ? 1 : 0;
     return { width: `${pct * 100}%` };
@@ -183,9 +183,10 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
       else await saveStory(story);
     } catch {
       Alert.alert('Could not update', 'Please try again.');
-    } finally {
-      setTogglingSave(false);
     }
+    // Reached on both paths: the `catch` alerts and stops there. Not a
+    // `finally` — React Compiler bails on any component containing one.
+    setTogglingSave(false);
   }
 
   async function sendReply() {
@@ -210,9 +211,9 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     } catch (e: any) {
       console.log('[Story reply] error:', e?.response?.status, JSON.stringify(e?.response?.data));
       Alert.alert('Could not send', 'Please try again.');
-    } finally {
-      setSendingReply(false);
     }
+    // Reached on both paths: the `catch` logs, alerts and stops there.
+    setSendingReply(false);
   }
 
   return (
@@ -223,7 +224,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
             vertical wash rather than flat black, which read as a dead screen. */}
         <View style={[StyleSheet.absoluteFill, styles.svBackdrop]} />
         {hasPhoto ? (
-          <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <Image source={{ uri: story.image! }} style={StyleSheet.absoluteFill} contentFit="cover" />
         ) : (
           <Scrim edge="top" height={420} opacity={0.55} />
         )}

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useId } from 'react';
 import { StyleSheet } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
@@ -16,11 +16,6 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 // is invisible where the image is already dark and does its work where it is
 // not.
 
-/** Gradient ids live in one document-wide namespace, so a fixed string breaks
- *  the moment two scrims are on screen at once — every `url(#id)` resolves to
- *  whichever def mounted last. A feed of cards is exactly that case. */
-let nextId = 0;
-
 interface ScrimProps {
   /** 'top' darkens downward from the top edge, 'bottom' upward from the bottom. */
   edge: 'top' | 'bottom';
@@ -29,9 +24,17 @@ interface ScrimProps {
   opacity?: number;
 }
 
+/** Gradient ids live in one document-wide namespace, so a fixed string breaks
+ *  the moment two scrims are on screen at once — every `url(#id)` resolves to
+ *  whichever def mounted last. A feed of cards is exactly that case.
+ *
+ *  `useId` is React's own answer to that. It replaces a module-level counter
+ *  bumped during render, which was impure — under StrictMode's double render it
+ *  burned two ids per scrim — and which React Compiler refuses to compile,
+ *  costing every screen with a scrim its automatic memoization. The punctuation
+ *  React puts in the id is stripped so the value stays safe inside `url(#…)`. */
 export function Scrim({ edge, height, opacity = 0.75 }: ScrimProps) {
-  const id = useRef<string | null>(null);
-  if (id.current === null) id.current = `scrim-${nextId++}`;
+  const id = `scrim-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
 
   // y1→y2 runs top→bottom; flipping the stops flips which edge is opaque. The
   // middle stop is deliberately not linear — a straight ramp leaves a visible
@@ -49,13 +52,13 @@ export function Scrim({ edge, height, opacity = 0.75 }: ScrimProps) {
       height={height}
     >
       <Defs>
-        <LinearGradient id={id.current} x1="0" y1="0" x2="0" y2="1">
+        <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
           {stops.map((s) => (
             <Stop key={s.offset} offset={s.offset} stopColor="#000000" stopOpacity={s.o} />
           ))}
         </LinearGradient>
       </Defs>
-      <Rect x="0" y="0" width="100%" height={height} fill={`url(#${id.current})`} />
+      <Rect x="0" y="0" width="100%" height={height} fill={`url(#${id})`} />
     </Svg>
   );
 }

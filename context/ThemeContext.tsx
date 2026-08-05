@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Appearance } from 'react-native';
 
 import { colors as darkColors, lightColors, type ColorPalette } from '@/constants/theme';
@@ -26,13 +26,13 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, []);
 
-  const toggleTheme = useCallback(() => {
+  const toggleTheme = () => {
     setThemeMode((prev) => {
       const next = prev === 'dark' ? 'light' : 'dark';
       AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
       return next;
     });
-  }, []);
+  };
 
   // Two things outside React have to follow the theme too.
   //

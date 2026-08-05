@@ -56,8 +56,6 @@ export default function EditInterestsScreen() {
   const sections = useMemo(() => sectionise(visibleInterests), [visibleInterests]);
 
   async function load() {
-    setError(null);
-    setLoading(true);
     try {
       const [allRes, profileRes] = await Promise.all([
         api.get<Interest[]>('/api/interests/'),
@@ -75,12 +73,22 @@ export default function EditInterestsScreen() {
       setInitialSelected(preSelected);
     } catch {
       setError('Could not load interests. Please try again.');
-    } finally {
-      setLoading(false);
     }
+    // Reached on both paths: the `catch` records the message and stops there.
+    // Not a `finally` — React Compiler bails on any component containing one.
+    setLoading(false);
   }
 
   useEffect(() => { load(); }, []);
+
+  // Only Retry has to put the screen back into its loading state — the first
+  // load already starts there, so doing it on mount would be a second render
+  // to set the values the initial state already holds.
+  function retry() {
+    setError(null);
+    setLoading(true);
+    load();
+  }
 
   function toggle(id: number) {
     setSelected((prev) => {
@@ -106,9 +114,9 @@ export default function EditInterestsScreen() {
       router.back();
     } catch {
       setError('Failed to save. Please try again.');
-    } finally {
-      setSaving(false);
     }
+    // Reached on both paths: the `catch` records the message and stops there.
+    setSaving(false);
   }
 
   return (
@@ -134,7 +142,7 @@ export default function EditInterestsScreen() {
       ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
-          <Button label="Retry" variant="ghost" size="sm" onPress={load} />
+          <Button label="Retry" variant="ghost" size="sm" onPress={retry} />
         </View>
       ) : (
         <>

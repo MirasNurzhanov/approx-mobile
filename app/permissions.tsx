@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -65,8 +65,8 @@ function PermissionRow({
   last: boolean;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
-  const STATE_COLOR = useMemo(() => makeStateColor(colors), [colors]);
+  const styles = makeStyles(colors);
+  const STATE_COLOR = makeStateColor(colors);
   const copy = PERMISSION_COPY[info.key];
   const askable = info.state === 'undetermined' || info.state === 'denied';
   const actionLabel = askable ? 'Allow' : 'Open Settings';
@@ -115,7 +115,7 @@ function PermissionRow({
 
 export default function PermissionsScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const store = usePermissionStore();
   const { settings } = usePrivacySettings();

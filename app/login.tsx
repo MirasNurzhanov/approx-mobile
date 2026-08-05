@@ -31,11 +31,14 @@ export default function LoginScreen() {
   async function handleLogin() {
     if (!email || !password) return;
     setSubmitting(true);
+    // The reset is mirrored on both paths rather than pulled into a `finally`:
+    // React Compiler cannot lower a `finally` and gives up on any component
+    // containing one, which costs this screen its automatic memoization.
     try {
       await login(email, password);
+      setSubmitting(false);
     } catch {
       Alert.alert('Login failed', 'Invalid email or password');
-    } finally {
       setSubmitting(false);
     }
   }

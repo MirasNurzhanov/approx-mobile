@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,6 +49,201 @@ const LEVEL_HINT: Record<ClubVisibilityLevel, string> = {
   district: 'Only people in this district can find it.',
 };
 
+// ─── Sections ─────────────────────────────────────────────────────────────────
+
+function EmblemPicker({ emblemUri, onPick }: { emblemUri: string | null; onPick: () => void }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <TouchableOpacity style={styles.emblemWrap} onPress={onPick} activeOpacity={0.8}>
+      {emblemUri ? (
+        <Image source={{ uri: emblemUri }} style={styles.emblemImage} />
+      ) : (
+        <View style={styles.emblemPlaceholder}>
+          <Ionicons name="image-outline" size={28} color={colors.t3} />
+          <Text style={styles.emblemHint}>Add emblem</Text>
+        </View>
+      )}
+      <View style={styles.emblemBadge}>
+        <Ionicons name="camera" size={13} color={colors.bg} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * Where this club will live.
+ *
+ * Resolved by the server from the position it already holds. This never sends a
+ * place of its own: it shows what the server found, and reports back only which
+ * of the offered levels the creator picked.
+ */
+function VisibilitySection({ place, loadingPlace, levelOptions, level, onSelectLevel, onRetry }: {
+  place: MyClubLocation;
+  loadingPlace: boolean;
+  levelOptions: ClubVisibilityLevel[];
+  level: ClubVisibilityLevel | null;
+  onSelectLevel: (level: ClubVisibilityLevel) => void;
+  onRetry: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+
+  if (loadingPlace) {
+    return (
+      <View style={styles.placeCard}>
+        <ActivityIndicator color={colors.teal} size="small" />
+        <Text style={styles.placeHint}>Working out where you are…</Text>
+      </View>
+    );
+  }
+
+  if (!place.resolved || levelOptions.length === 0) {
+    return (
+      <View style={styles.placeCard}>
+        <Ionicons name="location-outline" size={18} color={colors.t3} />
+        <Text style={styles.placeHint}>
+          {place.detail ||
+            'Aura could not work out which area you are in, so a club cannot be created here yet.'}
+        </Text>
+        <Pressable
+          style={styles.retryBtn}
+          onPress={onRetry}
+          accessibilityRole="button"
+          accessibilityLabel="Check my location again"
+        >
+          <Text style={styles.retryBtnText}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <View style={styles.placeCard}>
+        <Text style={styles.placeCaption}>Current location</Text>
+        {(['city', 'region', 'district'] as ClubVisibilityLevel[]).map((tier) =>
+          place[tier] ? (
+            <Text key={tier} style={styles.placeLine}>
+              <Text style={styles.placeTier}>
+                {tier[0].toUpperCase() + tier.slice(1)}:{' '}
+              </Text>
+              {place[tier]!.name}
+            </Text>
+          ) : null,
+        )}
+      </View>
+
+      {levelOptions.map((option) => {
+        const selected = level === option;
+        return (
+          <Pressable
+            key={option}
+            style={[styles.levelRow, selected && styles.levelRowActive]}
+            onPress={() => onSelectLevel(option)}
+            accessibilityRole="radio"
+            accessibilityState={{ selected }}
+            accessibilityLabel={levelLabel(option, place)}
+            accessibilityHint={LEVEL_HINT[option]}
+          >
+            <Ionicons
+              name={selected ? 'radio-button-on' : 'radio-button-off'}
+              size={20}
+              color={selected ? colors.teal : colors.t3}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.levelName, selected && styles.levelNameActive]}>
+                {levelLabel(option, place)}
+              </Text>
+              <Text style={styles.levelHint}>{LEVEL_HINT[option]}</Text>
+            </View>
+          </Pressable>
+        );
+      })}
+
+      {/* Said once, plainly: this is not editable later, and it is the
+          thing people get wrong about a scoped club. */}
+      <Text style={styles.levelFootnote}>
+        People outside the area you pick will not see this club. A club
+        never reaches beyond its city.
+      </Text>
+    </>
+  );
+}
+
+function InterestPickerModal({ visible, loading, interests, query, selectedId, onQueryChange, onSelect, onDismiss }: {
+  visible: boolean;
+  loading: boolean;
+  interests: Interest[];
+  query: string;
+  selectedId: number | null;
+  onQueryChange: (q: string) => void;
+  onSelect: (interest: Interest) => void;
+  onDismiss: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
+      <View style={styles.modalSheet}>
+        <View style={styles.modalHandle} />
+        <Text style={styles.modalTitle}>Pick an Interest</Text>
+
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color={colors.t3} />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={onQueryChange}
+            placeholder="Search interests…"
+            placeholderTextColor={colors.t3}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Search interests"
+          />
+          {query.length > 0 && (
+            <Pressable
+              onPress={() => onQueryChange('')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+            >
+              <Ionicons name="close" size={16} color={colors.t3} />
+            </Pressable>
+          )}
+        </View>
+
+        {loading ? (
+          <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {interests.map((interest) => (
+              <Pressable
+                key={interest.id}
+                style={[styles.interestRow, selectedId === interest.id && styles.interestRowActive]}
+                onPress={() => onSelect(interest)}
+              >
+                <Text style={styles.interestIcon}>{interest.icon}</Text>
+                <Text style={[styles.interestName, selectedId === interest.id && styles.interestNameActive]}>
+                  {interest.name}
+                </Text>
+                {selectedId === interest.id && (
+                  <Ionicons name="checkmark" size={18} color={colors.teal} />
+                )}
+              </Pressable>
+            ))}
+            {interests.length === 0 && (
+              <Text style={styles.interestEmpty}>Nothing matches “{query.trim()}”.</Text>
+            )}
+          </ScrollView>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
 export default function CreateClubScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -80,7 +275,6 @@ export default function CreateClubScreen() {
   );
 
   async function loadPlace(refresh = false) {
-    setLoadingPlace(true);
     // The first load is allowed to go upstream: in a city nobody has opened
     // this screen in before, that lookup is what puts the boundaries in the
     // shared cache — and everyone who follows reads them for free.
@@ -93,12 +287,25 @@ export default function CreateClubScreen() {
         ? current
         : (next.available_levels.includes('city') ? 'city' : next.available_levels[0] ?? null),
     );
+    // A lookup that fails still has to end the spinner: without that, a dropped
+    // connection here left "Finding where you are…" on screen for good, with no
+    // Retry to press because Retry lives past the spinner. `fetchMyLocation`
+    // answers with UNPLACED instead of rejecting, so a plain trailing statement
+    // gives that guarantee — and unlike a `finally`, React Compiler can compile
+    // it rather than giving up on this whole screen.
     setLoadingPlace(false);
   }
 
   useEffect(() => {
     loadPlace(true);
   }, []);
+
+  /** Retry path: the flag only has to be re-armed once it has been cleared,
+   *  which is never the case on mount — it starts true. */
+  function reloadPlace() {
+    setLoadingPlace(true);
+    loadPlace(true);
+  }
 
   // The catalog is hundreds of interests long. Same filter as the two interest
   // screens, so searching means the same thing everywhere it appears.
@@ -117,9 +324,10 @@ export default function CreateClubScreen() {
       setInterests(Array.isArray(data) ? data : (data as any).results ?? []);
     } catch {
       Alert.alert('Error', 'Could not load interests.');
-    } finally {
-      setLoadingInterests(false);
     }
+    // Reached on both paths: the `catch` alerts and stops there. Not a
+    // `finally` — React Compiler bails on any component containing one.
+    setLoadingInterests(false);
   }
 
   async function pickEmblem() {
@@ -183,12 +391,16 @@ export default function CreateClubScreen() {
         // Moved between opening the picker and pressing create. Re-resolve so
         // the options describe where they are now, and let them look again.
         Alert.alert('You have moved', e.response.data?.detail ?? 'Check the area and try again.');
-        loadPlace(true);
+        reloadPlace();
       } else {
         Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create club. Try again.');
       }
-      setSubmitting(false);
     }
+    // Reached on both paths — the `catch` handles every failure. Safe to clear
+    // on the success path too: `success` swaps the button out for the banner,
+    // so there is nothing left to double-tap while the 1200ms hand-off to the
+    // club screen plays.
+    setSubmitting(false);
   }
 
   return (
@@ -209,20 +421,7 @@ export default function CreateClubScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Emblem */}
-          <TouchableOpacity style={styles.emblemWrap} onPress={pickEmblem} activeOpacity={0.8}>
-            {emblemUri ? (
-              <Image source={{ uri: emblemUri }} style={styles.emblemImage} />
-            ) : (
-              <View style={styles.emblemPlaceholder}>
-                <Ionicons name="image-outline" size={28} color={colors.t3} />
-                <Text style={styles.emblemHint}>Add emblem</Text>
-              </View>
-            )}
-            <View style={styles.emblemBadge}>
-              <Ionicons name="camera" size={13} color={colors.bg} />
-            </View>
-          </TouchableOpacity>
+          <EmblemPicker emblemUri={emblemUri} onPick={pickEmblem} />
 
           {/* Name */}
           <Text style={styles.label}>Club Name <Text style={styles.required}>*</Text></Text>
@@ -265,78 +464,14 @@ export default function CreateClubScreen() {
           {/* Visibility */}
           <Text style={styles.label}>Group visibility <Text style={styles.required}>*</Text></Text>
 
-          {loadingPlace ? (
-            <View style={styles.placeCard}>
-              <ActivityIndicator color={colors.teal} size="small" />
-              <Text style={styles.placeHint}>Working out where you are…</Text>
-            </View>
-          ) : !place.resolved || levelOptions.length === 0 ? (
-            <View style={styles.placeCard}>
-              <Ionicons name="location-outline" size={18} color={colors.t3} />
-              <Text style={styles.placeHint}>
-                {place.detail ||
-                  'Aura could not work out which area you are in, so a club cannot be created here yet.'}
-              </Text>
-              <Pressable
-                style={styles.retryBtn}
-                onPress={() => loadPlace(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Check my location again"
-              >
-                <Text style={styles.retryBtnText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <>
-              <View style={styles.placeCard}>
-                <Text style={styles.placeCaption}>Current location</Text>
-                {(['city', 'region', 'district'] as ClubVisibilityLevel[]).map((tier) =>
-                  place[tier] ? (
-                    <Text key={tier} style={styles.placeLine}>
-                      <Text style={styles.placeTier}>
-                        {tier[0].toUpperCase() + tier.slice(1)}:{' '}
-                      </Text>
-                      {place[tier]!.name}
-                    </Text>
-                  ) : null,
-                )}
-              </View>
-
-              {levelOptions.map((option) => {
-                const selected = level === option;
-                return (
-                  <Pressable
-                    key={option}
-                    style={[styles.levelRow, selected && styles.levelRowActive]}
-                    onPress={() => setLevel(option)}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={levelLabel(option, place)}
-                    accessibilityHint={LEVEL_HINT[option]}
-                  >
-                    <Ionicons
-                      name={selected ? 'radio-button-on' : 'radio-button-off'}
-                      size={20}
-                      color={selected ? colors.teal : colors.t3}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.levelName, selected && styles.levelNameActive]}>
-                        {levelLabel(option, place)}
-                      </Text>
-                      <Text style={styles.levelHint}>{LEVEL_HINT[option]}</Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-
-              {/* Said once, plainly: this is not editable later, and it is the
-                  thing people get wrong about a scoped club. */}
-              <Text style={styles.levelFootnote}>
-                People outside the area you pick will not see this club. A club
-                never reaches beyond its city.
-              </Text>
-            </>
-          )}
+          <VisibilitySection
+            place={place}
+            loadingPlace={loadingPlace}
+            levelOptions={levelOptions}
+            level={level}
+            onSelectLevel={setLevel}
+            onRetry={reloadPlace}
+          />
 
           {/* Submit / success */}
           {success ? (
@@ -360,68 +495,20 @@ export default function CreateClubScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Interest picker modal */}
-      <Modal visible={showInterestPicker} transparent animationType="slide">
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowInterestPicker(false)} />
-        <View style={styles.modalSheet}>
-          <View style={styles.modalHandle} />
-          <Text style={styles.modalTitle}>Pick an Interest</Text>
-
-          <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color={colors.t3} />
-            <TextInput
-              style={styles.searchInput}
-              value={interestQuery}
-              onChangeText={setInterestQuery}
-              placeholder="Search interests…"
-              placeholderTextColor={colors.t3}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-              accessibilityLabel="Search interests"
-            />
-            {interestQuery.length > 0 && (
-              <Pressable
-                onPress={() => setInterestQuery('')}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="Clear search"
-              >
-                <Ionicons name="close" size={16} color={colors.t3} />
-              </Pressable>
-            )}
-          </View>
-
-          {loadingInterests ? (
-            <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
-          ) : (
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {visibleInterests.map((interest) => (
-                <Pressable
-                  key={interest.id}
-                  style={[styles.interestRow, selectedInterest?.id === interest.id && styles.interestRowActive]}
-                  onPress={() => {
-                    setSelectedInterest(interest);
-                    setShowInterestPicker(false);
-                    setInterestQuery('');
-                  }}
-                >
-                  <Text style={styles.interestIcon}>{interest.icon}</Text>
-                  <Text style={[styles.interestName, selectedInterest?.id === interest.id && styles.interestNameActive]}>
-                    {interest.name}
-                  </Text>
-                  {selectedInterest?.id === interest.id && (
-                    <Ionicons name="checkmark" size={18} color={colors.teal} />
-                  )}
-                </Pressable>
-              ))}
-              {visibleInterests.length === 0 && (
-                <Text style={styles.interestEmpty}>Nothing matches “{interestQuery.trim()}”.</Text>
-              )}
-            </ScrollView>
-          )}
-        </View>
-      </Modal>
+      <InterestPickerModal
+        visible={showInterestPicker}
+        loading={loadingInterests}
+        interests={visibleInterests}
+        query={interestQuery}
+        selectedId={selectedInterest?.id ?? null}
+        onQueryChange={setInterestQuery}
+        onSelect={(interest) => {
+          setSelectedInterest(interest);
+          setShowInterestPicker(false);
+          setInterestQuery('');
+        }}
+        onDismiss={() => setShowInterestPicker(false)}
+      />
     </View>
   );
 }

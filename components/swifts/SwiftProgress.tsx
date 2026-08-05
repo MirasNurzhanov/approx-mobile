@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import type { ColorPalette } from '@/constants/theme';
@@ -26,7 +25,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function SwiftProgress({ progress, bottom }: SwiftProgressProps) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const pct = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
   return (
     <View style={[styles.track, { bottom }]} pointerEvents="none">

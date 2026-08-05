@@ -235,7 +235,9 @@ export default function InterestsSetupScreen() {
     try {
       await api.post('/api/interests/select/', { interest_ids: Array.from(selected) });
     } catch {}
-    finally { setSaving(false); }
+    // The `catch` swallows everything, so this always runs. Deliberately not a
+    // `finally` — React Compiler bails on any component containing one.
+    setSaving(false);
     router.replace('/onboarding-profession');
   }
 

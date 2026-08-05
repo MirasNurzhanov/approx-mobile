@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useContext, useRef, useState } from 'react';
 
 type ScrollDir = 'down' | 'up';
 
@@ -19,7 +19,7 @@ export function ScrollNavProvider({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const reportScroll = useCallback((dir: ScrollDir) => {
+  const reportScroll = (dir: ScrollDir) => {
     if (timer.current) clearTimeout(timer.current);
 
     if (dir === 'down') {
@@ -28,7 +28,7 @@ export function ScrollNavProvider({ children }: { children: React.ReactNode }) {
     } else {
       setCollapsed(false);
     }
-  }, []);
+  };
 
   return (
     <ScrollNavContext.Provider value={{ collapsed, reportScroll }}>

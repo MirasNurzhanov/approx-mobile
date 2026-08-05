@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Avatar } from '@/components/ui/Avatar';
@@ -107,7 +107,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 // ─── Activity row ─────────────────────────────────────────────────────────────
 export function NotifRow({ notif, onPress }: { notif: Notification; onPress?: () => void }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const read = isRead(notif);
   const text = notifText(notif);
   const icon = ACTIVITY_ICON[notif.notification_type ?? ''] ?? 'notifications';
@@ -194,7 +194,7 @@ export function RequestRow({
   onPressUser?: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { user } = request;
 
   return (
@@ -240,7 +240,7 @@ export function RequestRow({
 // ─── Section wrapper ──────────────────────────────────────────────────────────
 export function Section({ label, children }: { label: string; children: React.ReactNode }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>{label}</Text>

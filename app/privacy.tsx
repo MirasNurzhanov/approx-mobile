@@ -83,7 +83,7 @@ const AUDIENCE_FIELDS: {
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 function SectionLabel({ children }: { children: React.ReactNode }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
@@ -99,7 +99,7 @@ function AudiencePicker({
   options?: Audience[];
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={styles.segment}>
       {options.map((option) => {
@@ -143,7 +143,7 @@ function ToggleRow({
   last?: boolean;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   return (
     <View style={[styles.row, !last && styles.rowBorder]}>
       {Icon && <Icon size={20} color={colors.t2} />}
@@ -189,9 +189,10 @@ export default function PrivacyScreen() {
       }
     } catch {
       setError('That change didn’t save. Your previous setting is still in effect.');
-    } finally {
-      setSaving(false);
     }
+    // Reached on both paths: the `catch` records the message and stops there.
+    // Not a `finally` — React Compiler bails on any component containing one.
+    setSaving(false);
   }
 
   function togglePrivate(next: boolean) {

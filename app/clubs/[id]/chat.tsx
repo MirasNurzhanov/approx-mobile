@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Modal,
   NativeScrollEvent,
@@ -20,6 +19,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -145,7 +145,7 @@ const DEFAULT_REGION: Region = { latitude: 43.238, longitude: 76.889, latitudeDe
 // ─── DateTimePicker ───────────────────────────────────────────────────────────
 function DateTimePicker({ value, onChange }: { value: Date; onChange: (d: Date) => void }) {
   const { colors } = useTheme();
-  const dtStyles = useMemo(() => makeDtStyles(colors), [colors]);
+  const dtStyles = makeDtStyles(colors);
   function adj(field: 'day' | 'hour' | 'minute', delta: number) {
     const d = new Date(value);
     if (field === 'day') d.setDate(d.getDate() + delta);
@@ -257,7 +257,7 @@ function ProposalCard({
   actioningId: number | null;
 }) {
   const { colors } = useTheme();
-  const cardStyles = useMemo(() => makeCardStyles(colors), [colors]);
+  const cardStyles = makeCardStyles(colors);
   const statusColor = STATUS_COLORS[proposal.status] ?? STATUS_COLORS.pending;
   const isActioning = actioningId === proposal.id;
   const canDelete = viewerIsOwner || viewerIsProposer;
@@ -403,6 +403,442 @@ const makeCardStyles = (colors: ColorPalette) => StyleSheet.create({
 });
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
+// ─── Chat pieces ──────────────────────────────────────────────────────────────
+
+function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
+  name?: string;
+  emblem?: string;
+  memberCount?: string;
+  wsReady: boolean;
+  top: number;
+  onBack: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <Pressable style={[styles.header, { paddingTop: top + 6 }]} onPress={onBack}>
+      <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn}>
+        <Ionicons name="chevron-back" size={24} color={colors.t1} />
+      </Pressable>
+      {emblem ? (
+        <Image source={{ uri: emblem }} style={styles.headerEmblem} />
+      ) : (
+        <View style={styles.headerEmblemFallback}>
+          <Text style={styles.headerEmblemInitial}>{(name ?? 'C').charAt(0).toUpperCase()}</Text>
+        </View>
+      )}
+      <View style={styles.headerInfo}>
+        <Text style={styles.headerName} numberOfLines={1}>{name ?? 'Club Chat'}</Text>
+        <Text style={styles.headerSub}>
+          {memberCount ? `${memberCount} members` : 'Group chat'}
+          {!wsReady ? '  ·  Reconnecting…' : ''}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+/** One message: a meetup proposal card, or an ordinary bubble. */
+function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerIsOwner, actioningId, onApprove, onReject, onDelete }: {
+  item: ClubMessage;
+  isMine: boolean;
+  hydratedItem: ClubMessage;
+  showSenderHeader: boolean;
+  viewerIsOwner: boolean;
+  actioningId: number | null;
+  onApprove: (id: number) => void;
+  onReject: (id: number) => void;
+  onDelete: (id: number) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+
+  if (item.message_type === 'meetup_proposal' && item.proposal) {
+    return (
+      <View style={styles.proposalRow}>
+        <ProposalCard
+          proposal={item.proposal}
+          proposerUsername={hydratedItem.sender_username}
+          viewerIsOwner={viewerIsOwner}
+          viewerIsProposer={isMine}
+          onApprove={onApprove}
+          onReject={onReject}
+          onDelete={onDelete}
+          actioningId={actioningId}
+        />
+        <Text style={styles.proposalTime}>{fmtTime(item.created_at)}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
+      {!isMine && (
+        <View style={styles.avatarSlot}>
+          {showSenderHeader && (
+            <Avatar uri={hydratedItem.sender_avatar} name={hydratedItem.sender_username ?? '?'} size="xs" />
+          )}
+        </View>
+      )}
+      <View style={styles.bubbleCol}>
+        {showSenderHeader && !isMine && (
+          <Text style={styles.senderName}>@{hydratedItem.sender_username ?? 'member'}</Text>
+        )}
+        <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs, item.pending && styles.bubblePending]}>
+          {item.image ? (
+            <Image source={{ uri: item.image }} style={styles.bubbleImage} contentFit="cover" />
+          ) : (
+            <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>{item.text}</Text>
+          )}
+          <Text style={[styles.bubbleTime, isMine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs]}>
+            {fmtTime(item.created_at)}{item.pending ? ' ·' : ''}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ClubChatInput({ text, canSend, bottom, onChangeText, onSend, onCamera, onAttach, onProposal }: {
+  text: string;
+  canSend: boolean;
+  bottom: number;
+  onChangeText: (t: string) => void;
+  onSend: () => void;
+  onCamera: () => void;
+  onAttach: () => void;
+  onProposal: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
+      <Pressable style={styles.attachBtn} onPress={onCamera} hitSlop={4}>
+        <Ionicons name="camera-outline" size={20} color={colors.t3} />
+      </Pressable>
+      <Pressable style={styles.attachBtn} onPress={onAttach} hitSlop={4}>
+        <Ionicons name="image-outline" size={20} color={colors.t3} />
+      </Pressable>
+      <Pressable style={styles.attachBtn} onPress={onProposal} hitSlop={4}>
+        <Ionicons name="calendar-outline" size={20} color={colors.t3} />
+      </Pressable>
+      <TextInput
+        style={styles.input}
+        value={text}
+        onChangeText={onChangeText}
+        placeholder="Message…"
+        placeholderTextColor={colors.t3}
+        multiline
+        maxLength={2000}
+      />
+      <Pressable
+        style={[styles.sendBtn, canSend && styles.sendBtnActive]}
+        onPress={onSend}
+        disabled={!canSend}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Send message"
+        accessibilityState={{ disabled: !canSend }}
+      >
+        <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
+      </Pressable>
+    </View>
+  );
+}
+
+/** One modal with two faces: the proposal form, and the map it sends you to for
+ *  a location. Kept as a single `<Modal>` because stacking two of them on iOS
+ *  leaves the first one's backdrop over the second. */
+function MeetupProposalModal({
+  modalView, top, bottom,
+  propTitle, propDesc, propDateTime, propLocation,
+  gettingLocation, proposalSubmitting, mapRegion,
+  onTitleChange, onDescChange, onDateTimeChange, onClearLocation,
+  onCurrentLocation, onOpenMap, onBackToForm, onRegionChange,
+  onConfirmMapLocation, onSubmit, onDismiss,
+}: {
+  modalView: 'proposal' | 'map' | null;
+  top: number;
+  bottom: number;
+  propTitle: string;
+  propDesc: string;
+  propDateTime: Date;
+  propLocation: { name: string; lat: number; lng: number } | null;
+  gettingLocation: boolean;
+  proposalSubmitting: boolean;
+  mapRegion: Region;
+  onTitleChange: (t: string) => void;
+  onDescChange: (t: string) => void;
+  onDateTimeChange: (d: Date) => void;
+  onClearLocation: () => void;
+  onCurrentLocation: () => void;
+  onOpenMap: () => void;
+  onBackToForm: () => void;
+  onRegionChange: (r: Region) => void;
+  onConfirmMapLocation: () => void;
+  onSubmit: () => void;
+  onDismiss: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <Modal
+      visible={modalView !== null}
+      transparent
+      animationType="slide"
+      onRequestClose={modalView === 'map' ? onBackToForm : onDismiss}
+    >
+      {modalView === 'proposal' ? (
+        <>
+          <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
+            <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>Propose a Meetup</Text>
+                <Pressable onPress={onDismiss} hitSlop={10}>
+                  <Ionicons name="close" size={22} color={colors.t2} />
+                </Pressable>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {/* Title */}
+                <Text style={styles.fieldLabel}>Title <Text style={styles.required}>*</Text></Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={propTitle}
+                  onChangeText={onTitleChange}
+                  placeholder="e.g. Morning hike at Shymbulak"
+                  placeholderTextColor={colors.t3}
+                  maxLength={80}
+                />
+
+                {/* Description */}
+                <Text style={styles.fieldLabel}>Description</Text>
+                <TextInput
+                  style={[styles.fieldInput, styles.fieldTextArea]}
+                  value={propDesc}
+                  onChangeText={onDescChange}
+                  placeholder="Details, what to bring, etc."
+                  placeholderTextColor={colors.t3}
+                  multiline
+                  numberOfLines={3}
+                  maxLength={400}
+                  textAlignVertical="top"
+                />
+
+                {/* Date / time */}
+                <Text style={styles.fieldLabel}>Date &amp; Time</Text>
+                <DateTimePicker value={propDateTime} onChange={onDateTimeChange} />
+
+                {/* Location */}
+                <Text style={styles.fieldLabel}>Location</Text>
+                <View style={styles.locationRow}>
+                  <Pressable
+                    style={[styles.locationBtn, gettingLocation && styles.locationBtnBusy]}
+                    onPress={onCurrentLocation}
+                    disabled={gettingLocation}
+                  >
+                    {gettingLocation
+                      ? <ActivityIndicator size="small" color={colors.teal} />
+                      : <Ionicons name="navigate-outline" size={16} color={colors.teal} />
+                    }
+                    <Text style={styles.locationBtnText}>My location</Text>
+                  </Pressable>
+                  <Pressable style={styles.locationBtn} onPress={onOpenMap}>
+                    <Ionicons name="map-outline" size={16} color={colors.teal} />
+                    <Text style={styles.locationBtnText}>Pick on map</Text>
+                  </Pressable>
+                </View>
+                {propLocation && (
+                  <View style={styles.locationPreview}>
+                    <Ionicons name="location" size={14} color={colors.teal} />
+                    <Text style={styles.locationPreviewText} numberOfLines={1}>{propLocation.name}</Text>
+                    <Pressable onPress={onClearLocation} hitSlop={8}>
+                      <Ionicons name="close-circle" size={16} color={colors.t3} />
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* Submit */}
+                <Pressable
+                  style={[styles.submitBtn, proposalSubmitting && styles.submitBtnBusy]}
+                  onPress={onSubmit}
+                  disabled={proposalSubmitting}
+                >
+                  {proposalSubmitting
+                    ? <ActivityIndicator color={colors.bg} size="small" />
+                    : <Text style={styles.submitBtnText}>Send Proposal</Text>
+                  }
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </>
+      ) : (
+        <View style={styles.mapPickerRoot}>
+          {/* Map header */}
+          <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
+            <Pressable onPress={onBackToForm} hitSlop={12} style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={24} color={colors.t1} />
+            </Pressable>
+            <Text style={styles.mapPickerTitle}>Drop a pin</Text>
+            <View style={{ width: 36 }} />
+          </View>
+
+          {/* Map */}
+          <View style={styles.mapWrap}>
+            <MapView
+              style={StyleSheet.absoluteFill}
+              provider={PROVIDER_GOOGLE}
+              initialRegion={mapRegion}
+              onRegionChangeComplete={onRegionChange}
+            />
+            {/* Fixed center pin */}
+            <View pointerEvents="none" style={styles.centerPin}>
+              <Ionicons name="location" size={36} color={colors.teal} />
+              <View style={styles.centerPinDot} />
+            </View>
+          </View>
+
+          {/* Confirm */}
+          <View style={[styles.mapConfirmBar, { paddingBottom: bottom + 16 }]}>
+            <Pressable
+              style={[styles.mapConfirmBtn, gettingLocation && styles.submitBtnBusy]}
+              onPress={onConfirmMapLocation}
+              disabled={gettingLocation}
+            >
+              {gettingLocation
+                ? <ActivityIndicator color={colors.bg} size="small" />
+                : <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
+              }
+            </Pressable>
+          </View>
+        </View>
+      )}
+    </Modal>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+/**
+ * Composing a meetup proposal: the form, the map picker behind it, and the two
+ * ways a place gets onto it.
+ *
+ * A proposal is a message the club votes on, but *writing* one has nothing to
+ * do with the chat transport — it posts over HTTP and comes back down the
+ * socket like anyone else's. So it lives here rather than among the messaging
+ * state it would otherwise be interleaved with.
+ */
+function useMeetupProposal(clubId: number) {
+  const [modalView, setModalView] = useState<'proposal' | 'map' | null>(null);
+  const [propTitle, setPropTitle] = useState('');
+  const [propDesc, setPropDesc] = useState('');
+  const [propDateTime, setPropDateTime] = useState<Date>(defaultProposalDate);
+  const [propLocation, setPropLocation] = useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [proposalSubmitting, setProposalSubmitting] = useState(false);
+  const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
+  const [gettingLocation, setGettingLocation] = useState(false);
+
+  /** Best human-readable name for a point, falling back to the given label. */
+  async function placeName(latitude: number, longitude: number, fallback: string) {
+    try {
+      const place = (await Location.reverseGeocodeAsync({ latitude, longitude }))[0];
+      const parts = [place.name, place.street, place.city].filter(Boolean);
+      if (parts.length) return parts.join(', ');
+    } catch {}
+    return fallback;
+  }
+
+  async function handleCurrentLocation() {
+    setGettingLocation(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow location access to use your current position.');
+        // Mirrored here because the reset below is no longer in a `finally`:
+        // this early return would otherwise leave the button spinning forever.
+        setGettingLocation(false);
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = pos.coords;
+      setPropLocation({ name: await placeName(latitude, longitude, 'Current Location'), lat: latitude, lng: longitude });
+      setMapRegion({ latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+    } catch {
+      Alert.alert('Error', 'Could not get current location.');
+    }
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // Every other exit path mirrors this reset.
+    setGettingLocation(false);
+  }
+
+  async function confirmMapLocation() {
+    setGettingLocation(true);
+    const { latitude, longitude } = mapRegion;
+    setPropLocation({ name: await placeName(latitude, longitude, 'Picked Location'), lat: latitude, lng: longitude });
+    setGettingLocation(false);
+    setModalView('proposal');
+  }
+
+  function close() {
+    setModalView(null);
+    setPropTitle('');
+    setPropDesc('');
+    setPropDateTime(defaultProposalDate());
+    setPropLocation(null);
+  }
+
+  async function handleSubmit() {
+    if (!propTitle.trim()) {
+      Alert.alert('Title required', 'Give your meetup a title.');
+      return;
+    }
+    setProposalSubmitting(true);
+    try {
+      await api.post(`/api/clubs/${clubId}/events/`, {
+        title: propTitle.trim(),
+        description: propDesc.trim() || undefined,
+        event_datetime: propDateTime.toISOString(),
+        location_name: propLocation?.name,
+        latitude: propLocation?.lat,
+        longitude: propLocation?.lng,
+      });
+      close();
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create proposal.');
+    }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setProposalSubmitting(false);
+  }
+
+  return {
+    open: () => setModalView('proposal'),
+    /** Spread straight onto `<MeetupProposalModal>`; insets come from the screen. */
+    modalProps: {
+      modalView,
+      propTitle,
+      propDesc,
+      propDateTime,
+      propLocation,
+      gettingLocation,
+      proposalSubmitting,
+      mapRegion,
+      onTitleChange: setPropTitle,
+      onDescChange: setPropDesc,
+      onDateTimeChange: setPropDateTime,
+      onClearLocation: () => setPropLocation(null),
+      onCurrentLocation: handleCurrentLocation,
+      onOpenMap: () => setModalView('map'),
+      onBackToForm: () => setModalView('proposal'),
+      onRegionChange: setMapRegion,
+      onConfirmMapLocation: confirmMapLocation,
+      onSubmit: handleSubmit,
+      onDismiss: close,
+    },
+  };
+}
+
 export default function ClubChatScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -419,51 +855,14 @@ export default function ClubChatScreen() {
   const clubId = Number(id);
   const [viewerIsOwner, setViewerIsOwner] = useState(false);
 
-  // ── Chat state ────────────────────────────────────────────────────────────
-  const [messages, setMessages] = useState<ClubMessage[]>([]);
-  const [text, setText] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [wsReady, setWsReady] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [actioningEventId, setActioningEventId] = useState<number | null>(null);
 
-  // ── Proposal / map modal state ────────────────────────────────────────────
-  const [modalView, setModalView] = useState<'proposal' | 'map' | null>(null);
-  const [propTitle, setPropTitle] = useState('');
-  const [propDesc, setPropDesc] = useState('');
-  const [propDateTime, setPropDateTime] = useState<Date>(defaultProposalDate);
-  const [propLocation, setPropLocation] = useState<{ name: string; lat: number; lng: number } | null>(null);
-  const [proposalSubmitting, setProposalSubmitting] = useState(false);
-
-  // ── Map picker state ──────────────────────────────────────────────────────
-  const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
-  const [gettingLocation, setGettingLocation] = useState(false);
-
-  const currentUserIdRef = useRef<number | null>(null);
-  const senderCache = useRef<Map<number, { username: string; avatar?: string }>>(new Map());
-  const ws = useRef<WebSocket | null>(null);
-  const flatListRef = useRef<FlatList>(null);
-
-  function cacheSender(msg: ClubMessage) {
-    if (msg.sender_id > 0 && msg.sender_username) {
-      senderCache.current.set(msg.sender_id, { username: msg.sender_username, avatar: msg.sender_avatar });
-    }
-  }
-
-  function hydrate(msg: ClubMessage): ClubMessage {
-    if (msg.sender_username) return msg;
-    const cached = senderCache.current.get(msg.sender_id);
-    if (!cached) return msg;
-    return { ...msg, sender_username: cached.username, sender_avatar: cached.avatar };
-  }
-
-  // ── Current user id ───────────────────────────────────────────────────────
-  useEffect(() => {
-    api.get<{ id: number | string }>('/api/users/profile/')
-      .then((r) => { currentUserIdRef.current = Number(r.data.id); })
-      .catch(() => {});
-  }, []);
+  const proposal = useMeetupProposal(clubId);
+  const chat = useClubChat(clubId, router, ensurePermission);
+  const {
+    messages, setMessages, text, setText, loading, wsReady, loadingMore,
+    flatListRef, currentUserIdRef, hydrate, onScroll, sendText, handleAttach, handleCamera,
+  } = chat;
 
   // ── Ownership — fetch on mount and re-check whenever screen is focused ────
   const fetchRole = useCallback(async () => {
@@ -476,236 +875,6 @@ export default function ClubChatScreen() {
   useEffect(() => { fetchRole(); }, [fetchRole]);
 
   useFocusEffect(useCallback(() => { fetchRole(); }, [fetchRole]));
-
-  // ── History ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/`)
-      .then((r) => {
-        const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
-        const msgs = raw.map((m) => normalise(m));
-        msgs.forEach(cacheSender);
-        setMessages(msgs);
-        if (raw.length === 0) setHasMore(false);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [clubId]);
-
-  // ── Infinite scroll up ────────────────────────────────────────────────────
-  const loadOlderMessages = useCallback(async () => {
-    if (loadingMore || !hasMore || messages.length === 0) return;
-    const oldestId = messages[0].id;
-    setLoadingMore(true);
-    try {
-      const r = await api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/?before=${oldestId}`);
-      const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
-      if (raw.length === 0) { setHasMore(false); return; }
-      const older = raw.map((m) => normalise(m));
-      older.forEach(cacheSender);
-      setMessages((prev) => [...older, ...prev]);
-    } catch {} finally { setLoadingMore(false); }
-  }, [clubId, loadingMore, hasMore, messages]);
-
-  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
-    if (e.nativeEvent.contentOffset.y < 60 && hasMore && !loadingMore) loadOlderMessages();
-  }
-
-  // ── WebSocket ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    let active = true;
-
-    async function connect() {
-      const token = await AsyncStorage.getItem('access_token');
-      if (!token || !active) return;
-      const socket = new WebSocket(`${WS_BASE}/ws/clubs/${clubId}/?token=${token}`);
-
-      socket.onopen = () => {
-        if (!active) { socket.close(); return; }
-        ws.current = socket;
-        setWsReady(true);
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const raw: RawMsg = JSON.parse(event.data);
-          const incoming = hydrate(normalise(raw));
-          // Allow proposals through even without text/image
-          if (!incoming.text && !incoming.image && incoming.message_type !== 'meetup_proposal') return;
-          cacheSender(incoming);
-
-          setMessages((prev) => {
-            if (incoming.id && prev.some((m) => m.id === incoming.id && !m.pending)) return prev;
-            const isFromMe = incoming.sender_id === currentUserIdRef.current;
-            if (isFromMe) {
-              for (let i = prev.length - 1; i >= 0; i--) {
-                if (prev[i].pending && prev[i].text === incoming.text) {
-                  const updated = [...prev];
-                  updated[i] = incoming;
-                  return updated;
-                }
-              }
-            }
-            return [...prev, incoming];
-          });
-        } catch {}
-      };
-
-      socket.onclose = (event) => {
-        if (!active) return;
-        setWsReady(false);
-        if (event.code === 4003) {
-          Alert.alert('Removed from club', 'You are no longer a member of this club.', [
-            { text: 'OK', onPress: () => router.replace('/(tabs)/chat' as any) },
-          ]);
-        } else if (event.code === 4001) {
-          router.back();
-        }
-      };
-
-      socket.onerror = () => { if (active) setWsReady(false); };
-    }
-
-    connect();
-    return () => {
-      active = false;
-      ws.current?.close();
-      ws.current = null;
-    };
-  }, [clubId]);
-
-  // ── Scroll to bottom ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (messages.length > 0 && !loadingMore) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
-    }
-  }, [messages.length]);
-
-  // ── Send text / image ─────────────────────────────────────────────────────
-  function sendText() {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setText('');
-    const tempId = `pending-${Date.now()}`;
-    setMessages((prev) => [...prev, {
-      id: tempId, text: trimmed,
-      sender_id: currentUserIdRef.current ?? -1,
-      created_at: new Date().toISOString(), pending: true,
-    }]);
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ content: trimmed }));
-    } else {
-      api.post<RawMsg>(`/api/clubs/${clubId}/messages/`, { content: trimmed })
-        .then((r) => {
-          const confirmed = normalise(r.data);
-          setMessages((prev) => prev.map((m) => m.id === tempId ? confirmed : m));
-        })
-        .catch(() => {});
-    }
-  }
-
-  function sendImage(asset: ImagePicker.ImagePickerAsset) {
-    const tempId = `temp-img-${Date.now()}`;
-    setMessages((prev) => [...prev, {
-      id: tempId, image: asset.uri,
-      sender_id: currentUserIdRef.current ?? -1,
-      created_at: new Date().toISOString(), pending: true,
-    }]);
-    // Straight to Cloudinary, then only the URL to Django — the server
-    // broadcasts it to the club socket group like any other message.
-    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
-      .then((imageUrl) => api.post(`/api/clubs/${clubId}/messages/`, { image_url: imageUrl }))
-      .catch(() => {});
-  }
-
-  async function handleAttach() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'] as any, allowsEditing: true, quality: 0.8,
-    });
-    if (!result.canceled) sendImage(result.assets[0]);
-  }
-
-  async function handleCamera() {
-    if (!(await ensurePermission('camera'))) return;
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'] as any, allowsEditing: true, quality: 0.8,
-    });
-    if (!result.canceled) sendImage(result.assets[0]);
-  }
-
-  // ── Location helpers ──────────────────────────────────────────────────────
-  async function handleCurrentLocation() {
-    setGettingLocation(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Allow location access to use your current position.');
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { latitude, longitude } = pos.coords;
-      let locationName = 'Current Location';
-      try {
-        const geo = await Location.reverseGeocodeAsync({ latitude, longitude });
-        const place = geo[0];
-        const parts = [place.name, place.street, place.city].filter(Boolean);
-        if (parts.length) locationName = parts.join(', ');
-      } catch {}
-      setPropLocation({ name: locationName, lat: latitude, lng: longitude });
-      setMapRegion({ latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
-    } catch {
-      Alert.alert('Error', 'Could not get current location.');
-    } finally {
-      setGettingLocation(false);
-    }
-  }
-
-  async function confirmMapLocation() {
-    setGettingLocation(true);
-    const { latitude, longitude } = mapRegion;
-    let locationName = 'Picked Location';
-    try {
-      const geo = await Location.reverseGeocodeAsync({ latitude, longitude });
-      const place = geo[0];
-      const parts = [place.name, place.street, place.city].filter(Boolean);
-      if (parts.length) locationName = parts.join(', ');
-    } catch {}
-    setPropLocation({ name: locationName, lat: latitude, lng: longitude });
-    setGettingLocation(false);
-    setModalView('proposal');
-  }
-
-  // ── Proposal submit ───────────────────────────────────────────────────────
-  function closeProposalModal() {
-    setModalView(null);
-    setPropTitle('');
-    setPropDesc('');
-    setPropDateTime(defaultProposalDate());
-    setPropLocation(null);
-  }
-
-  async function handleProposalSubmit() {
-    if (!propTitle.trim()) {
-      Alert.alert('Title required', 'Give your meetup a title.');
-      return;
-    }
-    setProposalSubmitting(true);
-    try {
-      const body = {
-        title: propTitle.trim(),
-        description: propDesc.trim() || undefined,
-        event_datetime: propDateTime.toISOString(),
-        location_name: propLocation?.name,
-        latitude: propLocation?.lat,
-        longitude: propLocation?.lng,
-      };
-      await api.post(`/api/clubs/${clubId}/events/`, body);
-      closeProposalModal();
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create proposal.');
-    } finally {
-      setProposalSubmitting(false);
-    }
-  }
 
   // ── Delete proposal ───────────────────────────────────────────────────────
   async function handleDelete(proposalId: number) {
@@ -730,9 +899,9 @@ export default function ClubChatScreen() {
       ));
     } catch {
       Alert.alert('Error', 'Could not approve proposal.');
-    } finally {
-      setActioningEventId(null);
     }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setActioningEventId(null);
   }
 
   async function handleReject(proposalId: number) {
@@ -746,9 +915,9 @@ export default function ClubChatScreen() {
       ));
     } catch {
       Alert.alert('Error', 'Could not reject proposal.');
-    } finally {
-      setActioningEventId(null);
     }
+    // Reached on both paths: the `catch` alerts and stops there.
+    setActioningEventId(null);
   }
 
   const canSend = text.trim().length > 0;
@@ -756,26 +925,14 @@ export default function ClubChatScreen() {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      {/* Header */}
-      <Pressable style={[styles.header, { paddingTop: top + 6 }]} onPress={() => router.back()}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
-        {emblem ? (
-          <Image source={{ uri: emblem }} style={styles.headerEmblem} />
-        ) : (
-          <View style={styles.headerEmblemFallback}>
-            <Text style={styles.headerEmblemInitial}>{(name ?? 'C').charAt(0).toUpperCase()}</Text>
-          </View>
-        )}
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerName} numberOfLines={1}>{name ?? 'Club Chat'}</Text>
-          <Text style={styles.headerSub}>
-            {memberCount ? `${memberCount} members` : 'Group chat'}
-            {!wsReady ? '  ·  Reconnecting…' : ''}
-          </Text>
-        </View>
-      </Pressable>
+      <ClubChatHeader
+        name={name}
+        emblem={emblem}
+        memberCount={memberCount}
+        wsReady={wsReady}
+        top={top}
+        onBack={() => router.back()}
+      />
 
       {/* Messages */}
       {loading ? (
@@ -803,231 +960,37 @@ export default function ClubChatScreen() {
           }
           renderItem={({ item, index }) => {
             const isMine = item.sender_id === currentUserIdRef.current;
-            const hydratedItem = hydrate(item);
-
-            // ── Meetup proposal card ──────────────────────────────────────
-            if (item.message_type === 'meetup_proposal' && item.proposal) {
-              return (
-                <View style={styles.proposalRow}>
-                  <ProposalCard
-                    proposal={item.proposal}
-                    proposerUsername={hydratedItem.sender_username}
-                    viewerIsOwner={viewerIsOwner}
-                    viewerIsProposer={item.sender_id === currentUserIdRef.current}
-                    onApprove={handleApprove}
-                    onReject={handleReject}
-                    onDelete={handleDelete}
-                    actioningId={actioningEventId}
-                  />
-                  <Text style={styles.proposalTime}>{fmtTime(item.created_at)}</Text>
-                </View>
-              );
-            }
-
-            // ── Regular bubble ────────────────────────────────────────────
             const prevMsg = index > 0 ? messages[index - 1] : null;
-            const showSenderHeader = !isMine && (!prevMsg || prevMsg.sender_id !== item.sender_id);
-
             return (
-              <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
-                {!isMine && (
-                  <View style={styles.avatarSlot}>
-                    {showSenderHeader && (
-                      <Avatar uri={hydratedItem.sender_avatar} name={hydratedItem.sender_username ?? '?'} size="xs" />
-                    )}
-                  </View>
-                )}
-                <View style={styles.bubbleCol}>
-                  {showSenderHeader && !isMine && (
-                    <Text style={styles.senderName}>@{hydratedItem.sender_username ?? 'member'}</Text>
-                  )}
-                  <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs, item.pending && styles.bubblePending]}>
-                    {item.image ? (
-                      <Image source={{ uri: item.image }} style={styles.bubbleImage} resizeMode="cover" />
-                    ) : (
-                      <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>{item.text}</Text>
-                    )}
-                    <Text style={[styles.bubbleTime, isMine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs]}>
-                      {fmtTime(item.created_at)}{item.pending ? ' ·' : ''}
-                    </Text>
-                  </View>
-                </View>
-              </View>
+              <ClubMessageItem
+                item={item}
+                isMine={isMine}
+                hydratedItem={hydrate(item)}
+                showSenderHeader={!isMine && (!prevMsg || prevMsg.sender_id !== item.sender_id)}
+                viewerIsOwner={viewerIsOwner}
+                actioningId={actioningEventId}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                onDelete={handleDelete}
+              />
             );
           }}
         />
       )}
 
-      {/* Input bar */}
-      <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
-        <Pressable style={styles.attachBtn} onPress={handleCamera} hitSlop={4}>
-          <Ionicons name="camera-outline" size={20} color={colors.t3} />
-        </Pressable>
-        <Pressable style={styles.attachBtn} onPress={handleAttach} hitSlop={4}>
-          <Ionicons name="image-outline" size={20} color={colors.t3} />
-        </Pressable>
-        <Pressable style={styles.attachBtn} onPress={() => setModalView('proposal')} hitSlop={4}>
-          <Ionicons name="calendar-outline" size={20} color={colors.t3} />
-        </Pressable>
-        <TextInput
-          style={styles.input}
-          value={text}
-          onChangeText={setText}
-          placeholder="Message…"
-          placeholderTextColor={colors.t3}
-          multiline
-          maxLength={2000}
-        />
-        <Pressable
-          style={[styles.sendBtn, canSend && styles.sendBtnActive]}
-          onPress={sendText}
-          disabled={!canSend}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Send message"
-          accessibilityState={{ disabled: !canSend }}
-        >
-          <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
-        </Pressable>
-      </View>
+      <ClubChatInput
+        text={text}
+        canSend={canSend}
+        bottom={bottom}
+        onChangeText={setText}
+        onSend={sendText}
+        onCamera={handleCamera}
+        onAttach={handleAttach}
+        onProposal={proposal.open}
+      />
       {primer}
 
-      {/* ── Single modal: proposal form or map picker ────────────────────── */}
-      <Modal
-        visible={modalView !== null}
-        transparent
-        animationType="slide"
-        onRequestClose={modalView === 'map' ? () => setModalView('proposal') : closeProposalModal}
-      >
-        {modalView === 'proposal' ? (
-          <>
-            <Pressable style={styles.modalBackdrop} onPress={closeProposalModal} />
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
-              <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
-                <View style={styles.modalHandle} />
-                <View style={styles.modalHeaderRow}>
-                  <Text style={styles.modalTitle}>Propose a Meetup</Text>
-                  <Pressable onPress={closeProposalModal} hitSlop={10}>
-                    <Ionicons name="close" size={22} color={colors.t2} />
-                  </Pressable>
-                </View>
-
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                  {/* Title */}
-                  <Text style={styles.fieldLabel}>Title <Text style={styles.required}>*</Text></Text>
-                  <TextInput
-                    style={styles.fieldInput}
-                    value={propTitle}
-                    onChangeText={setPropTitle}
-                    placeholder="e.g. Morning hike at Shymbulak"
-                    placeholderTextColor={colors.t3}
-                    maxLength={80}
-                  />
-
-                  {/* Description */}
-                  <Text style={styles.fieldLabel}>Description</Text>
-                  <TextInput
-                    style={[styles.fieldInput, styles.fieldTextArea]}
-                    value={propDesc}
-                    onChangeText={setPropDesc}
-                    placeholder="Details, what to bring, etc."
-                    placeholderTextColor={colors.t3}
-                    multiline
-                    numberOfLines={3}
-                    maxLength={400}
-                    textAlignVertical="top"
-                  />
-
-                  {/* Date / time */}
-                  <Text style={styles.fieldLabel}>Date &amp; Time</Text>
-                  <DateTimePicker value={propDateTime} onChange={setPropDateTime} />
-
-                  {/* Location */}
-                  <Text style={styles.fieldLabel}>Location</Text>
-                  <View style={styles.locationRow}>
-                    <Pressable
-                      style={[styles.locationBtn, gettingLocation && styles.locationBtnBusy]}
-                      onPress={handleCurrentLocation}
-                      disabled={gettingLocation}
-                    >
-                      {gettingLocation
-                        ? <ActivityIndicator size="small" color={colors.teal} />
-                        : <Ionicons name="navigate-outline" size={16} color={colors.teal} />
-                      }
-                      <Text style={styles.locationBtnText}>My location</Text>
-                    </Pressable>
-                    <Pressable style={styles.locationBtn} onPress={() => setModalView('map')}>
-                      <Ionicons name="map-outline" size={16} color={colors.teal} />
-                      <Text style={styles.locationBtnText}>Pick on map</Text>
-                    </Pressable>
-                  </View>
-                  {propLocation && (
-                    <View style={styles.locationPreview}>
-                      <Ionicons name="location" size={14} color={colors.teal} />
-                      <Text style={styles.locationPreviewText} numberOfLines={1}>{propLocation.name}</Text>
-                      <Pressable onPress={() => setPropLocation(null)} hitSlop={8}>
-                        <Ionicons name="close-circle" size={16} color={colors.t3} />
-                      </Pressable>
-                    </View>
-                  )}
-
-                  {/* Submit */}
-                  <Pressable
-                    style={[styles.submitBtn, proposalSubmitting && styles.submitBtnBusy]}
-                    onPress={handleProposalSubmit}
-                    disabled={proposalSubmitting}
-                  >
-                    {proposalSubmitting
-                      ? <ActivityIndicator color={colors.bg} size="small" />
-                      : <Text style={styles.submitBtnText}>Send Proposal</Text>
-                    }
-                  </Pressable>
-                </ScrollView>
-              </View>
-            </KeyboardAvoidingView>
-          </>
-        ) : (
-          <View style={styles.mapPickerRoot}>
-            {/* Map header */}
-            <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
-              <Pressable onPress={() => setModalView('proposal')} hitSlop={12} style={styles.backBtn}>
-                <Ionicons name="chevron-back" size={24} color={colors.t1} />
-              </Pressable>
-              <Text style={styles.mapPickerTitle}>Drop a pin</Text>
-              <View style={{ width: 36 }} />
-            </View>
-
-            {/* Map */}
-            <View style={styles.mapWrap}>
-              <MapView
-                style={StyleSheet.absoluteFill}
-                provider={PROVIDER_GOOGLE}
-                initialRegion={mapRegion}
-                onRegionChangeComplete={setMapRegion}
-              />
-              {/* Fixed center pin */}
-              <View pointerEvents="none" style={styles.centerPin}>
-                <Ionicons name="location" size={36} color={colors.teal} />
-                <View style={styles.centerPinDot} />
-              </View>
-            </View>
-
-            {/* Confirm */}
-            <View style={[styles.mapConfirmBar, { paddingBottom: bottom + 16 }]}>
-              <Pressable
-                style={[styles.mapConfirmBtn, gettingLocation && styles.submitBtnBusy]}
-                onPress={confirmMapLocation}
-                disabled={gettingLocation}
-              >
-                {gettingLocation
-                  ? <ActivityIndicator color={colors.bg} size="small" />
-                  : <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
-                }
-              </Pressable>
-            </View>
-          </View>
-        )}
-      </Modal>
+      <MeetupProposalModal {...proposal.modalProps} top={top} bottom={bottom} />
     </KeyboardAvoidingView>
   );
 }

@@ -100,14 +100,14 @@ function ClubHero({ club, memberCount, myRole, isMember, onOpenChat }: {
         <Image source={{ uri: club.emblem }} style={styles.emblem} />
       ) : (
         <View style={styles.emblemFallback}>
-          <Text style={styles.emblemInitial}>{club.name.charAt(0).toUpperCase()}</Text>
+          <Text style={styles.emblemInitial}>{club.name?.charAt(0)?.toUpperCase() ?? '?'}</Text>
         </View>
       )}
 
-      <Text style={styles.clubName}>{club.name}</Text>
+      <Text style={styles.clubName}>{club.name ?? ''}</Text>
 
       <View style={styles.metaRow}>
-        {club.interest && (
+        {club.interest?.name && (
           <View style={styles.interestBadge}>
             <Text style={styles.interestIcon}>{club.interest.icon}</Text>
             <Text style={styles.interestName}>{club.interest.name}</Text>
@@ -457,8 +457,13 @@ export default function ClubDetailScreen() {
 
   // ── Delete Club ───────────────────────────────────────────────────────────
   function handleDeleteClub() {
+    // A real guard, not a `!` assertion: both callers of this function only
+    // reach it once `club` has been confirmed non-null by the render below,
+    // but the two are otherwise unconnected — this makes that true by
+    // construction rather than by every caller remembering to check first.
+    if (!club) return;
     Alert.alert(
-      `Delete ${club!.name}?`,
+      `Delete ${club.name}?`,
       'This removes all members and events and cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -482,7 +487,8 @@ export default function ClubDetailScreen() {
 
   // ── Club manage (creator header button) ───────────────────────────────────
   function openClubManage() {
-    Alert.alert(club!.name, undefined, [
+    if (!club) return;
+    Alert.alert(club.name, undefined, [
       { text: 'Delete Club', style: 'destructive', onPress: handleDeleteClub },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -597,7 +603,7 @@ export default function ClubDetailScreen() {
               pathname: '/clubs/[id]/chat',
               params: {
                 id: club.id,
-                name: club.name,
+                name: club.name ?? '',
                 emblem: club.emblem ?? '',
                 memberCount: members.length || club.member_count,
               },

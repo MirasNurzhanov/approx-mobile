@@ -1,7 +1,7 @@
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
 
-import { fonts } from '@/constants/theme';
+import { fonts, withAlpha } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
@@ -13,6 +13,10 @@ const RING_BASE   = 56;
 
 export function AuraLoader() {
   const { colors } = useTheme();
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: dropping it
+  // is not a no-op here. Compiling this file with and without the wrapper shows
+  // the cache shrinking from 37 slots to 23 — the compiler stops caching
+  // `makeStyles(colors)` and, with it, every `styles.*` read downstream.
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   // Created once and never replaced. `useState` with an initialiser rather than
@@ -208,11 +212,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     height:        CORE_R * 2,
     borderRadius:  CORE_R,
     backgroundColor: colors.teal,
-    shadowColor:   colors.teal,
-    shadowRadius:  14,
-    shadowOpacity: 0.85,
-    shadowOffset:  { width: 0, height: 0 },
-    elevation:     8,
+    boxShadow:     `0 0 14px ${withAlpha(colors.teal, 0.85)}`,
   },
   wordmark: {
     fontFamily:    fonts.display,

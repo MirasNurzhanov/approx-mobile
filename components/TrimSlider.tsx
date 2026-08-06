@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -95,21 +95,19 @@ export function TrimSlider({
   minLengthMs, format, disabled,
 }: Props) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const [width, setWidth] = useState(0);
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
+  const onLayout = (e: LayoutChangeEvent) => {
     setWidth(e.nativeEvent.layout.width);
-  }, []);
+  };
 
   const travel = Math.max(width - THUMB, 1);
   const safeDuration = Math.max(duration, 1);
 
   /** Milliseconds → pixels along the usable track. */
-  const toX = useCallback(
-    (ms: number) => (Math.max(0, Math.min(safeDuration, ms)) / safeDuration) * travel,
-    [safeDuration, travel],
-  );
+  const toX = (ms: number) =>
+    (Math.max(0, Math.min(safeDuration, ms)) / safeDuration) * travel;
 
   // Where each handle is being dragged to, in pixels. Shared values so the
   // drag is drawn on the UI thread; the millisecond values follow on the JS

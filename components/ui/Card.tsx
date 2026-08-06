@@ -21,11 +21,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   elevated: {
     backgroundColor: colors.surface2,
-    shadowColor: '#000',
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
   },
   pressed: { opacity: 0.8 },
 })

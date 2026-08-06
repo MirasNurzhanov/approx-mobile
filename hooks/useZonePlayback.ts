@@ -181,6 +181,9 @@ export function useZonePlayback({
     setState(status.isPlaying || status.shouldPlay ? 'playing' : 'paused');
   }, []);
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: React
+  // Compiler bails on this hook (emitted output is the source verbatim, no `_c`
+  // cache), so every `useCallback` here is the only caching there is.
   const load = useCallback(async (startAt = 0) => {
     setState('loading');
 

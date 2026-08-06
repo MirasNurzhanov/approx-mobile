@@ -518,13 +518,13 @@ function DotMarker({
               a flat circle sitting on the map. */}
           <View style={[styles.dotBloom, { width: haloH, height: haloH, borderRadius: haloH / 2, backgroundColor: color }]} />
           {InterestIcon ? (
-            <View style={[styles.dotIconCore, { borderColor: color, shadowColor: color }]}>
+            <View style={[styles.dotIconCore, { borderColor: color, boxShadow: `0 0 5px ${withAlpha(color, 0.9)}` }]}>
               <InterestIcon size={13} color={color} />
             </View>
           ) : (
             <>
               <View style={[styles.dotGlow, { backgroundColor: color }]} />
-              <View style={[styles.userDot, { backgroundColor: color, shadowColor: color }]} />
+              <View style={[styles.userDot, { backgroundColor: color, boxShadow: `0 0 5px ${withAlpha(color, 0.9)}` }]} />
             </>
           )}
           {/* Absent presence renders nothing — PresenceDot returns null — so a
@@ -3044,9 +3044,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.9,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 0 },
+    // The glow itself is applied inline, as a `boxShadow` built from the
+    // marker's interest colour — see the `dotIconCore` call site.
   },
   /** Outer bloom: wide and very faint, so a cluster of matched strangers reads
    *  as a lit area before you can pick out the individual points. */
@@ -3073,11 +3072,10 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     // lands on a pale road label.
     borderWidth: 1.5,
     borderColor: colors.bg,
-    // iOS only; Android rasterizes the marker and drops it, which is why the
-    // bloom above does the same job structurally.
-    shadowOpacity: 0.9,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 0 },
+    // The glow itself is applied inline, as a `boxShadow` built from the
+    // marker's colour — see the `userDot` call site. Android still rasterizes
+    // the marker and drops it, which is why the bloom above does the same job
+    // structurally.
   },
 
   /** Presence badge, pinned to the dot's lower-right so it reads as attached

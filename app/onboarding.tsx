@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -50,7 +50,7 @@ const LIGHT = {
 } as const;
 
 export default function OnboardingScreen() {
-  const styles = useMemo(() => makeStyles(LIGHT), []);
+  const styles = makeStyles(LIGHT);
   const { bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const flatRef = useRef<FlatList>(null);

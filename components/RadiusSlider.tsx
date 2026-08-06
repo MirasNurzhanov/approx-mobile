@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -98,7 +98,7 @@ export function RadiusSlider({
   value, min, max, onChange, onCommit, format, label = 'Zone radius', disabled,
 }: Props) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const [width, setWidth] = useState(0);
   const position = useSharedValue(valueToPosition(value, min, max));
   const scale = useSharedValue(1);
@@ -107,9 +107,9 @@ export function RadiusSlider({
    *  one render behind the gesture for the whole drag. */
   const dragging = useSharedValue(false);
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
+  const onLayout = (e: LayoutChangeEvent) => {
     setWidth(e.nativeEvent.layout.width);
-  }, []);
+  };
 
   // Follow a value that arrives from somewhere other than this control — the
   // server's stored radius landing after the first render, or the a11y

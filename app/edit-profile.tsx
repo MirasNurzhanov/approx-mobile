@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -263,7 +263,7 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
 export default function EditProfileScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
 
   const [profile,   setProfile]   = useState<Profile | null>(null);

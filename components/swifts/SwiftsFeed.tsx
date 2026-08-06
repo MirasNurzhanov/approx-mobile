@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -74,7 +74,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function SwiftsFeed() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { bottom: safeBottom } = useSafeAreaInsets();
 
@@ -102,10 +102,10 @@ export function SwiftsFeed() {
   // Only the retry path has to put the feed back into 'loading' — the first
   // load already starts there, so doing it in the mount effect would just be a
   // second render to set the value it already had.
-  const retry = useCallback(() => {
+  const retry = () => {
     setState('loading');
     load();
-  }, [load]);
+  };
 
   // Stable identity: FlatList warns and misbehaves if this changes per render.
   // Held by `useState` rather than a ref, since reading a ref back during
@@ -123,13 +123,13 @@ export function SwiftsFeed() {
     };
   });
 
-  const handleLayout = useCallback((e: LayoutChangeEvent) => {
+  const handleLayout = (e: LayoutChangeEvent) => {
     setHeight(e.nativeEvent.layout.height);
-  }, []);
+  };
 
   // Optimistic: the count moves under the thumb, and only rolls back if the
   // write actually fails.
-  const handleToggleLike = useCallback((id: string, liked: boolean) => {
+  const handleToggleLike = (id: string, liked: boolean) => {
     setSwifts((prev) =>
       prev.map((s) =>
         s.id === id
@@ -146,11 +146,11 @@ export function SwiftsFeed() {
         ),
       );
     });
-  }, []);
+  };
 
   // TODO(swifts): comments sheet, share sheet, and a report/mute menu. Each is a
   // screen of its own; the feed only needs to know they were asked for.
-  const noop = useCallback(() => {}, []);
+  const noop = () => {};
 
   const navClearance = navArcClearance(RAIL_RIGHT, RAIL_WIDTH) + safeBottom;
 

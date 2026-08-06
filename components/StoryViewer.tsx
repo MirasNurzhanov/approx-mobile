@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -108,7 +108,7 @@ export interface StoryViewerProps {
 
 export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId }: StoryViewerProps) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);

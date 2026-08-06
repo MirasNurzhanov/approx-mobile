@@ -66,6 +66,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function DraggableTabs({ tabs, activeTab, order, onTabPress, onOrderChange }: Props) {
   const { colors } = useTheme();
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: React
+  // Compiler bails on this component (the emitted code is the source verbatim,
+  // no `_c` cache), so these wrappers are the only caching it has.
   const styles = useMemo(() => makeStyles(colors), [colors]);
   // All three are read only from the gesture callbacks below, which cannot fire
   // before the commit this effect follows — so syncing here rather than during

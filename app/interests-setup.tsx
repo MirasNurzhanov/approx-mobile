@@ -148,11 +148,7 @@ function FloatingBubble({
         backgroundColor: withAlpha(color, hasPicks ? 0.18 : 0.09),
         borderWidth: hasPicks ? 2 : 1.5,
         borderColor: withAlpha(color, hasPicks ? 1 : 0.3),
-        shadowColor: hasPicks ? color : '#2D2A22',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: hasPicks ? 0.2 : 0.06,
-        shadowRadius: 8,
-        elevation: hasPicks ? 4 : 2,
+        boxShadow: `0 4px 8px ${withAlpha(hasPicks ? color : '#2D2A22', hasPicks ? 0.2 : 0.06)}`,
         transform,
       }}
     >

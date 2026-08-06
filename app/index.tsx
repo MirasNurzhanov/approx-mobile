@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
@@ -12,10 +12,30 @@ import { hasSeenOnboarding } from '@/services/onboarding';
 // introduction to the app they already use before they can reach the login
 // button. `onboarding_seen` is per device rather than per account, and signing
 // out deliberately leaves it in place (see services/signOut).
+//
+// This decision is made exactly once per mount, not on every `isAuthenticated`
+// change. This screen stays alive in the stack after its own `replace()` —
+// which is *why* it originally re-ran on every later flip of the flag — and an
+// unconditional "authenticated → map" here raced any other screen's own
+// post-auth routing. AuthContext.completeSocialSignIn needs a fresh social
+// sign-up to land on /social-birthday or /interests-setup instead of the map;
+// that call was landing correctly and then getting silently overwritten a
+// beat later by this effect, because effects run after the synchronous
+// `router.replace` that set it up. Every other path (password login,
+// register) happened to want /(tabs)/map too, which is the only reason this
+// was never visible before social sign-in existed.
 export default function Index() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+  const decided = useRef(false);
 
   useEffect(() => {
+    // The real answer isn't in yet — acting on the default `false` here would
+    // send a genuinely signed-in user to the carousel for a flash before the
+    // second, correct pass fixed it. Waiting costs nothing: AuraLoader is
+    // already covering the screen for this same stretch.
+    if (isLoading || decided.current) return;
+    decided.current = true;
+
     let cancelled = false;
 
     (async () => {
@@ -32,7 +52,7 @@ export default function Index() {
     })();
 
     return () => { cancelled = true; };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isLoading]);
 
   return <View style={{ flex: 1, backgroundColor: '#faf9f5' }} />;
 }

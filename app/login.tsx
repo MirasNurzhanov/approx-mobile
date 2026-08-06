@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,17 +21,21 @@ import { lightColors as L } from '@/constants/theme';
 import { fonts } from '@/constants/theme';
 
 export default function LoginScreen() {
-  const { login, isAuthenticated, isLoading } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [focused, setFocused]   = useState<'email' | 'password' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const passwordRef = useRef<TextInput>(null);
 
-  useEffect(() => {
-    if (!isLoading && isAuthenticated) router.replace('/(tabs)/map');
-  }, [isAuthenticated, isLoading]);
-
+  // No isAuthenticated-watching redirect here — login() and
+  // completeSocialSignIn() (Google/Apple, via SocialAuthButtons) already
+  // navigate explicitly on success, and a fresh social sign-up needs to land
+  // on /social-birthday or /interests-setup rather than the map. A second,
+  // unconditional "authenticated → map" effect here raced that: it fired a
+  // beat after the explicit redirect (effects run post-commit) and silently
+  // overwrote it, which is why Apple sign-in appeared to skip both the age
+  // gate and interest selection entirely.
   async function handleLogin() {
     if (!email || !password) return;
     setSubmitting(true);

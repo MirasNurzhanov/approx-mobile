@@ -12,7 +12,16 @@
           "package_name": "com.arcanix.aura"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "703267035957-3plo86ki81ntt3cevmk115shqk8b50dc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.arcanix.aura",
+            "certificate_hash": "62422762b14bd049f6582b9c4e860457b820468e"
+          }
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyApovBG7m-moAZ1O4tUPKZXKBdhWmdYuuc"

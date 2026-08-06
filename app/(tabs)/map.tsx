@@ -2553,12 +2553,24 @@ export default function MapScreen() {
           <ActivityIndicator color={colors.teal} size="large" />
           <Text style={styles.loadingText}>Locating you…</Text>
         </View>
-      ) : (
+      ) : (() => {
+        // TEMP DIAGNOSTIC — remove once the iOS native-crash cause is found.
+        // No onMapLoadingError: react-native-maps@1.20.1 (the installed
+        // version) does not expose one. onMapLoaded is the closest real
+        // signal — it fires after tiles finish, one step past onMapReady, so
+        // "ready logs but loaded never does" points at tile loading
+        // specifically rather than native init.
+        console.log('[Map] MapView rendering, provider:', PROVIDER_GOOGLE);
+        console.log('[Map] initial region:', region);
+        console.log('[Map] iOS key prefix:', 'AIzaSyB6YKo...');
+        return (
         <MapView
           ref={mapRef}
           onLayout={(e) => {
             setMapH(e.nativeEvent.layout.height);
           }}
+          onMapReady={() => console.log('[Map] onMapReady fired — native map view initialised')}
+          onMapLoaded={() => console.log('[Map] onMapLoaded fired — tiles finished loading')}
           style={styles.map}
           provider={PROVIDER_GOOGLE}
           customMapStyle={mapStyleFor(themeMode)}
@@ -2849,7 +2861,8 @@ export default function MapScreen() {
             />
           ))}
         </MapView>
-      )}
+        );
+      })()}
 
       {/* Top bar */}
       <TopBar

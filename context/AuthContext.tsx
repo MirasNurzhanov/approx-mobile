@@ -76,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function completeSocialSignIn({ created, needsDateOfBirth }: SocialSignInResult) {
+    // TEMP DIAGNOSTIC — remove once the skip-onboarding bug is found.
+    console.log('[SocialAuth] completeSocialSignIn called with:', { created, needsDateOfBirth });
     markOnboardingSeen();
     setIsAuthenticated(true);
     // Order matters, and it is not "new users here, old users there". A date of
@@ -83,9 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // show — including for the returning account whose first attempt was
     // interrupted before they answered. The birthday screen sends them on to
     // interests itself.
-    if (needsDateOfBirth) router.replace('/social-birthday');
-    else if (created) router.replace('/interests-setup');
-    else router.replace('/(tabs)/map');
+    if (needsDateOfBirth) {
+      console.log('[SocialAuth] routing to /social-birthday');
+      router.replace('/social-birthday');
+    } else if (created) {
+      console.log('[SocialAuth] routing to /interests-setup');
+      router.replace('/interests-setup');
+    } else {
+      console.log('[SocialAuth] routing to /(tabs)/map');
+      router.replace('/(tabs)/map');
+    }
   }
 
   async function logout() {

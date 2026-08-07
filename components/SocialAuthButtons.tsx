@@ -85,6 +85,8 @@ export default function SocialAuthButtons({ disabled = false }: { disabled?: boo
   }, []);
 
   async function run(provider: 'google' | 'apple') {
+    // TEMP DIAGNOSTIC — remove once the skip-onboarding bug is found.
+    console.log('[SocialAuth] run() called for', provider, '| pending:', pending, '| disabled:', disabled);
     if (pending || disabled) return;
     setPending(provider);
     await runBusy(
@@ -92,6 +94,7 @@ export default function SocialAuthButtons({ disabled = false }: { disabled?: boo
         const result = provider === 'google'
           ? await signInWithGoogle()
           : await signInWithApple();
+        console.log('[SocialAuth] provider sign-in resolved:', result);
         completeSocialSignIn(result);
       },
       () => setPending(null),

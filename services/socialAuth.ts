@@ -157,14 +157,19 @@ async function exchange(
     );
   }
 
+  // TEMP DIAGNOSTIC — remove once the skip-onboarding bug is found.
+  console.log('[SocialAuth] /api/users/social/ raw response:', JSON.stringify(data));
+
   await AsyncStorage.setItem('access_token', data.tokens.access);
   await AsyncStorage.setItem('refresh_token', data.tokens.refresh);
   resumeSession();
 
-  return {
+  const result = {
     created: !!data.created,
     needsDateOfBirth: !!data.needs_date_of_birth,
   };
+  console.log('[SocialAuth] exchange() returning:', result);
+  return result;
 }
 
 // ── Google ───────────────────────────────────────────────────────────────────

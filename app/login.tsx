@@ -5,7 +5,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/AuthContext';
 import { runBusy } from '@/services/busy';
@@ -26,6 +26,7 @@ export default function LoginScreen() {
   const [focused, setFocused]   = useState<'email' | 'password' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const passwordRef = useRef<TextInput>(null);
+  const insets = useSafeAreaInsets();
 
   // No isAuthenticated-watching redirect here — login() already navigates
   // explicitly on success. A second, unconditional "authenticated → map"
@@ -43,7 +44,7 @@ export default function LoginScreen() {
   }
 
   return (
-    <SafeAreaView style={s.root}>
+    <View style={[s.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       {/* Decorative blobs */}
       <View style={s.blobTL} />
       <View style={s.blobBR} />
@@ -147,7 +148,7 @@ export default function LoginScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

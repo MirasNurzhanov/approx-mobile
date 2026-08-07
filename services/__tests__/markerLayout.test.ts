@@ -279,7 +279,7 @@ describe('layoutMarkers', () => {
 
   // ── Zones ────────────────────────────────────────────────────────────────
 
-  it('still honours a sound zone that is large enough on screen to mean something', () => {
+  it('still honours a music zone that is large enough on screen to mean something', () => {
     // The floor must not swallow the constraint it rescues. A ring of six
     // wants a wider radius than the floor, so a zone between the two really
     // does pull it in — a marker fanned outside a circle its owner is audibly

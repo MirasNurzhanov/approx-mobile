@@ -72,7 +72,7 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   locationBackground: {
     title: 'Background location',
     primer:
-      'Aura can keep finding people and sound zones while the app is closed. This is optional — everything works while the app is open without it.',
+      'Aura can keep finding people and music zones while the app is closed. This is optional — everything works while the app is open without it.',
     purpose: 'Keep finding nearby people and zones while the app is closed.',
     denied:
       'Aura will only find people while the app is open.',

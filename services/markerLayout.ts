@@ -180,7 +180,7 @@ export interface MarkerLayout {
  * How far a marker at `center` may move without leaving a zone it is inside.
  *
  * A marker `d` metres from the middle of a zone of radius `R` has `R − d` to
- * spare. Being inside someone's sound zone is an audible fact, so a marker that
+ * spare. Being inside someone's music zone is an audible fact, so a marker that
  * the fan pushed across the circle's edge would contradict what the user can
  * hear. Zones the point is already outside impose nothing.
  *

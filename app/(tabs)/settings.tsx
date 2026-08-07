@@ -232,9 +232,10 @@ function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
 
             It used to *be* a way to mute a track: everything about the
             music zone was gated on this flag, so removing the circle also
-            stopped friends hearing a song and stopped the earshot alerts.
-            The two are separate now. Music is switched off by clearing the
-            track in Zone Music. */}
+            stopped friends hearing a song and stopped the alerts. The two
+            are separate now, and each has its own switch — the music zone's
+            is on Zone Music, and it removes that circle from the map the
+            way this one removes yours. */}
         <SettingsRow
           icon={IconLocate}
           label="Zone on the map"

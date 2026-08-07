@@ -40,6 +40,8 @@ import {
   type RegionCandidate,
   type RegionSummary,
   type ZoneMode,
+  type ZoneType,
+  zoneTypeForRegion,
 } from '@/services/zoneArea';
 
 /** How long to sit on a keystroke before asking the server.
@@ -65,7 +67,7 @@ const MIN_QUERY_LEN = 2;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ZoneState {
-  zone_mode?: ZoneMode;
+  zone_type?: ZoneType;
   zone_radius?: number;
   zone_region?: number | null;
   zone_region_detail?: RegionSummary | null;
@@ -680,7 +682,11 @@ export default function ZoneAreaScreen() {
 
       if (zoneRes.status === 'fulfilled') {
         const z = zoneRes.value.data;
-        setMode(z.zone_mode === 'region' && z.zone_region ? 'region' : 'radius');
+        // The screen offers two buttons; the server stores three types. Both
+        // polygon types land on the Place tab, and which one it was is
+        // recoverable from the region itself, so nothing is lost collapsing
+        // them here.
+        setMode(z.zone_type !== 'circle' && z.zone_region ? 'region' : 'radius');
         setRadiusM(z.zone_radius && z.zone_radius > 0 ? z.zone_radius : 500);
         if (z.zone_region_detail) setRegion(z.zone_region_detail);
       }
@@ -740,7 +746,9 @@ export default function ZoneAreaScreen() {
     const previous = mode;
     setMode(next);
     save(
-      next === 'region' ? { zone_mode: next, zone_region: region!.id } : { zone_mode: next },
+      next === 'region'
+        ? { zone_type: zoneTypeForRegion(region), zone_region: region!.id }
+        : { zone_type: 'circle' },
       () => setMode(previous),
     );
   }
@@ -759,7 +767,7 @@ export default function ZoneAreaScreen() {
     setQuery('');
     setChoices([]);
     setChoicesFor(null);
-    save({ zone_mode: 'region', zone_region: next.id }, () => {
+    save({ zone_type: zoneTypeForRegion(next), zone_region: next.id }, () => {
       setRegion(previous);
       if (!previous) setMode('radius');
     });
@@ -775,7 +783,7 @@ export default function ZoneAreaScreen() {
     // region mode pointed at the region just cleared would keep the old city
     // on everyone's map while this screen showed nothing chosen.
     setMode('radius');
-    save({ zone_mode: 'radius' }, () => {
+    save({ zone_type: 'circle' }, () => {
       setRegion(previous);
       setMode('region');
     });

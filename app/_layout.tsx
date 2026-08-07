@@ -92,6 +92,10 @@ function AppShell() {
       <Stack.Screen name="interests-setup"         options={{ headerShown: false }} />
       <Stack.Screen name="onboarding-profession"   options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding-nationality"  options={{ headerShown: false, animation: 'slide_from_right' }} />
+      {/* Last stop of the sign-up chain, shown once per new account. No back
+          gesture: everything behind it has already been answered, and swiping
+          out would land on the country picker again. It has its own Skip. */}
+      <Stack.Screen name="getting-started"         options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />
@@ -102,12 +106,35 @@ function AppShell() {
   );
 }
 
-export default function RootLayout() {
-  ErrorUtils.setGlobalHandler((error, isFatal) => {
-    console.error('[FATAL]', error.message, error.stack);
-  });
+// Installed once, at module scope, and chained rather than replaced.
+//
+// This used to sit in RootLayout's render body, which meant re-registering it
+// on every render — and, far worse, it replaced React Native's own handler
+// without ever calling it. A genuinely fatal error was written to the console
+// and then swallowed: no red box in development, no crash report in production,
+// nothing for the next person to work from. A crash reported as "it just closes
+// with no message" is exactly what that looks like from the outside.
+//
+// `getGlobalHandler` is guarded because it is not part of the documented
+// surface; if it is ever missing, chaining is skipped rather than throwing here
+// and taking the launch down with it.
+const previousErrorHandler = ErrorUtils.getGlobalHandler?.();
+ErrorUtils.setGlobalHandler((error, isFatal) => {
+  console.error('[FATAL]', isFatal ? '(fatal)' : '(non-fatal)', error?.message, error?.stack);
+  previousErrorHandler?.(error, isFatal);
+});
 
-  const [fontsLoaded] = useFonts({
+export default function RootLayout() {
+  // `fontError` is read, not ignored. `useFonts` reports a failure by setting
+  // it and leaving `loaded` false forever — so a bare `if (!loaded) return null`
+  // renders a permanently blank screen when a font fails to load, with the
+  // splash already dismissed behind it. From the user's side that is
+  // indistinguishable from the app failing to start, and because a font load
+  // can fail intermittently it is the kind of fault that clears on the next try.
+  //
+  // A missing font is a cosmetic problem; a blank screen is not. Render either
+  // way and let the system fall back.
+  const [fontsLoaded, fontError] = useFonts({
     SpaceGrotesk: SpaceGrotesk_400Regular,
     'SpaceGrotesk-Medium': SpaceGrotesk_500Medium,
     'SpaceGrotesk-SemiBold': SpaceGrotesk_600SemiBold,
@@ -120,7 +147,11 @@ export default function RootLayout() {
 
   const colorScheme = useColorScheme();
 
-  if (!fontsLoaded) return null;
+  useEffect(() => {
+    if (fontError) console.warn('[Fonts] failed to load, falling back:', fontError.message);
+  }, [fontError]);
+
+  if (!fontsLoaded && !fontError) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

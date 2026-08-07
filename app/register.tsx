@@ -19,6 +19,7 @@ import DatePickerField from '@/components/DatePickerField';
 import SocialAuthButtons from '@/components/SocialAuthButtons';
 import { loginRequest } from '@/services/auth';
 import { runBusy } from '@/services/busy';
+import { markGuidePending } from '@/services/guide';
 import { BASE_URL } from '@/services/api';
 import { fonts, lightColors as L, radius } from '@/constants/theme';
 
@@ -101,6 +102,11 @@ export default function RegisterScreen() {
         password2: confirmPassword,
       });
       await loginRequest(email, password);
+      // The one moment the app knows this account is new. The guide at the end
+      // of the sign-up chain is shown to whoever is carrying this marker, which
+      // is how it reaches new accounts without ambushing every existing one —
+      // see services/guide.
+      await markGuidePending();
       router.replace('/interests-setup');
     }, () => setSubmitting(false)).catch((err) => {
       if (axios.isAxiosError(err) && err.response?.data) {

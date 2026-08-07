@@ -5,6 +5,7 @@ import { beginSessionEnd, BASE_URL } from './api';
 import { stopBackgroundLocationUpdates } from './backgroundLocation';
 import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
+import { GUIDE_PENDING_KEY, GUIDE_SEEN_KEY } from './guide';
 import { resetOwnMotion } from './ownMotion';
 import { resetPrivacy } from './privacy';
 import { clearGoogleSession } from './socialAuth';
@@ -35,6 +36,15 @@ const ACCOUNT_SCOPED_KEYS = [
   'refresh_token',
   'chat_last_seen',
   'last_zone_notified',
+  // The new-account guide, both halves. Account-scoped rather than device —
+  // unlike `onboarding_seen` above, which sells the app and only needs saying
+  // once per phone, this one is a manual owed to whoever just signed up. Two
+  // people sharing a device each get theirs; clearing `pending` here also stops
+  // an abandoned sign-up ambushing the *next* account that signs in on it.
+  // Imported rather than spelled out: a typo here would leave the guide behind
+  // and there is nothing that would fail loudly if it did.
+  GUIDE_PENDING_KEY,
+  GUIDE_SEEN_KEY,
   // The on-device activity feed is gone (alerts come from the server now), but
   // devices that ran an older build still hold its keys — and they hold the
   // previous account's alerts. Kept in the list so signing out clears them.

@@ -330,13 +330,32 @@ function useClubInvite(clubId: number, members: ClubMember[], onInvited: () => P
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
+/**
+ * Reads the route and hands the club id down as a `key`.
+ *
+ * The key is the whole point: navigating from one club to another can reuse
+ * this screen rather than pushing a new one, and a reused component keeps the
+ * state it already had — so the previous club stayed on screen while `clubId`
+ * had already moved on. This used to be papered over with an effect that
+ * re-derived `club`/`members`/`loading` from the cache whenever `clubId`
+ * changed, which meant every such navigation rendered the stale club once and
+ * then immediately re-rendered with the right one.
+ *
+ * Keying on the id makes a different club a different component instance, so
+ * the `useState` initialisers below run again and the first render is already
+ * correct. React's own answer to "reset all state when a prop changes".
+ */
 export default function ClubDetailScreen() {
+  const { id, fromCreate } = useLocalSearchParams<{ id: string; fromCreate?: string }>();
+  const clubId = Number(id);
+  return <ClubDetail key={clubId} clubId={clubId} fromCreate={fromCreate} />;
+}
+
+function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: string }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { id, fromCreate } = useLocalSearchParams<{ id: string; fromCreate?: string }>();
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
-  const clubId = Number(id);
   const cached = _clubCache.get(clubId);
 
   const [club, setClub] = useState<Club | null>(cached?.club ?? null);
@@ -345,19 +364,6 @@ export default function ClubDetailScreen() {
   const [loading, setLoading] = useState(cached === undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [actioning, setActioning] = useState(false);
-
-  // Re-derive from the cache whenever the route's clubId changes. The
-  // useState initializers above only run once, on this instance's first
-  // mount — if the screen is reused for a different club (a param-only
-  // navigation, not a fresh push) rather than remounted, `club` would
-  // otherwise keep showing the previous club while `clubId` has already
-  // moved on.
-  useEffect(() => {
-    const c = _clubCache.get(clubId);
-    setClub(c?.club ?? null);
-    setMembers(c?.members ?? []);
-    setLoading(c === undefined);
-  }, [clubId]);
 
   const fetchMembers = useCallback(async () => {
     try {

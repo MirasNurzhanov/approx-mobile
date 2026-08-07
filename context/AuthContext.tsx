@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { Alert } from 'react-native';
 import { setOnAuthFailure } from '@/services/api';
 import { getAccessToken, loginRequest } from '@/services/auth';
+import { markGuidePending } from '@/services/guide';
 import { markOnboardingSeen } from '@/services/onboarding';
 import { flushPendingRevocations, performSignOut } from '@/services/signOut';
 import type { SocialSignInResult } from '@/services/socialAuth';
@@ -83,6 +84,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // show — including for the returning account whose first attempt was
     // interrupted before they answered. The birthday screen sends them on to
     // interests itself.
+    // Whoever is about to walk the sign-up chain is owed the guide at the end
+    // of it, and that is both of the branches below that do not go straight to
+    // the map — `created` is a fresh account, and `needsDateOfBirth` on a
+    // returning one means their first attempt never finished. Not awaited: the
+    // routing below is synchronous and the write only has to land before the
+    // chain reaches its last screen. See services/guide.
+    if (created || needsDateOfBirth) markGuidePending();
+
     if (needsDateOfBirth) {
       router.replace('/social-birthday');
     } else if (created) {

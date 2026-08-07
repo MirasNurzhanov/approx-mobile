@@ -96,7 +96,6 @@ import { fmtRadius, trackTitle } from '@/services/zoneAudio';
 import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
 import {
     getRegion,
-    regionContains,
     ringsForDisplay,
     type Region as ZoneRegion,
     type ZoneMode,
@@ -132,13 +131,11 @@ interface NearbyUser {
    *  10s. Resolved through services/zoneArea, which caches per region. */
   zone_region_id?: number | null;
   zone_audio_url?: string;
-  /** How close you have to be to *hear* them, which is no longer how big their
-   *  zone is. Sent only to viewers allowed to hear the track at all, so its
-   *  absence means "no audio for you" rather than "no music zone". */
+  /** Their music zone: how close you have to be to *hear* them, which is not
+   *  how big their zone is. Sent only to viewers allowed to hear the track and
+   *  only while the music zone is switched on, so its absence means either "no
+   *  audio for you" or "there is no music zone" — and both draw nothing. */
   music_zone_radius?: number;
-  /** True when they gave the music a zone of its own — the only case where a
-   *  second circle is worth drawing over the first. */
-  music_zone_separate?: boolean;
   /** Present for Apple Music tracks, which have a real name and cover art.
    *  Everything else is still named by services/zoneAudio from its URL. */
   zone_track_title?: string;
@@ -166,19 +163,16 @@ interface SelfZone {
   zone_radius: number;
   zone_mode: ZoneMode;
   zone_region_id: number | null;
-  /** Earshot, drawn as its own ring wherever the zone circle is not already
-   *  drawing it. The owner is the one person who cannot hear their own zone
-   *  from the map, so seeing where the sound stops is the only feedback they
-   *  get. `music_zone_radius` is the server's resolved `music_radius_m` — the
-   *  separate dial or the zone radius inherited — so it is the true distance
-   *  either way. */
-  music_zone_separate: boolean;
+  /** The music zone, drawn as its own ring. The owner is the one person who
+   *  cannot hear their own zone from the map, so seeing where the sound stops
+   *  is the only feedback they get — and it is the only place the radius they
+   *  set on Zone Music is visible at real scale. */
   music_zone_radius: number;
-  /** The sound zone's own on/off. Off means no ring, because there is nothing
-   *  audible for one to mark. */
+  /** Whether they have a music zone at all. Off means no ring: the zone has
+   *  been removed, not muted, so there is no edge left to mark. */
   music_zone_active: boolean;
-  /** Whether there is a track at all. Nothing carries from an empty zone, so an
-   *  earshot ring around one marks the reach of silence. */
+  /** Whether there is a track at all. Nothing carries from an empty zone, so a
+   *  ring around one would mark the reach of silence. */
   has_track: boolean;
 }
 
@@ -352,44 +346,27 @@ function fmtTimeLeft(expiresAt: string): string {
 }
 
 /**
- * The radius of the viewer's own earshot ring, or null for no ring.
+ * The radius of the viewer's own music-zone ring, or null for no ring.
  *
- * Yours is not drawn on quite the same terms as everyone else's, and the
- * difference is that yours is also a control. Other people's rings answer "can
- * I hear something here"; yours additionally answers "how far did I just set
- * that dial", which is a question worth answering before there is a track.
+ * The same two conditions everyone else's ring gets, which is the point: what
+ * the owner sees is what a friend standing next to them sees.
  *
- *  1. Is the sound zone on? Muting is the switch that stops people hearing
- *     you, so it is the switch that removes the ring marking where they would
- *     — and with the size controls hidden while muted, there is no dial left
- *     to preview either.
- *  2. Is earshot a dial you set? A separate music zone is drawn whether or not
- *     a track is loaded: the ring is the only place the radius is visible at
- *     real scale, and sizing the zone before choosing the song is the normal
- *     order to do those two things in.
- *  3. Otherwise, is there a track? Inherited earshot is not a preview of
- *     anything — the number belongs to the zone, and Zone Size previews it
- *     there — so an empty zone has no reach worth drawing.
- *  4. Is earshot a circle at all? A region zone that the music still follows
- *     has a city outline for a listening range, and drawing `zone_radius` as a
- *     circle would claim a boundary that is not the one in force. Same rule
- *     other people get, a few lines further down in `musicZones`.
- *  5. Is the zone circle already drawing it? When earshot is inherited and the
- *     zone is on the map at the same radius, a second identical ring is not
- *     information — but when the zone circle is *off*, this ring is the only
- *     thing showing how far the music goes, and it must stay.
+ *  1. Is the music zone switched on? That switch is the whole feature now — on
+ *     draws the circle, off removes it from this map and every other one.
+ *  2. Is there a track? A music zone with nothing loaded is audible to nobody,
+ *     and a ring around it would be marking the reach of silence. It also
+ *     matters that the switch defaults to *on*: without this, everyone who has
+ *     never opened Zone Music would find a circle around themselves for a
+ *     feature they are not using.
  *
- * Point 5 is what makes turning "a separate zone for music" off safe. It used
- * to delete the ring outright, which on a map with the zone circle hidden left
- * nothing at all — the switch looked like it had removed the zone.
+ * Not gated on `zone_active` or `zone_mode`. The map zone is a different
+ * circle, drawn separately and answering a different question; the music zone
+ * is always its own radius, never a city border it inherited.
  */
-function selfEarshotRing(zone: SelfZone | null): number | null {
+function selfMusicZoneRing(zone: SelfZone | null): number | null {
   if (!zone?.music_zone_active) return null;
-  if (!(zone.music_zone_radius > 0)) return null;
-  if (zone.music_zone_separate) return zone.music_zone_radius;
   if (!zone.has_track) return null;
-  if (zone.zone_mode === 'region') return null;
-  if (zone.zone_active) return null;
+  if (!(zone.music_zone_radius > 0)) return null;
   return zone.music_zone_radius;
 }
 
@@ -814,7 +791,7 @@ function SelfMarker({ coordinate, uri, username }: {
  * floating near it, and so two zones on top of each other stack their labels
  * in a readable column instead of overlapping at the same point.
  */
-function MusicZoneBadge({ center, radius, mine, label, color }: {
+function MusicZoneBadge({ center, radius, mine, label, color, parked }: {
   center: GeoPoint;
   radius: number;
   mine?: boolean;
@@ -823,34 +800,49 @@ function MusicZoneBadge({ center, radius, mine, label, color }: {
   /** The ring's colour, repeated here so the chip and the circle it labels are
    *  visibly one thing when several overlap. */
   color: string;
+  /** Slot currently standing in for no music zone — see `PARKED_MARKERS`. The
+   *  ring beside it is a Circle and removes itself cleanly; this chip is a
+   *  Marker with a custom child, which is exactly the thing Fabric strands on
+   *  the native map. Switching a music zone off has to take the label with the
+   *  circle, so the slot parks rather than unmounting. */
+  parked?: boolean;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   // Same reason as ClusterMarker: let it draw, then freeze the raster — and
   // re-arm on every input that changes what the chip says, or a zone resized or
-  // recoloured mid-session keeps drawing the label it first froze.
-  const { settling } = useMarkerSettle(`${radius}|${label}|${color}`);
+  // recoloured mid-session keeps drawing the label it first froze. Parking is
+  // in the key for the same reason it is in ClusterMarker's: a slot that goes
+  // quiet has to redraw as the empty spacer or it keeps drawing the last chip.
+  const { settling } = useMarkerSettle(`${radius}|${label}|${color}|${parked}`);
 
   return (
     <Marker
       coordinate={offsetByMeters(center, radius, 0)}
       anchor={{ x: 0.5, y: 0.5 }}
       tracksViewChanges={settling}
+      opacity={parked ? 0 : 1}
       zIndex={Z_MUSIC}
       accessibilityLabel={
-        mine
-          ? `Your music carries ${fmtRadius(radius)}`
-          // The name goes first: a screen reader arriving at this chip is
-          // answering "whose zone is this", same as the colour does visually.
-          : `${label}'s music zone, ${fmtRadius(radius)} across`
+        parked
+          ? undefined
+          : mine
+            ? `Your music carries ${fmtRadius(radius)}`
+            // The name goes first: a screen reader arriving at this chip is
+            // answering "whose zone is this", same as the colour does visually.
+            : `${label}'s music zone, ${fmtRadius(radius)} across`
       }
     >
-      <View style={[styles.musicBadge, { borderColor: withAlpha(color, 0.55) }]}>
-        <IconMusic size={10} color={color} />
-        <Text style={[styles.musicBadgeText, { color }]} numberOfLines={1}>
-          {label}
-        </Text>
-      </View>
+      {parked ? (
+        <View style={styles.parkedMarker} />
+      ) : (
+        <View style={[styles.musicBadge, { borderColor: withAlpha(color, 0.55) }]}>
+          <IconMusic size={10} color={color} />
+          <Text style={[styles.musicBadgeText, { color }]} numberOfLines={1}>
+            {label}
+          </Text>
+        </View>
+      )}
     </Marker>
   );
 }
@@ -1373,15 +1365,14 @@ interface SheetProps {
   sheetY: SharedValue<number>;
   onDismiss: () => void;
   onFriendChange: () => void;
-  /** Where the viewer is. Needed because being inside a region zone is a
-   *  point-in-polygon question, which a scalar distance cannot answer. */
-  viewerCoords: { latitude: number; longitude: number } | null;
-  /** This user's zone outline when they are in region mode, once resolved. */
-  zoneRegion: ZoneRegion | null;
 }
 
+// The viewer's coordinates and this user's region outline used to be props: a
+// music zone could be a city border, so "are you inside it" was a
+// point-in-polygon question. A music zone is always a circle now, and a scalar
+// distance answers it.
 function UserSheet({
-  user, sheetY, onDismiss, onFriendChange, viewerCoords, zoneRegion,
+  user, sheetY, onDismiss, onFriendChange,
 }: SheetProps) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -1439,7 +1430,7 @@ function UserSheet({
 
   // Friends and connections get the real number; a stranger gets a band.
   const distLine = identified ? dist : distanceBand(user.distance);
-  const zoneLine = identified && user.zone_audio_url ? 'in their sound zone' : null;
+  const zoneLine = identified && user.zone_audio_url ? 'has a music zone' : null;
   const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
 
 
@@ -1454,26 +1445,19 @@ function UserSheet({
   // with a zone on the map, and reading it here is what made turning that
   // circle off silently mute a song its owner had not touched.
   const zoneUrl = identified ? user.zone_audio_url : undefined;
-  const zoneRadius = user.zone_radius && user.zone_radius > 0 ? user.zone_radius : 500;
   const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
-  // A region zone is a shape, not a distance: someone 3km away can be well
-  // inside a city while someone 300m away across the boundary is outside, so
-  // the radius comparison would be wrong in both directions.
-  //
-  // …unless they gave the music its own zone, which is always a circle. Then
-  // that circle is the answer whatever shape the zone around it happens to be.
+  // Their music zone, which is always a circle — never the city border their
+  // *map* zone might be. A region is a shape, not a distance, and comparing a
+  // radius against one was wrong in both directions: someone 3km away can be
+  // well inside a city while someone 300m away across the boundary is outside.
+  // The music zone having its own radius is what removed that problem.
   const musicRadius = user.music_zone_radius && user.music_zone_radius > 0
     ? user.music_zone_radius
-    : zoneRadius;
-  const isRegionZone = user.zone_mode === 'region' && !!zoneRegion && !user.music_zone_separate;
-  // What earshot is *called* in the copy below — "200 m" or "Almaty".
-  const zoneLabel = isRegionZone ? zoneRegion!.name : fmtRadius(musicRadius);
+    : 200;
+  const zoneLabel = fmtRadius(musicRadius);
   // Unknown position is not "out of range" — a card that refuses to play with
   // no reason it can name is worse than one that plays a track you can hear.
-  const insideZone = isRegionZone
-    ? (!viewerCoords ||
-       regionContains(zoneRegion!, viewerCoords.latitude, viewerCoords.longitude))
-    : (distanceM == null || distanceM < musicRadius);
+  const insideZone = distanceM == null || distanceM < musicRadius;
 
   return (
     <>
@@ -1556,15 +1540,15 @@ function UserSheet({
               subtitle={
                 [
                   user.zone_track_artist || `@${user.username}`,
-                  insideZone ? `inside their ${zoneLabel} zone` : `${zoneLabel} zone`,
+                  insideZone
+                    ? `inside their ${zoneLabel} music zone`
+                    : `${zoneLabel} music zone`,
                 ].join(' · ')
               }
               blockedReason={
                 insideZone
                   ? null
-                  : isRegionZone
-                    ? `Out of range — step inside ${zoneLabel} to listen`
-                    : `Out of range — step within ${zoneLabel} of them to listen`
+                  : `Out of range — step within ${zoneLabel} of them to listen`
               }
               accessibilityName={`${user.username}'s zone track`}
             />
@@ -1909,20 +1893,13 @@ export default function MapScreen() {
       label: string;
       color: string;
     }[] = [];
-    // Your own ring, on the same terms as everyone else's: a track, a sound
-    // zone switched on, and a circle that is genuinely the listening range.
+    // Your own ring, on the same terms as everyone else's: a track, and a music
+    // zone switched on to carry it. Off takes the circle off your map exactly
+    // as it takes it off theirs — there is no zone left for it to mark.
     //
-    // It used to require `music_zone_separate`, and that is the bug this
-    // whole change came from. Turning "a separate zone for music" off is a
-    // statement about *size* — earshot goes back to following the zone — but
-    // the only ring on the map disappeared, so the switch read as the thing
-    // that removes your zone. Now the ring survives the toggle and simply
-    // becomes whichever circle is really in force.
-    //
-    // Still independent of `zone_active`, which removes the circle you appear
-    // inside and says nothing about sound. `music_zone_active` is the mute,
-    // and it does take the ring with it — there is no audible edge left to mark.
-    const selfRadius = selfEarshotRing(selfZone);
+    // Independent of `zone_active`, which removes the circle you appear inside
+    // and says nothing about sound. These are two different circles.
+    const selfRadius = selfMusicZoneRing(selfZone);
     if (displayCoords && selfRadius) {
       zones.push({
         key: 'music-self',
@@ -1942,17 +1919,9 @@ export default function MapScreen() {
       // here is always one the viewer could walk into and play.
       if (!(u.music_zone_radius ?? 0) || !u.zone_audio_url) continue;
       if (u.latitude == null || u.longitude == null) continue;
-      // Not gated on `music_zone_separate` any more. `music_zone_radius`
-      // arrives already resolved — the server sends `music_radius_m`, the
-      // separate dial or the zone radius inherited — so it is the right circle
-      // either way, and requiring the flag meant a friend who had never opened
-      // the earshot setting showed no music zone at all. That is almost
-      // everybody, which made the feature look broken rather than off.
-      //
-      // The exception is a region-mode friend who has *not* separated earshot:
-      // their listening range is the city outline, not a circle, and drawing
-      // their zone radius as one would claim a boundary that is not theirs.
-      if (u.zone_mode === 'region' && !u.music_zone_separate) continue;
+      // `zone_mode` is not consulted. A music zone is always its own circle,
+      // never a city border inherited from the map zone, so a region-mode
+      // friend's ring is as honest as anyone else's.
       zones.push({
         key: `music-${u.id}`,
         center: { latitude: u.latitude, longitude: u.longitude },
@@ -1974,9 +1943,9 @@ export default function MapScreen() {
    * is standing in, which is only ever a lie about a boundary the viewer can
    * *see* — so the list is exactly the circles that get drawn, taken from
    * `musicZones` rather than recomputed. They used to be two independent
-   * conditions and they had already drifted apart: this one asked for
-   * `music_zone_separate` where the drawing asked for `zone_audio_url`, so it
-   * constrained rings that were not on screen and ignored ones that were.
+   * conditions and they had already drifted apart: this one asked whether the
+   * music zone was separate where the drawing asked for `zone_audio_url`, so
+   * it constrained rings that were not on screen and ignored ones that were.
    *
    * Region zones are deliberately absent. The fan is capped at tens of metres
    * and no displacement that small can move anyone out of a city, so a polygon
@@ -2072,6 +2041,24 @@ export default function MapScreen() {
   const leaders = useMemo(
     () => Array.from({ length: leaderSlots }, (_, i) => leaderLines[i] ?? null),
     [leaderLines, leaderSlots],
+  );
+
+  /** The same slot pool for the chips that label music zones.
+   *
+   * These leave the map for a reason the others do not: someone switching their
+   * music zone off. The ring is a Circle and goes cleanly, but the chip is a
+   * Marker wrapping a custom view — the one shape Fabric strands — so an
+   * unmounted chip would sit on the native map naming a zone that no longer
+   * exists. Pooled, it parks instead, and the switch removes both halves. */
+  const [musicBadgeSlots, setMusicBadgeSlots] = useState(0);
+  const drawableMusicBadges = useMemo(
+    () => musicZones.filter((z) => musicBadgeVisible(z.radius) && isDrawable(z.center)),
+    [musicZones, musicBadgeVisible],
+  );
+  if (drawableMusicBadges.length > musicBadgeSlots) setMusicBadgeSlots(drawableMusicBadges.length);
+  const musicBadges = useMemo(
+    () => Array.from({ length: musicBadgeSlots }, (_, i) => drawableMusicBadges[i] ?? null),
+    [drawableMusicBadges, musicBadgeSlots],
   );
 
   /** Marker position for someone, falling back to their true point before the
@@ -2209,14 +2196,14 @@ export default function MapScreen() {
           // cache leaves the stored mode saying 'region' with nothing to draw.
           zone_mode: (d.effective_zone_mode ?? d.zone_mode) === 'region' ? 'region' : 'radius',
           zone_region_id: d.zone_region ?? null,
-          music_zone_separate: Boolean(d.music_zone_separate),
-          // `music_radius_m` is the server resolving the "separate or
-          // inherited" question, so the map never has to answer it twice.
+          // The music zone's own radius, never the map zone's. The server used
+          // to resolve a "separate or inherited" question into `music_radius_m`
+          // for this; there is no question left to resolve.
           music_zone_radius:
-            Number(d.music_radius_m) > 0 ? Number(d.music_radius_m) : Number(d.zone_radius) || 500,
+            Number(d.music_zone_radius) > 0 ? Number(d.music_zone_radius) : 200,
           // `!== false`, not `Boolean(...)`: on is the server's default and an
           // older build's response has no such key. Reading a missing field as
-          // "muted" would take the ring off the map for everyone who has not
+          // off would take the ring off the map for everyone who has not
           // touched the switch.
           music_zone_active: d.music_zone_active !== false,
           has_track: Boolean(d.zone_audio_url),
@@ -2663,12 +2650,11 @@ export default function MapScreen() {
               stay, because those answer a question you can act on — walk
               inside one and you can hear what is playing. */}
 
-          {/* Earshot, wherever nothing else is already drawing it. Someone
-              else's ring is drawn when the viewer is allowed to hear their
-              track; the viewer's own when their zone circle is not standing in
-              for it — see `selfEarshotRing`. A ring is worth the ink when it
-              means "the music stops here", and is noise when it traces the
-              circle already underneath it.
+          {/* Music zones. Someone else's ring is drawn when the viewer is
+              allowed to hear their track; the viewer's own whenever they have
+              a music zone switched on — see `selfMusicZoneRing`. A ring means
+              "the music stops here", so a zone that has been switched off has
+              no ring, on the owner's map or anyone else's.
               A hairline and nothing else. What identifies it as *music* is the
               badge on its edge, not the stroke — the map already has circles in
               this colour, and shouting with opacity would only have made a
@@ -2727,15 +2713,19 @@ export default function MapScreen() {
               anonymous smudge. Drawn after every circle so it sits on top of
               them, and skipped when the ring is too small on screen for a label
               to mean anything. Your own is included: where your music stops is
-              the one thing you cannot check by listening. */}
-          {musicZones.filter((z) => musicBadgeVisible(z.radius)).map((z) => (
+              the one thing you cannot check by listening.
+              Slotted, and a spare slot goes transparent rather than unmounting
+              — see PARKED_MARKERS. A zone switched off has to take its chip
+              with its circle, and an unmounted Marker does not reliably go. */}
+          {musicBadges.map((z, i) => (
             <MusicZoneBadge
-              key={`${z.key}-badge`}
-              center={z.center}
-              radius={z.radius}
-              mine={z.mine}
-              label={z.label}
-              color={z.color}
+              key={`music-badge-slot-${i}`}
+              center={z?.center ?? displayCoords}
+              radius={z?.radius ?? 0}
+              mine={z?.mine}
+              label={z?.label ?? ''}
+              color={z?.color ?? colors.purple}
+              parked={!z}
             />
           ))}
 
@@ -2943,12 +2933,6 @@ export default function MapScreen() {
             sheetY={sheetY}
             onDismiss={closeSheet}
             onFriendChange={handleHiSent}
-            viewerCoords={displayCoords ?? null}
-            zoneRegion={
-              sheetUser.zone_region_id
-                ? regionOutlines.get(sheetUser.zone_region_id) ?? null
-                : null
-            }
           />
         </View>
       )}

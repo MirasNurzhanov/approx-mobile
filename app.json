@@ -112,7 +112,12 @@
           }
         }
       ],
-      "@react-native-google-signin/google-signin",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.480602152070-vj368te6l4bsng2v0mn4tih9036gshvg"
+        }
+      ],
       "expo-build-properties"
     ],
     "experiments": {

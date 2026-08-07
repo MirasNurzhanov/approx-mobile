@@ -211,6 +211,14 @@ export async function signInWithGoogle(): Promise<SocialSignInResult> {
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     response = await GoogleSignin.signIn();
   } catch (err) {
+    // TEMP DIAGNOSTIC — remove once Google sign-in is confirmed working.
+    // The branches below only handle three known codes and otherwise throw a
+    // generic message, discarding the real error — this is what actually
+    // reaches Console.app/Metro before that happens.
+    console.log(
+      '[SocialAuth] GoogleSignin.signIn() threw:',
+      isErrorWithCode(err) ? { code: err.code, message: err.message } : String(err),
+    );
     if (isErrorWithCode(err)) {
       if (err.code === statusCodes.SIGN_IN_CANCELLED) throw new SocialSignInCancelled();
       if (err.code === statusCodes.IN_PROGRESS) throw new SocialSignInCancelled();
@@ -229,6 +237,7 @@ export async function signInWithGoogle(): Promise<SocialSignInResult> {
   if (!isSuccessResponse(response)) throw new SocialSignInCancelled();
 
   const { idToken, user } = response.data;
+  console.log('[SocialAuth] GoogleSignin.signIn() succeeded, idToken present:', !!idToken);
   if (!idToken) {
     // Almost always a missing or wrong `webClientId`: Google signs the person
     // in happily and simply declines to issue an identity token.

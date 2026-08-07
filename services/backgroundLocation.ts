@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
@@ -6,6 +7,13 @@ import * as TaskManager from 'expo-task-manager';
 import { api } from './api';
 import { reportLocation } from './location';
 import { getCachedLocationSharing } from './privacy';
+
+// Same guard as services/socialAuth.ts and services/notifications.ts, for the
+// same reason: Expo Go's shell app has no way to declare the background modes
+// and entitlements a *third-party* app's `startLocationUpdatesAsync` needs, so
+// calling it there is a native call the binary cannot actually service —
+// exactly the shape of crash that leaves no JS error to catch.
+const isExpoGo = Constants.appOwnership === 'expo';
 
 const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
 const ZONE_NOTIFICATION_COOLDOWN_MS = 30 * 60 * 1000;
@@ -111,6 +119,11 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 );
 
 export async function startBackgroundLocationUpdates(): Promise<void> {
+  if (isExpoGo) {
+    console.log('[BG Location] skipped — not supported in Expo Go');
+    return;
+  }
+
   // "Pause location sharing entirely" should stop the phone tracking us at
   // all, not just stop the uploads. The per-update check in the task is the
   // correctness guarantee; this is the one that saves the battery.

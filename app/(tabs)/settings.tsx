@@ -21,6 +21,7 @@ import { runBusy } from '@/services/busy';
 import { useAuth } from '@/context/AuthContext';
 import { syncBackgroundLocationSharing } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
+import { hasSeenZoneTutorial, markZoneTutorialSeen } from '@/services/tutorial';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import {
   refreshPrivacy,
@@ -29,6 +30,7 @@ import {
   type LocationSharing,
 } from '@/services/privacy';
 import { Speedometer } from '@/components/Speedometer';
+import { ZoneTutorialOverlay } from '@/components/tutorial/ZoneTutorialOverlay';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import {
@@ -417,6 +419,30 @@ export default function SettingsScreen() {
   const [zoneSaving, setZoneSaving] = useState(false);
   const [notifAllowed, setNotifAllowed] = useState<boolean | null>(null);
 
+  // First-run tutorial, step 2: where the zone lives. The flag is namespaced
+  // by account (see services/tutorial.ts), so this needs the account's id —
+  // this screen has no other reason to fetch it, unlike the map, which
+  // already has one for /nearby/'s self exclusion.
+  const [tutorialUserId, setTutorialUserId] = useState<number | null>(null);
+  useEffect(() => {
+    api.get<{ id: number }>('/api/users/me/')
+      .then((r) => setTutorialUserId(r.data.id))
+      .catch(() => {});
+  }, []);
+  const [showZoneTutorial, setShowZoneTutorial] = useState(false);
+  useEffect(() => {
+    if (tutorialUserId === null) return;
+    hasSeenZoneTutorial(tutorialUserId).then((seen) => { if (!seen) setShowZoneTutorial(true); });
+  }, [tutorialUserId]);
+  function dismissZoneTutorial() {
+    setShowZoneTutorial(false);
+    if (tutorialUserId !== null) markZoneTutorialSeen(tutorialUserId).catch(() => {});
+  }
+  function takeMeToZone() {
+    dismissZoneTutorial();
+    router.push('/zone-area');
+  }
+
   const refreshNotifPermission = useCallback(async () => {
     try {
       const p = await Notifications.getPermissionsAsync();
@@ -581,7 +607,11 @@ export default function SettingsScreen() {
 
       {primer}
 
-      <Speedometer />
+      {showZoneTutorial && (
+        <ZoneTutorialOverlay onDismiss={dismissZoneTutorial} onTakeMeThere={takeMeToZone} />
+      )}
+
+      <Speedometer highlightSection={showZoneTutorial ? 'settings' : undefined} />
     </View>
   );
 }

@@ -13,9 +13,38 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function registerForPushNotifications(): Promise<string | null> {
+// app/_layout.tsx calls this on every AppState "active" transition as well as
+// on login, so two calls landing close together is routine, not a caller bug
+// — a screen lock and unlock right after opening the app fires both. Without
+// this, a second `getExpoPushTokenAsync()` could start while the first was
+// still settling; that call is not documented as safe to re-enter, and on at
+// least one device the overlap crashed the app natively with nothing for the
+// outer try/catch to catch. Sharing one in-flight promise makes a second call
+// join the first instead of starting a second native request.
+let inFlight: Promise<string | null> | null = null;
+
+export function registerForPushNotifications(): Promise<string | null> {
+  if (inFlight) return inFlight;
+  inFlight = registerForPushNotificationsImpl().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+async function registerForPushNotificationsImpl(): Promise<string | null> {
   try {
     console.log('[Push] function called');
+
+    // Remote push was pulled from Expo Go starting SDK 53 — this binary has
+    // none of the native registration machinery `getExpoPushTokenAsync()`
+    // needs, and calling it anyway is what crashed the app natively with
+    // nothing for the try/catch below to catch. Same guard services/socialAuth
+    // already uses for Google/Apple sign-in, for the same reason: a feature
+    // Expo Go cannot run has to say so rather than reach the native call.
+    if (Constants.appOwnership === 'expo') {
+      console.log('[Push] skipped — not supported in Expo Go');
+      return null;
+    }
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {

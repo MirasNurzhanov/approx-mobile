@@ -1,60 +1,26 @@
-import { useEffect, useState } from 'react';
-import {
-  Animated,
-  ActivityIndicator,
-  Easing,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
-import { CATEGORY_STYLES, UNGROUPED, type CategoryStyle } from '@/services/interestCategories';
-import { fonts, lightColors as L, withAlpha } from '@/constants/theme';
+import { groupAll } from '@/services/interestCategories';
+import { InterestBubbleField } from '@/components/ui/InterestBubbleField';
+import { fonts, lightColors as L } from '@/constants/theme';
 
-// ─── Category definitions ─────────────────────────────────────────────────────
-// The nine groups come from the server, on every interest, and their order and
-// membership are its decision — see services/interestCategories. What is added
-// here is where each bubble sits on the canvas, which is nothing but layout.
+// ─── What are you into? ───────────────────────────────────────────────────────
+// Nine bubbles, one per category, with the interests inside them: tapping one
+// grows it into a panel filling the field and the chips are right there. The
+// grouping — which interests are in which bubble, and what order the bubbles
+// come in — is the server's decision and arrives on every interest as
+// `category`; see services/interestCategories.
 //
 // This screen used to define eight categories of its own and sort 681
-// interests into them with a regex over the names. Most of the catalogue fell
-// through to a bucket called "Casual": Sports showed a fraction of its 186
-// entries, and there was no bubble at all for Fitness, Travel or Entertainment.
+// interests into them with a regex over the names, then push a separate
+// drill-in step to show them. Most of the catalogue fell through the regex into
+// a bucket called "Casual": Sports showed a fraction of its 186 entries, and
+// there was no bubble at all for Fitness, Travel or Entertainment.
 
-interface Category extends CategoryStyle {
-  x: number;
-  y: number;
-  size: number;
-}
-
-/** Placement on the 350×580 canvas, in the server's own order. Sizes are
- *  roughly proportional to how big each group is, so the biggest one is also
- *  the biggest target. */
-const LAYOUT: { x: number; y: number; size: number }[] = [
-  { x: 8,   y: 6,   size: 140 }, // Sports — the largest group, 186 entries
-  { x: 196, y: 30,  size: 108 }, // Fitness & Wellness
-  { x: 30,  y: 158, size: 110 }, // Music
-  { x: 186, y: 152, size: 128 }, // Arts & Creativity
-  { x: 12,  y: 288, size: 116 }, // Food & Drink
-  { x: 156, y: 300, size: 112 }, // Travel & Outdoors
-  { x: 6,   y: 418, size: 118 }, // Games & Tech
-  { x: 146, y: 428, size: 110 }, // Entertainment & Culture
-  { x: 258, y: 300, size: 92  }, // Lifestyle & Social
-];
-
-const CATEGORIES: Category[] = CATEGORY_STYLES.map((style, i) => ({
-  ...style,
-  ...LAYOUT[i],
-}));
-
-// ─── Interest type ────────────────────────────────────────────────────────────
 interface Interest {
   id: number;
   name: string;
@@ -63,162 +29,52 @@ interface Interest {
   category_label?: string;
 }
 
-// ─── Float animation config ───────────────────────────────────────────────────
-// Indexed modulo their own length, because how many bubbles there are is now a
-// property of the catalogue rather than a constant — a tenth bubble appears
-// whenever there are ungrouped interests, and reading past the end of these
-// gave it an undefined drift variant and a NaN duration.
-type Variant = 'A' | 'B' | 'C';
-const VARIANTS: Variant[] = ['A', 'B', 'C', 'A', 'B', 'C', 'B', 'A'];
-const DURATIONS           = [7200, 6100, 8000, 6800, 7600, 6400, 8400, 7000];
-
-const variantFor  = (i: number) => VARIANTS[i % VARIANTS.length];
-const durationFor = (i: number) => DURATIONS[i % DURATIONS.length];
-
-// ─── Floating bubble ──────────────────────────────────────────────────────────
-function FloatingBubble({
-  category,
-  index,
-  picked,
-  onPress,
-}: {
-  category: Category;
-  index: number;
-  picked: number;
-  reduceMotion: boolean;
-  onPress: () => void;
-}) {
-  const [anim]  = useState(() => new Animated.Value(0));
-  const variant = variantFor(index);
-
-  useEffect(() => {
-    const dur = durationFor(index);
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, {
-          toValue: 1,
-          duration: dur,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: false,
-        }),
-        Animated.timing(anim, {
-          toValue: 0,
-          duration: dur,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: false,
-        }),
-      ]),
-    );
-    const timer = setTimeout(() => loop.start(), index * 400);
-    return () => {
-      clearTimeout(timer);
-      loop.stop();
-    };
-    // `anim` is built once and `index` is fixed for a mounted bubble, so this
-    // still runs exactly once per bubble.
-  }, [anim, index]);
-
-  const { size, color, label, icon, x, y } = category;
-  const hasPicks  = picked > 0;
-  const iconSize  = Math.round(size * 0.2);
-  const labelSize = Math.max(13, Math.round(size * 0.115));
-
-  const transform =
-    variant === 'A'
-      ? [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, -18] }) }]
-      : variant === 'B'
-      ? [
-          { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [0, 8] }) },
-          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, 14] }) },
-        ]
-      : [
-          { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [0, -10] }) },
-          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) },
-        ];
-
-  return (
-    <Animated.View
-      style={{
-        position: 'absolute',
-        left: x,
-        top: y,
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: withAlpha(color, hasPicks ? 0.18 : 0.09),
-        borderWidth: hasPicks ? 2 : 1.5,
-        borderColor: withAlpha(color, hasPicks ? 1 : 0.3),
-        boxShadow: `0 4px 8px ${withAlpha(hasPicks ? color : '#2D2A22', hasPicks ? 0.2 : 0.06)}`,
-        transform,
-      }}
-    >
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [
-          StyleSheet.absoluteFillObject,
-          {
-            borderRadius: size / 2,
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 4,
-            opacity: pressed ? 0.7 : 1,
-          },
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`${label}${hasPicks ? `, ${picked} picked` : ''}`}
-      >
-        <Ionicons name={icon} size={iconSize} color={color} />
-        <Text
-          numberOfLines={2}
-          style={{
-            fontFamily: fonts.display,
-            fontWeight: '600',
-            fontSize: labelSize,
-            lineHeight: labelSize * 1.25,
-            color: '#2D2A22',
-            textAlign: 'center',
-            paddingHorizontal: 8,
-          }}
-        >
-          {label}
-        </Text>
-        {hasPicks && (
-          <View style={[s.pickedPill, { backgroundColor: color }]}>
-            <Text style={s.pickedPillText}>{picked} picked</Text>
-          </View>
-        )}
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-// ─── Screen ───────────────────────────────────────────────────────────────────
 export default function InterestsSetupScreen() {
   const { top, bottom } = useSafeAreaInsets();
 
-  const [step, setStep]                     = useState<'categories' | 'interests'>('categories');
-  const [activeCategory, setActiveCategory] = useState<Category>(CATEGORIES[0]);
-  const [interests, setInterests]           = useState<Interest[]>([]);
-  const [selected, setSelected]             = useState<Set<number>>(new Set());
-  const [loading, setLoading]               = useState(true);
-  const [saving, setSaving]                 = useState(false);
-  const [error, setError]                   = useState<string | null>(null);
-  const [query, setQuery]                   = useState('');
+  const [interests, setInterests] = useState<Interest[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Every failure here used to collapse into one sentence — "Could not load
+  // interests" — and an empty catalogue produced no message at all: nine
+  // bubbles reading 0, which looks exactly like a screen that has decided you
+  // are interested in nothing. The status and the count are the two facts that
+  // tell those apart, so both are surfaced and both are logged.
+  function load() {
     api.get<Interest[]>('/api/interests/')
-      .then(r => setInterests(r.data))
-      .catch(() => setError('Could not load interests. Please try again.'))
+      .then(r => {
+        const list = Array.isArray(r.data) ? r.data : [];
+        console.log('[Interests] /api/interests/ →', list.length, 'interests');
+        setInterests(list);
+      })
+      .catch(e => {
+        console.log(
+          '[Interests] load failed:',
+          e?.response?.status,
+          JSON.stringify(e?.response?.data),
+        );
+        const status = e?.response?.status;
+        setError(
+          status === 401
+            ? 'Your session has expired. Sign in again to choose interests.'
+            : `Could not load interests${status ? ` (${status})` : ''}. Please try again.`,
+        );
+      })
       .finally(() => setLoading(false));
-  }, []);
-
-  function openCategory(cat: Category) {
-    setActiveCategory(cat);
-    // Cleared on entry, so a search left behind in Sports does not make Music
-    // look empty.
-    setQuery('');
-    setStep('interests');
   }
+
+  useEffect(() => { load(); }, []);
+
+  function retry() {
+    setError(null);
+    setLoading(true);
+    load();
+  }
+
+  const groups = useMemo(() => groupAll(interests), [interests]);
 
   function toggle(id: number) {
     setSelected(prev => {
@@ -239,161 +95,12 @@ export default function InterestsSetupScreen() {
     router.replace('/onboarding-profession');
   }
 
-  // Group interests by the category the server gave them. Anything without one
-  // — a custom entry from the retired "Other" flow — collects under "More",
-  // which is only shown when it has something in it.
-  const byCategory = (() => {
-    const map = new Map<string, Interest[]>();
-    for (const cat of CATEGORIES) map.set(cat.key, []);
-    map.set(UNGROUPED.key, []);
-    for (const item of interests) {
-      const key = item.category ?? '';
-      (map.get(key) ?? map.get(UNGROUPED.key)!).push(item);
-    }
-    return map;
-  })();
-
-  /** The bubbles to draw: the nine, plus "More" only if it is not empty. */
-  const bubbles: Category[] = (byCategory.get(UNGROUPED.key) ?? []).length
-    // Tucked into the gap at the top right rather than given a slot in the
-    // layout, because whether it exists at all depends on the data.
-    ? [...CATEGORIES, { ...UNGROUPED, x: 262, y: 6, size: 84 }]
-    : CATEGORIES;
-
-  // Selected count per category
-  const pickedPerCategory = (() => {
-    const map = new Map<string, number>();
-    for (const [key, items] of byCategory) {
-      map.set(key, items.filter(i => selected.has(i.id)).length);
-    }
-    return map;
-  })();
-
-  // ── Screen 2: drill-in ───────────────────────────────────────────────────
-  if (step === 'interests') {
-    const catItems  = byCategory.get(activeCategory.key) ?? [];
-    const catPicked = pickedPerCategory.get(activeCategory.key) ?? 0;
-    const { color }  = activeCategory;
-    // Sports alone is 186 entries. A category that is a long scroll needs a
-    // way through it that is not scrolling.
-    const needle  = query.trim().toLowerCase();
-    const shown   = needle
-      ? catItems.filter((i) => i.name.toLowerCase().includes(needle))
-      : catItems;
-
-    return (
-      <View style={[s.root, { paddingTop: top }]}>
-        {/* Back */}
-        <Pressable
-          onPress={() => setStep('categories')}
-          style={({ pressed }) => [s.backLink, pressed && s.dimmed]}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="All categories"
-        >
-          <Ionicons name="chevron-back" size={18} color={L.t2} />
-          <Text style={s.backLinkLabel}>All categories</Text>
-        </Pressable>
-
-        {/* Category header */}
-        <View style={s.drillHeader}>
-          <View style={[s.drillIconTile, { backgroundColor: withAlpha(color, 0.12) }]}>
-            <Ionicons name={activeCategory.icon} size={22} color={color} />
-          </View>
-          <View style={{ gap: 2 }}>
-            <Text style={s.drillTitle}>{activeCategory.label}</Text>
-            <Text style={s.drillSubtitle}>
-              {catPicked} of {catItems.length} selected
-            </Text>
-          </View>
-        </View>
-
-        <View style={s.searchBar}>
-          <Ionicons name="search" size={17} color={L.t3} />
-          <TextInput
-            style={s.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder={`Search ${activeCategory.label.toLowerCase()}…`}
-            placeholderTextColor={L.t3}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            accessibilityLabel={`Search ${activeCategory.label}`}
-          />
-          {query.length > 0 && (
-            <Pressable
-              onPress={() => setQuery('')}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search"
-            >
-              <Ionicons name="close-circle" size={17} color={L.t3} />
-            </Pressable>
-          )}
-        </View>
-
-        <ScrollView
-          contentContainerStyle={s.chipsContainer}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {catItems.length === 0 ? (
-            <Text style={s.emptyText}>No interests in this category yet.</Text>
-          ) : shown.length === 0 ? (
-            <Text style={s.emptyText}>Nothing here matches “{query.trim()}”.</Text>
-          ) : (
-            <View style={s.chips}>
-              {shown.map(item => {
-                const sel = selected.has(item.id);
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => toggle(item.id)}
-                    style={({ pressed }) => [
-                      s.chip,
-                      sel && s.chipSelected,
-                      pressed && s.dimmed,
-                    ]}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: sel }}
-                    accessibilityLabel={item.name}
-                  >
-                    <Text style={s.chipIcon}>{item.icon}</Text>
-                    <Text style={[s.chipLabel, sel && s.chipLabelSelected]}>
-                      {item.name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </ScrollView>
-
-        <View style={[s.footer, { paddingBottom: bottom + 16 }]}>
-          <Text style={s.footerCount}>
-            {catPicked > 0 ? `${catPicked} selected` : ' '}
-          </Text>
-          <Pressable
-            onPress={() => setStep('categories')}
-            style={({ pressed }) => [s.continueBtn, pressed && s.dimmed]}
-            accessibilityRole="button"
-            accessibilityLabel="Done"
-          >
-            <Text style={s.continueBtnLabel}>Done</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  // ── Screen 1: floating bubbles ───────────────────────────────────────────
   return (
     <View style={[s.root, { paddingTop: top }]}>
       <View style={s.header}>
         <Text style={s.title}>What are you into?</Text>
         <Text style={s.subtitle}>
-          Tap a category to see what is inside. Find people who share your passions.
+          Tap a bubble to open it. Find people who share your passions.
         </Text>
       </View>
 
@@ -404,26 +111,42 @@ export default function InterestsSetupScreen() {
       ) : error ? (
         <View style={s.center}>
           <Text style={s.errorText}>{error}</Text>
+          <Pressable
+            onPress={retry}
+            style={({ pressed }) => [s.retryBtn, pressed && s.dimmed]}
+            accessibilityRole="button"
+            accessibilityLabel="Retry"
+          >
+            <Text style={s.retryLabel}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : interests.length === 0 ? (
+        // Loaded, succeeded, and returned nothing. Said out loud, because the
+        // alternative is nine bubbles reading 0 and no way to tell whether the
+        // catalogue is empty or the screen is broken.
+        <View style={s.center}>
+          <Text style={s.errorText}>The interest catalogue came back empty.</Text>
+          <Text style={s.emptyHint}>
+            Nothing to choose from yet — the server has no interests seeded.
+          </Text>
+          <Pressable
+            onPress={retry}
+            style={({ pressed }) => [s.retryBtn, pressed && s.dimmed]}
+            accessibilityRole="button"
+            accessibilityLabel="Retry"
+          >
+            <Text style={s.retryLabel}>Retry</Text>
+          </Pressable>
         </View>
       ) : (
-        <ScrollView
-          contentContainerStyle={s.canvasContainer}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* 350×560 absolute-positioned canvas */}
-          <View style={s.canvas}>
-            {bubbles.map((cat, i) => (
-              <FloatingBubble
-                key={cat.key || 'more'}
-                category={cat}
-                index={i}
-                picked={pickedPerCategory.get(cat.key) ?? 0}
-                reduceMotion={false}
-                onPress={() => openCategory(cat)}
-              />
-            ))}
-          </View>
-        </ScrollView>
+        // Forced light: this runs before the user has ever seen the app's
+        // theme, and the whole onboarding flow is cream.
+        <InterestBubbleField
+          groups={groups}
+          selected={selected}
+          onToggle={toggle}
+          palette={L}
+        />
       )}
 
       <View style={[s.footer, { paddingBottom: bottom + 16 }]}>
@@ -452,16 +175,42 @@ export default function InterestsSetupScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#faf9f5' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  root:   { flex: 1, backgroundColor: L.bg },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 32,
+  },
+  emptyHint: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: L.t2,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: L.border,
+    backgroundColor: L.surface,
+  },
+  retryLabel: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    fontWeight: '600',
+    color: L.t1,
+  },
 
-  // Screen 1 header
-  header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 12, gap: 8 },
+  header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 8, gap: 8 },
   title: {
     fontFamily: fonts.display,
     fontWeight: '700',
     fontSize: 30,
-    color: '#2D2A22',
+    color: L.t1,
   },
   subtitle: {
     fontFamily: fonts.body,
@@ -470,131 +219,13 @@ const s = StyleSheet.create({
     color: L.t2,
   },
 
-  // Bubble canvas — 350×560 design field
-  canvasContainer: { paddingBottom: 8 },
-  canvas: {
-    width: 350,
-    height: 580,
-    alignSelf: 'center',
-    position: 'relative',
-  },
-
-  // Picked badge inside bubble
-  pickedPill: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  pickedPillText: {
-    fontFamily: fonts.body,
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#faf9f5',
-  },
-
-  // Screen 2 back link
-  backLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
-    alignSelf: 'flex-start',
-  },
-  backLinkLabel: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    color: L.t2,
-  },
-
-  // Screen 2 category header
-  drillHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 20,
-  },
-  drillIconTile: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  drillTitle: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 24,
-    color: '#2D2A22',
-  },
-  drillSubtitle: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    color: '#8C8475',
-  },
-
-  // Search within a category
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 20,
-    marginBottom: 14,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E8E4DA',
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 11,
-    fontFamily: fonts.body,
-    fontSize: 14,
-    color: '#2D2A22',
-  },
-
-  // Interest chips
-  chipsContainer: { paddingHorizontal: 20, paddingBottom: 16 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: L.border,
-  },
-  chipSelected: {
-    backgroundColor: '#FCEEE8',
-    borderColor: '#F0C4AE',
-  },
-  chipIcon:  { fontSize: 14 },
-  chipLabel: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    fontWeight: '500',
-    color: L.t1,
-  },
-  chipLabelSelected: {
-    color: '#E8714A',
-    fontWeight: '600',
-  },
-
-  // Shared footer
   footer: {
     paddingHorizontal: 24,
     paddingTop: 16,
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: L.border,
-    backgroundColor: '#faf9f5',
+    backgroundColor: L.bg,
   },
   footerCount: {
     fontFamily: fonts.body,
@@ -603,7 +234,7 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
   continueBtn: {
-    backgroundColor: '#E8714A',
+    backgroundColor: L.coral,
     borderRadius: 14,
     height: 52,
     alignItems: 'center',
@@ -616,13 +247,6 @@ const s = StyleSheet.create({
     color: '#ffffff',
   },
 
-  emptyText: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    color: L.t3,
-    textAlign: 'center',
-    paddingTop: 40,
-  },
   errorText: {
     fontFamily: fonts.body,
     fontSize: 14,

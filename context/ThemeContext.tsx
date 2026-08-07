@@ -3,7 +3,6 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Appearance } from 'react-native';
 
 import { colors as darkColors, lightColors, type ColorPalette } from '@/constants/theme';
-import { setDesiredAppIcon } from '@/services/appIcon';
 
 interface ThemeContextValue {
   colors: ColorPalette;
@@ -36,19 +35,22 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
     setThemeMode(next);
   };
 
-  // Two things outside React have to follow the theme too.
-  //
-  // The icon is queued rather than swapped: it only lands when the app next
-  // goes to the background, because changing it in the foreground restarts the
-  // app on Android and raises a system alert on iOS. See services/appIcon.
-  //
   // `Appearance.setColorScheme` is what stops the *native* chrome — keyboards,
   // system alerts, scroll indicators, the text-selection menu — from staying on
   // whatever the phone is set to while the app itself is the other way round.
   // The app's theme is its own setting and deliberately does not follow the OS,
   // so without this a light app on a dark phone gets a black keyboard.
+  //
+  // The home-screen icon deliberately does *not* follow the theme any more.
+  // Swapping it on Android means enabling a different `activity-alias`, which
+  // does not restart the app but force-stops it — `moveTaskToBack(true)`, then
+  // `finishAffinity()` + `killProcess()` half a second later. There is no
+  // window in which that is not a crash from the user's point of view, and it
+  // fired on launch: this effect ran with the default 'light' before
+  // AsyncStorage had returned the real theme, and Android reports a cold start
+  // (and any permission dialog) as AppState 'background', which is what the
+  // queue flushed on. A themed icon is not worth the session.
   useEffect(() => {
-    setDesiredAppIcon(themeMode);
     // Guarded: react-native-web has no such method, and this runs on the web
     // build too.
     Appearance.setColorScheme?.(themeMode);

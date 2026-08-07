@@ -1,5 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 
+import { catalogueCategory } from './interestCatalogue';
+
 // The nine groups the interest catalogue is organised into.
 //
 // The server decides *which* group an interest is in and *what order* the
@@ -54,9 +56,11 @@ export const CATEGORY_STYLES: CategoryStyle[] = [
   { key: 'lifestyle',     label: 'Lifestyle & Social',      icon: 'sparkles-outline',        color: '#D2691E' },
 ];
 
-/** Interests that belong to no group. Not one of the nine — it is where the
- *  retired "Other" flow's entries ended up — so it is only ever shown when
- *  something is actually in it. */
+/** Interests that belong to no group. Not one of the nine — this is where the
+ *  retired "Other" flow's entries would have ended up. Nothing is bucketed
+ *  here any more: `inferCategory` below sorts them into one of the nine
+ *  instead, so a picker never has to show a leftover "More". Kept only as the
+ *  fallback `styleFor` reaches for on a key it truly cannot place. */
 export const UNGROUPED: CategoryStyle = {
   key: '',
   label: 'More',
@@ -72,10 +76,43 @@ export function styleFor(key: string | undefined | null): CategoryStyle {
   return BY_KEY.get(key ?? '') ?? UNGROUPED;
 }
 
+/**
+ * The category for an interest the server sent with no usable `category`.
+ *
+ * Two steps, in order of how much they can be trusted:
+ *
+ * 1. The curated catalogue — all 681 seeded interests, grouped exactly as
+ *    `scripts/interests_seed.json` groups them, which is the same file the
+ *    backend seeds from. This is an answer, not a guess, and covers every
+ *    interest a normal install has.
+ * 2. Keyword matching, for a name the catalogue has never seen: an entry left
+ *    behind by the retired "Other" flow, or one added on the server after this
+ *    build shipped.
+ *
+ * Always returns one of the nine real keys, so nothing collects in a leftover
+ * "More" bucket.
+ */
+export function inferCategory(name: string): Exclude<CategoryKey, ''> {
+  const known = catalogueCategory(name);
+  if (known) return known;
+
+  const n = name.toLowerCase();
+  if (/sport|football|basketball|soccer|tennis|running?|marathon|martial|boxing|cycl|volleyball|baseball|hockey|rugby|golf|skat|climbing|badminton|cricket/.test(n)) return 'sports';
+  if (/fitness|yoga|pilates|workout|weight.?lift|crossfit|calisthenic|gym\b|wellness|meditat|nutrition/.test(n)) return 'fitness';
+  if (/music|guitar|piano|drum|\bsing|\bdj\b|rap|hip.?hop|jazz|concert|festival|instrument|songwrit|\bband\b|orchestra/.test(n)) return 'music';
+  if (/\bart\b|paint|sculpt|\bdraw|photograph|craft|design|ceramic|pottery|calligraphy|knitting|sewing/.test(n)) return 'arts';
+  if (/food|cooking|baking|coffee|\bwine\b|cocktail|restaurant|recipe|vegan|culinary|\bdrink|\bbeer\b|\btea\b|barbecue|\bbbq\b/.test(n)) return 'food';
+  if (/travel|hiking|camping|surfing|skiing|snowboard|outdoor|nature|backpack|road.?trip|adventure|garden|fishing/.test(n)) return 'travel';
+  if (/gaming|gamer|esport|video.?game|playstation|xbox|nintendo|\brpg\b|\bfps\b|board.?game|chess|puzzle|\btech\b|programming|coding|software|robotics|cyber/.test(n)) return 'games';
+  if (/film|movie|cinema|\btv\b|television|theatre|theater|dance|\bwrit|literature|poetry|novel|\bbook|anime|comic|celebrity/.test(n)) return 'entertainment';
+  return 'lifestyle';
+}
+
 /** Anything the interest endpoints return. Deliberately structural rather than
  *  an import: three screens have their own local `Interest` shape and none of
  *  them should have to change to use this. */
 export interface Categorised {
+  name: string;
   category?: string;
   category_label?: string;
 }
@@ -95,18 +132,43 @@ export interface CategorySection<T> {
  *
  * Empty sections are dropped — an interest picker showing "Music (0)" is
  * showing the shape of the catalogue rather than anything the user can act on.
- * `''` sorts last, and only appears when something is in it.
+ * Every interest lands in one of the nine real sections — one with no
+ * `category` (a leftover "Other"-flow entry) is sorted into one of them by
+ * `inferCategory` rather than collecting under a separate "More".
  */
+/**
+ * Every one of the nine, in the server's order, empty groups included.
+ *
+ * This is what the bubble field needs and `sectionise` deliberately is not: a
+ * list drops a heading with nothing under it, but the field's nine bubbles are
+ * a fixed composition, and a bubble vanishing because the catalogue happens to
+ * be missing that group would rearrange the screen.
+ */
+export function groupAll<T extends Categorised>(
+  items: T[],
+): { style: CategoryStyle; items: T[] }[] {
+  const buckets = new Map<CategoryKey, T[]>(CATEGORY_STYLES.map((c) => [c.key, []]));
+  for (const item of items) {
+    // A category the server sent that this build has no bubble for is placed by
+    // name rather than shown as a tenth: the field's nine slots are authored,
+    // not generated, and a bubble with no slot has nowhere to sit.
+    const sent = item.category as CategoryKey | undefined;
+    const key = sent && buckets.has(sent) ? sent : inferCategory(item.name);
+    buckets.get(key)!.push(item);
+  }
+  return CATEGORY_STYLES.map((style) => ({ style, items: buckets.get(style.key)! }));
+}
+
 export function sectionise<T extends Categorised>(items: T[]): CategorySection<T>[] {
   const buckets = new Map<string, T[]>();
   for (const item of items) {
-    const key = item.category ?? '';
+    const key = item.category || inferCategory(item.name);
     const bucket = buckets.get(key);
     if (bucket) bucket.push(item);
     else buckets.set(key, [item]);
   }
 
-  const ordered = [...CATEGORY_STYLES, UNGROUPED];
+  const ordered = CATEGORY_STYLES;
   const sections: CategorySection<T>[] = [];
 
   for (const style of ordered) {

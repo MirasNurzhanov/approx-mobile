@@ -99,21 +99,7 @@
       "expo-font",
       "expo-video",
       "expo-apple-authentication",
-      [
-        "@mozzius/expo-dynamic-app-icon",
-        {
-          "light": {
-            "ios": "./assets/images/icon-light.png",
-            "android": "./assets/images/icon-android-light.png"
-          },
-          "dark": {
-            "ios": "./assets/images/icon-dark.png",
-            "android": "./assets/images/icon-android-dark.png"
-          }
-        }
-      ],
-      "@react-native-google-signin/google-signin",
-      "expo-build-properties"
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 
-import SocialAuthButtons from '@/components/SocialAuthButtons';
 import { useAuth } from '@/context/AuthContext';
 import { runBusy } from '@/services/busy';
 import { lightColors as L } from '@/constants/theme';
@@ -28,14 +27,12 @@ export default function LoginScreen() {
   const [submitting, setSubmitting] = useState(false);
   const passwordRef = useRef<TextInput>(null);
 
-  // No isAuthenticated-watching redirect here — login() and
-  // completeSocialSignIn() (Google/Apple, via SocialAuthButtons) already
-  // navigate explicitly on success, and a fresh social sign-up needs to land
-  // on /social-birthday or /interests-setup rather than the map. A second,
-  // unconditional "authenticated → map" effect here raced that: it fired a
-  // beat after the explicit redirect (effects run post-commit) and silently
-  // overwrote it, which is why Apple sign-in appeared to skip both the age
-  // gate and interest selection entirely.
+  // No isAuthenticated-watching redirect here — login() already navigates
+  // explicitly on success. A second, unconditional "authenticated → map"
+  // effect here raced that: it fired a beat after the explicit redirect
+  // (effects run post-commit) and silently overwrote it, which is why a
+  // fresh sign-up appeared to skip both the age gate and interest selection
+  // entirely. Social sign-in (Google/Apple) lives on /register only.
   async function handleLogin() {
     if (!email || !password) return;
     setSubmitting(true);
@@ -55,11 +52,11 @@ export default function LoginScreen() {
         style={s.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Scrolls rather than centring in a fixed box: with the provider
-            buttons the column is tall enough to run off a small phone once the
-            keyboard is up, and content that cannot be reached is worse than
-            content that is not perfectly centred. `flexGrow` keeps it centred
-            on every screen that does have the room. */}
+        {/* Scrolls rather than centring in a fixed box: on a small phone with
+            the keyboard up the column can still run off screen, and content
+            that cannot be reached is worse than content that is not perfectly
+            centred. `flexGrow` keeps it centred on every screen that does have
+            the room. */}
         <ScrollView
           contentContainerStyle={s.inner}
           keyboardShouldPersistTaps="handled"
@@ -139,8 +136,6 @@ export default function LoginScreen() {
                 : <Text style={s.btnLabel}>Sign in</Text>
               }
             </Pressable>
-
-            <SocialAuthButtons disabled={submitting} />
           </View>
 
           {/* Footer link */}

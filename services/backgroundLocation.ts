@@ -8,6 +8,12 @@ import { reportLocation } from './location';
 import { getCachedLocationSharing } from './privacy';
 
 const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
+const ZONE_NOTIFICATION_COOLDOWN_MS = 30 * 60 * 1000;
+
+interface LastZoneNotified {
+  username: string;
+  timestamp: number;
+}
 
 export const BACKGROUND_LOCATION_TASK = 'aura-background-location';
 
@@ -84,8 +90,14 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         return (u.distance_km ?? Infinity) * 1000 < earshot;
       });
       if (zoneUser) {
-        const lastNotified = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
-        if (lastNotified !== zoneUser.username) {
+        const stored = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
+        const lastNotified: LastZoneNotified | null = stored ? JSON.parse(stored) : null;
+        const withinCooldown =
+          lastNotified != null &&
+          lastNotified.username === zoneUser.username &&
+          Date.now() - lastNotified.timestamp < ZONE_NOTIFICATION_COOLDOWN_MS;
+
+        if (!withinCooldown) {
           await Notifications.scheduleNotificationAsync({
             content: {
               title: '🎵 You entered a zone!',
@@ -93,7 +105,10 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
             },
             trigger: null,
           });
-          await AsyncStorage.setItem(LAST_ZONE_NOTIFIED_KEY, zoneUser.username);
+          await AsyncStorage.setItem(
+            LAST_ZONE_NOTIFIED_KEY,
+            JSON.stringify({ username: zoneUser.username, timestamp: Date.now() }),
+          );
         }
       } else {
         await AsyncStorage.removeItem(LAST_ZONE_NOTIFIED_KEY);

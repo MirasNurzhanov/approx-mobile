@@ -19,7 +19,7 @@ import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { ZonePlayer } from '@/components/ZonePlayer';
-import { IconClose, IconInfo, IconLock, IconMusic, IconUpload } from '@/components/ui/icons';
+import { IconClose, IconInfo, IconLock, IconMusic, IconSound, IconUpload } from '@/components/ui/icons';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -48,6 +48,12 @@ import { RADIUS_MAX_M, RADIUS_MIN_M } from '@/services/zoneArea';
 // hears it. One number could not serve both, so there are two, and the second
 // one stays invisible until someone switches it on.
 //
+// Going quiet is here, though, and only here: the Sound zone switch. It is the
+// one control that stops people hearing you, and it is on this screen rather
+// than in Settings because the thing it silences is on this screen. Muting
+// keeps the track, the earshot dial and the map zone exactly as they are — it
+// parks the zone rather than dismantling it.
+//
 // Two things can fill the one audio slot — an Apple Music track or an upload —
 // and the last one picked wins. A zone plays one thing.
 //
@@ -65,6 +71,13 @@ interface ZoneState {
   /** Read only, and only to phrase the copy: a zone that covers a whole city
    *  has no radius to quote, so "within 500 m" would be a lie there. */
   effective_zone_mode?: 'radius' | 'region';
+
+  /** The sound zone's own on/off. Off means nobody hears the track, nobody is
+   *  alerted, and no earshot ring is drawn — while the track, the dial and the
+   *  zone on the map all stay exactly as they were. Absent means on: it is the
+   *  server's default, and a build that predates the field must not read a
+   *  missing key as silence. */
+  music_zone_active?: boolean;
 
   /** The music zone — how far the sound carries, which this screen *does* set.
    *  While `music_zone_separate` is false it follows `zone_radius`.
@@ -101,12 +114,13 @@ const WAVE = [7, 13, 22, 15, 28, 20, 34, 24, 16, 27, 11, 20, 31, 18, 9, 15, 24, 
 // PATCHes; these only render it.
 
 /** The track itself, the loop window, and who can hear it. */
-function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, trimmed, audience, onEditLoop }: {
+function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, muted, trimmed, audience, onEditLoop }: {
   zone: ZoneState;
   audioUrl: string | null;
   title: string | null;
   earshot: number;
   inheritsRegion: boolean;
+  muted: boolean;
   trimmed: boolean;
   audience: Audience;
   onEditLoop: () => void;
@@ -126,10 +140,16 @@ function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, tri
           url={audioUrl}
           title={title ?? 'Zone audio'}
           artwork={zone.zone_apple_artwork}
+          // The player still works while muted — this is your own track on
+          // your own screen, and muting is about other people. The subtitle is
+          // the only thing that changes, because "loops for anyone within
+          // 200 m" would be describing something that is not happening.
           subtitle={
-            inheritsRegion
-              ? 'Loops for anyone inside your zone'
-              : `Loops for anyone within ${fmtRadius(earshot)}`
+            muted
+              ? 'Muted — nobody else can hear this'
+              : inheritsRegion
+                ? 'Loops for anyone inside your zone'
+                : `Loops for anyone within ${fmtRadius(earshot)}`
           }
           startMs={zone.zone_track_start_ms ?? 0}
           endMs={zone.zone_track_end_ms ?? null}
@@ -190,7 +210,7 @@ function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, tri
 }
 
 /**
- * How far the sound carries.
+ * Whether the sound zone is on, and how far it carries.
  *
  * A zone is a radar and a music zone is a speaker, and they were one number.
  * Widening your zone to be found by more people also handed all of them your
@@ -198,14 +218,25 @@ function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, tri
  * everyone else's map. Two dials now, and the second one only exists once you
  * ask for it — while the switch is off earshot is still the zone, exactly as it
  * always was.
+ *
+ * The master switch above them is newer, and it exists because neither of the
+ * other two would go quiet. `zone_active` in Settings removes the circle from
+ * the map and deliberately leaves the music playing; "a separate zone for
+ * music" only picks which radius earshot uses. So going quiet meant deleting
+ * the song — and turning the separate zone off *looked* like a mute, because
+ * the ring disappeared off the map while the track carried on playing to
+ * everyone in the zone. Now the top switch is the one that stops the sound and
+ * the ring together, and the two below it are only ever about size.
  */
-function EarshotSection({ musicSeparate, musicRadius, earshot, inheritsRegion, musicAlerts, saving, onToggleSeparate, onRadiusChange, onRadiusCommit, onToggleAlerts }: {
+function EarshotSection({ musicActive, musicSeparate, musicRadius, earshot, inheritsRegion, musicAlerts, saving, onToggleActive, onToggleSeparate, onRadiusChange, onRadiusCommit, onToggleAlerts }: {
+  musicActive: boolean;
   musicSeparate: boolean;
   musicRadius: number;
   earshot: number;
   inheritsRegion: boolean;
   musicAlerts: boolean;
   saving: boolean;
+  onToggleActive: (v: boolean) => void;
   onToggleSeparate: (v: boolean) => void;
   onRadiusChange: (next: number) => void;
   onRadiusCommit: (next: number) => void;
@@ -215,48 +246,80 @@ function EarshotSection({ musicSeparate, musicRadius, earshot, inheritsRegion, m
   const styles = makeStyles(colors);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>HOW FAR IT CARRIES</Text>
+      <Text style={styles.sectionLabel}>THE SOUND ZONE</Text>
 
       <View style={styles.controlRow}>
-        <IconMusic size={18} color={colors.t2} />
+        <IconSound size={18} color={colors.t2} />
         <View style={styles.controlText}>
-          <Text style={styles.controlLabel}>A separate zone for music</Text>
+          <Text style={styles.controlLabel}>Sound zone</Text>
           <Text style={styles.controlHint}>
-            {musicSeparate
-              ? `People hear you within ${fmtRadius(earshot)}, whatever size your zone is.`
-              : inheritsRegion
-                ? 'Off — the music reaches everyone inside the place your zone covers.'
-                : `Off — the music reaches as far as your zone does (${fmtRadius(earshot)}).`}
+            {musicActive
+              ? inheritsRegion
+                ? 'On — friends inside your zone can play your track.'
+                : `On — friends within ${fmtRadius(earshot)} can play your track.`
+              : 'Off — nobody hears your track. Your zone stays on the map and the track stays here.'}
           </Text>
         </View>
         <Switch
-          value={musicSeparate}
-          onValueChange={onToggleSeparate}
+          value={musicActive}
+          onValueChange={onToggleActive}
           trackColor={{ false: colors.surface2, true: colors.teal }}
           thumbColor={colors.t1}
           ios_backgroundColor={colors.surface2}
         />
       </View>
 
-      {musicSeparate && (
-        <View style={styles.dialCard}>
-          <View style={styles.readoutRow}>
-            <Text style={styles.readoutLabel}>Earshot</Text>
-            <Text style={styles.readout}>{fmtRadius(musicRadius)}</Text>
+      {/* The size controls are hidden rather than disabled while muted. A
+          greyed-out dial still reads as a setting you are being denied; a
+          missing one reads as a question that does not apply yet, which is
+          what "how far does the silence carry" is. */}
+      {musicActive && (
+        <>
+          <View style={styles.controlRow}>
+            <IconMusic size={18} color={colors.t2} />
+            <View style={styles.controlText}>
+              <Text style={styles.controlLabel}>A separate zone for music</Text>
+              <Text style={styles.controlHint}>
+                {musicSeparate
+                  ? `People hear you within ${fmtRadius(earshot)}, whatever size your zone is.`
+                  : inheritsRegion
+                    ? 'Off — the music reaches everyone inside the place your zone covers.'
+                    : `Off — the music reaches as far as your zone does (${fmtRadius(earshot)}).`}
+              </Text>
+            </View>
+            <Switch
+              value={musicSeparate}
+              onValueChange={onToggleSeparate}
+              trackColor={{ false: colors.surface2, true: colors.teal }}
+              thumbColor={colors.t1}
+              ios_backgroundColor={colors.surface2}
+            />
           </View>
-          <RadiusSlider
-            value={musicRadius}
-            min={RADIUS_MIN_M}
-            max={RADIUS_MAX_M}
-            onChange={onRadiusChange}
-            onCommit={onRadiusCommit}
-            format={fmtRadius}
-            label="Music zone radius"
-            disabled={saving}
-          />
-        </View>
+
+          {musicSeparate && (
+            <View style={styles.dialCard}>
+              <View style={styles.readoutRow}>
+                <Text style={styles.readoutLabel}>Earshot</Text>
+                <Text style={styles.readout}>{fmtRadius(musicRadius)}</Text>
+              </View>
+              <RadiusSlider
+                value={musicRadius}
+                min={RADIUS_MIN_M}
+                max={RADIUS_MAX_M}
+                onChange={onRadiusChange}
+                onCommit={onRadiusCommit}
+                format={fmtRadius}
+                label="Music zone radius"
+                disabled={saving}
+              />
+            </View>
+          )}
+        </>
       )}
 
+      {/* Outside the gate on purpose: this switch is both directions at once,
+          and being told about a friend's music is still worth having when your
+          own zone is silent. */}
       <View style={styles.controlRow}>
         <Ionicons name="notifications-outline" size={18} color={colors.t2} />
         <View style={styles.controlText}>
@@ -511,6 +574,11 @@ export default function ZoneScreen() {
     ? (appleTitle ?? uploadName ?? trackTitle(audioUrl))
     : null;
 
+  /** Absent means on — see `music_zone_active` on ZoneState. */
+  const musicActive = zone.music_zone_active ?? true;
+  /** Muted *and* there is something being muted. A silent switch over an empty
+   *  slot is not worth mentioning anywhere: nobody could hear you either way. */
+  const muted = !musicActive && Boolean(audioUrl);
   const musicSeparate = zone.music_zone_separate ?? false;
   const musicRadius = zone.music_zone_radius ?? 200;
   /** What earshot is right now — the separate dial, or the zone it inherits.
@@ -540,6 +608,10 @@ export default function ZoneScreen() {
       setZone(previous);
       Alert.alert('Could not save', e?.response?.data?.detail ?? 'Please try again.');
     });
+  }
+
+  function setMusicActive(on: boolean) {
+    patchZone({ music_zone_active: on }, { music_zone_active: on });
   }
 
   function setMusicSeparate(separate: boolean) {
@@ -681,8 +753,12 @@ export default function ZoneScreen() {
             a track is clearing it, right here. When earshot is inherited rather
             than separate the zone's radius is still the distance it carries —
             that is a number, not an on/off — so the line below says which
-            distance is in force instead. */}
-        {!active && !musicSeparate && audioUrl && (
+            distance is in force instead.
+
+            Suppressed while muted, where it would be flatly wrong — "this
+            still plays" is the one thing that is no longer true. The muted
+            state says so itself, on the switch that caused it. */}
+        {!active && !musicSeparate && audioUrl && musicActive && (
           <View style={styles.offNote}>
             <IconInfo size={16} color={colors.t2} />
             <Text style={styles.offNoteText}>
@@ -699,18 +775,21 @@ export default function ZoneScreen() {
           title={title}
           earshot={earshot}
           inheritsRegion={inheritsRegion}
+          muted={muted}
           trimmed={trimmed}
           audience={audience}
           onEditLoop={() => router.push('/zone-trim')}
         />
 
         <EarshotSection
+          musicActive={musicActive}
           musicSeparate={musicSeparate}
           musicRadius={musicRadius}
           earshot={earshot}
           inheritsRegion={inheritsRegion}
           musicAlerts={musicAlerts}
           saving={saving}
+          onToggleActive={setMusicActive}
           onToggleSeparate={setMusicSeparate}
           onRadiusChange={(next) => setZone((z) => ({ ...z, music_zone_radius: next }))}
           onRadiusCommit={commitMusicRadius}

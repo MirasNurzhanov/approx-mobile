@@ -60,8 +60,10 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         // 1. There must be something to listen to. Not `zone_active` — that
         //    switch removes the circle drawn around someone on the map, which
         //    is a different question. The server only sends `zone_audio_url`
-        //    to viewers allowed to hear it, so its presence already means both
-        //    "there is music" and "you may play it".
+        //    to viewers allowed to hear it, and withholds it entirely from a
+        //    zone whose owner has switched the sound off, so its presence
+        //    already means all three of "there is music", "it is playing" and
+        //    "you may play it".
         if (!u.zone_audio_url) return false;
 
         // 2. A region zone is a city border, not a listening range, and its

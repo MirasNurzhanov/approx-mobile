@@ -35,6 +35,11 @@ const ACCOUNT_SCOPED_KEYS = [
   'refresh_token',
   'chat_last_seen',
   'last_zone_notified',
+  // The feature tutorial (services/tutorial.ts) is deliberately NOT here —
+  // its keys are namespaced by user id, not flat flags, so it does not need
+  // wiping on sign-out to behave correctly for the next account. Clearing it
+  // here would undo that: the same account would see it again every time
+  // they logged back in.
   // The on-device activity feed is gone (alerts come from the server now), but
   // devices that ran an older build still hold its keys — and they hold the
   // previous account's alerts. Kept in the list so signing out clears them.

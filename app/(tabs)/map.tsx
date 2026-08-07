@@ -32,6 +32,7 @@ import { navArcClearance } from '@/components/navArc';
 import { Speedometer } from '@/components/Speedometer';
 import { REACTIONS } from '@/components/storyReactions';
 import { StoryViewer } from '@/components/StoryViewer';
+import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import {
@@ -93,6 +94,7 @@ import { useMotionTrails } from '@/hooks/useMotionTrails';
 import { recordSpeed } from '@/services/ownMotion';
 import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
 import { fmtRadius, trackTitle } from '@/services/zoneAudio';
+import { hasSeenStoryTutorial, markStoryTutorialSeen } from '@/services/tutorial';
 import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
 import {
     getRegion,
@@ -610,6 +612,21 @@ function AvatarMarker({
   const loadIsCurrent = load.uri === uri;
   const imageReady  = loadIsCurrent ? load.ready  : !uri || loadedAvatars.has(uri);
   const imageFailed = loadIsCurrent ? load.failed : false;
+
+  // Safety valve. `tracksViewChanges` below is `!imageReady` — true, and the
+  // marker re-rasterizing every frame, for as long as this stays false. A uri
+  // whose fetch neither loads nor errors (a stalled CDN, a host that hangs
+  // rather than 404s) would otherwise leave that running forever, which is
+  // the exact "re-rasterizing until it runs out of memory" crash the fan
+  // logic elsewhere in this file already has scars from — see the badgeKey
+  // comment in services/markerLayout.ts. Giving up after a few seconds trades
+  // a permanently-blank avatar for an app that stays open.
+  useEffect(() => {
+    if (imageReady) return;
+    const timer = setTimeout(() => setLoad({ uri, ready: true, failed: true }), 8000);
+    return () => clearTimeout(timer);
+  }, [uri, imageReady]);
+
   const online = presence?.is_online;
 
   // Presence changes the bitmap too, so it re-arms tracking — but keyed on the
@@ -708,12 +725,28 @@ function SelfMarker({ coordinate, uri, username }: {
   const styles = makeStyles(colors);
   // Same shape as AvatarMarker: the load state carries the uri it belongs to,
   // so changing your own picture is not a reset an effect has to perform.
+  // Seeded from `loadedAvatars`, same as AvatarMarker — without it, a remount
+  // (e.g. the map view remounting after a screen pushed on top of it, such as
+  // Zone Size, is popped) forgets the picture was already decoded and blanks
+  // the ring until it loads again, which read as the avatar vanishing.
   const [load, setLoad] = useState<{ uri?: string; ready: boolean; failed: boolean }>(
-    () => ({ uri, ready: !uri, failed: false }),
+    () => ({ uri, ready: !uri || loadedAvatars.has(uri), failed: false }),
   );
   const loadIsCurrent = load.uri === uri;
-  const imageReady  = loadIsCurrent ? load.ready  : !uri;
+  const imageReady  = loadIsCurrent ? load.ready  : !uri || loadedAvatars.has(uri);
   const imageFailed = loadIsCurrent ? load.failed : false;
+
+  // Safety valve, same as AvatarMarker: a uri that never resolves (loads or
+  // errors) would otherwise leave `tracksViewChanges` true — and this marker
+  // re-rasterizing every frame — forever, which is the exact "runs out of
+  // memory" crash shape services/markerLayout.ts already documents scars
+  // from. This is the owner's own marker, on screen every time the map is
+  // open, so it is the one most exposed to a hung fetch running indefinitely.
+  useEffect(() => {
+    if (imageReady) return;
+    const timer = setTimeout(() => setLoad({ uri, ready: true, failed: true }), 8000);
+    return () => clearTimeout(timer);
+  }, [uri, imageReady]);
 
   return (
     <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={!imageReady}>
@@ -727,7 +760,10 @@ function SelfMarker({ coordinate, uri, username }: {
                 loadedAvatars.add(uri);
                 setTimeout(() => setLoad({ uri, ready: true, failed: false }), 250);
               }}
-              onError={() => setLoad({ uri, ready: true, failed: true })}
+              onError={(e) => {
+                console.log('[Map] self avatar Image failed to load:', uri, e?.error);
+                setLoad({ uri, ready: true, failed: true });
+              }}
             />
           ) : (
             <View style={[styles.selfAvatar, styles.selfInitialWrap]}>
@@ -1623,6 +1659,20 @@ export default function MapScreen() {
   const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
   const [selfProfile, setSelfProfile] = useState<{ username: string; profile_picture?: string } | null>(null);
   const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
+
+  // First-run tutorial, step 1: how to post a story. Keyed by account, not
+  // just checked once on mount — it waits on `currentUserId` because the flag
+  // itself is namespaced by id (see services/tutorial.ts), and re-runs only
+  // when that id changes, which happens once per session.
+  const [showStoryTutorial, setShowStoryTutorial] = useState(false);
+  useEffect(() => {
+    if (currentUserId === null) return;
+    hasSeenStoryTutorial(currentUserId).then((seen) => { if (!seen) setShowStoryTutorial(true); });
+  }, [currentUserId]);
+  function dismissStoryTutorial() {
+    setShowStoryTutorial(false);
+    if (currentUserId !== null) markStoryTutorialSeen(currentUserId).catch(() => {});
+  }
   const [hiToast, setHiToast]           = useState(false);
   const [locationToast, setLocationToast] = useState(false);
   const [stories, setStories]           = useState<Story[]>([]);
@@ -2141,8 +2191,11 @@ export default function MapScreen() {
       .catch((e: any) => console.log('[Map] /users/me/ error:', e?.response?.status));
 
     api.get<{ username: string; profile_picture?: string }>('/api/users/profile/')
-      .then((r) => setSelfProfile({ username: r.data.username, profile_picture: r.data.profile_picture }))
-      .catch(() => {});
+      .then((r) => {
+        console.log('[Map] /users/profile/ response:', r.data.username, r.data.profile_picture);
+        setSelfProfile({ username: r.data.username, profile_picture: r.data.profile_picture });
+      })
+      .catch((e: any) => console.log('[Map] /users/profile/ error:', e?.response?.status));
 
     // The zone endpoint answers with either {zone_active, zone_radius, ...} or
     // {active, ...} and may omit the radius — normalize so the owner's circle
@@ -2967,6 +3020,10 @@ export default function MapScreen() {
           button left there is both covered and unreachable. */}
       {mapVisible && !selectedUser && !selectedMeetup && !storyViewer && createStoryCoord === null && (
         <LocateButton state={locateState} bottom={locateBottom} onPress={handleLocatePress} />
+      )}
+
+      {mapVisible && showStoryTutorial && (
+        <StoryTutorialOverlay onDismiss={dismissStoryTutorial} />
       )}
     </View>
   );

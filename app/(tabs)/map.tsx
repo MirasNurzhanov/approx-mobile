@@ -354,28 +354,40 @@ function fmtTimeLeft(expiresAt: string): string {
 /**
  * The radius of the viewer's own earshot ring, or null for no ring.
  *
- * Four questions, in the order that makes them cheap to read:
+ * Yours is not drawn on quite the same terms as everyone else's, and the
+ * difference is that yours is also a control. Other people's rings answer "can
+ * I hear something here"; yours additionally answers "how far did I just set
+ * that dial", which is a question worth answering before there is a track.
  *
- *  1. Is there a track? Silence has no reach.
- *  2. Is the sound zone on? Muting is the switch that stops people hearing you,
- *     so it is the switch that removes the ring marking where they would.
- *  3. Is earshot a circle at all? A region zone that the music still follows
+ *  1. Is the sound zone on? Muting is the switch that stops people hearing
+ *     you, so it is the switch that removes the ring marking where they would
+ *     — and with the size controls hidden while muted, there is no dial left
+ *     to preview either.
+ *  2. Is earshot a dial you set? A separate music zone is drawn whether or not
+ *     a track is loaded: the ring is the only place the radius is visible at
+ *     real scale, and sizing the zone before choosing the song is the normal
+ *     order to do those two things in.
+ *  3. Otherwise, is there a track? Inherited earshot is not a preview of
+ *     anything — the number belongs to the zone, and Zone Size previews it
+ *     there — so an empty zone has no reach worth drawing.
+ *  4. Is earshot a circle at all? A region zone that the music still follows
  *     has a city outline for a listening range, and drawing `zone_radius` as a
  *     circle would claim a boundary that is not the one in force. Same rule
  *     other people get, a few lines further down in `musicZones`.
- *  4. Is the zone circle already drawing it? When earshot is inherited and the
+ *  5. Is the zone circle already drawing it? When earshot is inherited and the
  *     zone is on the map at the same radius, a second identical ring is not
  *     information — but when the zone circle is *off*, this ring is the only
  *     thing showing how far the music goes, and it must stay.
  *
- * Point 4 is what makes turning "a separate zone for music" off safe. It used
+ * Point 5 is what makes turning "a separate zone for music" off safe. It used
  * to delete the ring outright, which on a map with the zone circle hidden left
  * nothing at all — the switch looked like it had removed the zone.
  */
 function selfEarshotRing(zone: SelfZone | null): number | null {
-  if (!zone?.has_track || !zone.music_zone_active) return null;
+  if (!zone?.music_zone_active) return null;
   if (!(zone.music_zone_radius > 0)) return null;
   if (zone.music_zone_separate) return zone.music_zone_radius;
+  if (!zone.has_track) return null;
   if (zone.zone_mode === 'region') return null;
   if (zone.zone_active) return null;
   return zone.music_zone_radius;

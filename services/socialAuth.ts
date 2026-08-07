@@ -58,6 +58,8 @@ interface GoogleAuthConfig {
 const googleConfig: GoogleAuthConfig =
   (Constants.expoConfig?.extra?.googleAuth as GoogleAuthConfig | undefined) ?? {};
 
+const isExpoGo = Constants.appOwnership === 'expo';
+
 /**
  * Google needs the **web** client id even on a phone: it is what makes Google
  * mint an `idToken` at all, and without one `signIn()` succeeds and returns
@@ -80,6 +82,7 @@ export const isGoogleAvailable = !!googleConfig.webClientId;
 let google: typeof GoogleSigninModule | null = null;
 
 function loadGoogle() {
+  if (isExpoGo) return null;
   if (google) return google;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   google = require('@react-native-google-signin/google-signin') as typeof GoogleSigninModule;
@@ -89,7 +92,9 @@ function loadGoogle() {
 let googleConfigured = false;
 
 function configureGoogle() {
-  const { GoogleSignin } = loadGoogle();
+  const mod = loadGoogle();
+  if (!mod) return;
+  const { GoogleSignin } = mod;
   if (googleConfigured) return;
   GoogleSignin.configure({
     webClientId: googleConfig.webClientId,
@@ -186,11 +191,13 @@ export async function signInWithGoogle(): Promise<SocialSignInResult> {
   let isSuccessResponse;
   let statusCodes;
   try {
-    ({ GoogleSignin, isErrorWithCode, isSuccessResponse, statusCodes } = loadGoogle());
+    const mod = loadGoogle();
+    if (!mod) throw new Error('not_linked');
+    ({ GoogleSignin, isErrorWithCode, isSuccessResponse, statusCodes } = mod);
     configureGoogle();
   } catch {
-    // The native side is not in this binary — an older dev build, or a
-    // prebuild that has not been re-run since the library was added.
+    // The native side is not in this binary — an older dev build, Expo Go,
+    // or a prebuild that has not been re-run since the library was added.
     throw new SocialSignInError(
       'This build does not include Google sign-in. Please update the app.',
       'not_linked',
@@ -284,8 +291,10 @@ export async function signInWithApple(): Promise<SocialSignInResult> {
 export async function clearGoogleSession() {
   if (!isGoogleAvailable) return;
   try {
+    const mod = loadGoogle();
+    if (!mod) return;
     configureGoogle();
-    await loadGoogle().GoogleSignin.signOut();
+    await mod.GoogleSignin.signOut();
   } catch {
     // Nothing to do about it, and nothing that depends on it.
   }

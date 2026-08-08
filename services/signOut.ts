@@ -6,6 +6,7 @@ import { stopBackgroundLocationUpdates } from './backgroundLocation';
 import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
 import { resetOwnMotion } from './ownMotion';
+import { resetNotificationPrefs } from './notificationPrefs';
 import { resetPrivacy } from './privacy';
 import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
@@ -138,6 +139,10 @@ export async function performSignOut(): Promise<void> {
   await resetRegionCache().catch(() => {});
   resetBlocked();
   resetAlertsCount();
+  // Which notifications the previous account wanted is theirs, not the next
+  // person's — and the switches would otherwise be drawn from their answers
+  // until the new account's own settings were fetched.
+  resetNotificationPrefs();
   // Otherwise a user who signed out mid-journey leaves the next session
   // starting in "driving" — with nearby prompts quietly suppressed for someone
   // who is sitting still.

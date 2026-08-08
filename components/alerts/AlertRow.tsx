@@ -15,6 +15,9 @@ const ACTIVITY_ICON: Record<string, IoniconsName> = {
   story_reaction: 'heart',
   story_reply: 'chatbubble',
   zone_music: 'musical-notes',
+  club_event: 'calendar',
+  club_event_status: 'checkmark-circle',
+  club_invite: 'people',
 };
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
@@ -111,7 +114,12 @@ export function NotifRow({ notif, onPress }: { notif: Notification; onPress?: ()
   const read = isRead(notif);
   const text = notifText(notif);
   const icon = ACTIVITY_ICON[notif.notification_type ?? ''] ?? 'notifications';
-  const excerpt = notif.story_excerpt ?? undefined;
+  // A story alert quotes the story; a club alert names the club. Same slot,
+  // but the quotation marks belong only to the first — "Runners" reads as a
+  // quote from a club rather than the name of one.
+  const excerpt = notif.story_excerpt
+    ? `“${notif.story_excerpt}”`
+    : (notif.club_name ?? undefined);
 
   const body = (
     <>
@@ -140,7 +148,7 @@ export function NotifRow({ notif, onPress }: { notif: Notification; onPress?: ()
           <Text style={styles.notifTitle} numberOfLines={2}>{text}</Text>
         </View>
         {excerpt ? (
-          <Text style={styles.notifSubtitle} numberOfLines={1}>"{excerpt}"</Text>
+          <Text style={styles.notifSubtitle} numberOfLines={1}>{excerpt}</Text>
         ) : null}
         {notif.created_at ? (
           <Text style={styles.notifTime}>{fmtTime(notif.created_at)}</Text>

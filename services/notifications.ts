@@ -13,6 +13,76 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// One Android channel per kind of news, matching notifications/push.py's
+// CATEGORIES — the server stamps `channelId` on every message it sends.
+//
+// The channels are the point, not decoration. Android exposes them
+// individually in system settings, so a member of six noisy clubs can mute
+// club chat there and keep direct messages loud, at whatever importance and
+// sound they prefer, without the app needing to offer that control itself.
+// One 'default' channel meant every notification was the same notification.
+//
+// Names and descriptions are user-facing: this is the list someone reads in
+// Settings → Apps → Aura → Notifications.
+//
+// A channel's importance is fixed at creation — Android ignores later changes
+// to one that already exists, and only the user can move it after that. Which
+// is the intended behaviour here: their choice outranks ours on every launch.
+const ANDROID_CHANNELS: {
+  id: string;
+  name: string;
+  description: string;
+  importance: Notifications.AndroidImportance;
+}[] = [
+  {
+    id: 'messages',
+    name: 'Messages',
+    description: 'Direct messages from people you are connected to.',
+    importance: Notifications.AndroidImportance.MAX,
+  },
+  {
+    id: 'clubs',
+    name: 'Club chat',
+    description: 'New messages in clubs you have joined.',
+    importance: Notifications.AndroidImportance.DEFAULT,
+  },
+  {
+    id: 'events',
+    name: 'Meetups',
+    description: 'Meetups proposed, confirmed or declined in your clubs.',
+    importance: Notifications.AndroidImportance.HIGH,
+  },
+  {
+    id: 'social',
+    name: 'Requests & activity',
+    description: 'Hi requests, new connections, and reactions to your stories.',
+    importance: Notifications.AndroidImportance.HIGH,
+  },
+  {
+    id: 'default',
+    name: 'Other',
+    description: 'Anything that does not belong to the categories above.',
+    importance: Notifications.AndroidImportance.DEFAULT,
+  },
+];
+
+async function ensureAndroidChannels(): Promise<void> {
+  await Promise.all(
+    ANDROID_CHANNELS.map((channel) =>
+      Notifications.setNotificationChannelAsync(channel.id, {
+        name: channel.name,
+        description: channel.description,
+        importance: channel.importance,
+        vibrationPattern: [0, 250, 250, 250],
+      }).catch((e: unknown) => {
+        // One unsupported channel must not stop the others, and must not stop
+        // registration — a phone with no channels still receives pushes.
+        console.log(`[Push] channel ${channel.id} failed:`, (e as Error)?.message ?? e);
+      }),
+    ),
+  );
+}
+
 // app/_layout.tsx calls this on every AppState "active" transition as well as
 // on login, so two calls landing close together is routine, not a caller bug
 // — a screen lock and unlock right after opening the app fires both. Without
@@ -47,11 +117,7 @@ async function registerForPushNotificationsImpl(): Promise<string | null> {
     }
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-      });
+      await ensureAndroidChannels();
     }
 
     // Deliberately does NOT request. This runs on login, and prompting here

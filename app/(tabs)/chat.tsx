@@ -29,6 +29,7 @@ import { storyReplyPreview } from '@/services/storyReply';
 import {
   deriveAlerts,
   EMPTY_ALERTS,
+  isClubAlert,
   isRead,
   loadAlerts,
   refreshAlertsCount,
@@ -992,6 +993,14 @@ export default function ChatScreen() {
         ),
       }));
       api.patch(`/api/notifications/${n.id}/read/`).then(refreshAlertsCount).catch(() => {});
+    }
+
+    // A club alert is about a club, not the person who caused it — opening
+    // @miras's profile when they proposed a meetup buries the meetup. Checked
+    // before the sender fallback because these do carry a sender.
+    if (isClubAlert(n) && n.club_id != null) {
+      router.push({ pathname: '/clubs/[id]', params: { id: n.club_id } } as any);
+      return;
     }
 
     if (n.sender_id == null) return;

@@ -99,7 +99,13 @@
       "expo-font",
       "expo-video",
       "expo-apple-authentication",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/adaptive-icon-monochrome.png",
+          "color": "#E8714A"
+        }
+      ],
       [
         "@react-native-google-signin/google-signin",
         {

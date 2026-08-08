@@ -46,7 +46,7 @@ export default function Index() {
         // of that chain would be missed for good — the marker is what lets it
         // be picked back up. Existing accounts never carry one, which is what
         // keeps this from being an introduction they have to sit through. See
-        // services/guide.
+         // services/guide.
         const owedGuide = await isGuidePending();
         if (cancelled) return;
         router.replace(owedGuide ? '/getting-started' : '/(tabs)/map');

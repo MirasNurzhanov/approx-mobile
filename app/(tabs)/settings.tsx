@@ -15,6 +15,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
@@ -22,6 +23,16 @@ import { useAuth } from '@/context/AuthContext';
 import { syncBackgroundLocationSharing } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
 import { hasSeenZoneTutorial, markZoneTutorialSeen } from '@/services/tutorial';
+import {
+  isAppleAvailable,
+  isGoogleAvailable,
+  linkAppleAccount,
+  linkGoogleAccount,
+  SocialSignInCancelled,
+  SocialSignInError,
+  type SocialProvider,
+} from '@/services/socialAuth';
+import { GoogleMark } from '@/components/SocialAuthButtons';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import {
   refreshPrivacy,
@@ -326,6 +337,113 @@ function PreferencesSection({ notifAllowed, onToggleNotifications, darkMode, onT
   );
 }
 
+/** One provider inside Connected Accounts — not SettingsRow, because its icon
+ *  is a fixed-palette brand mark (GoogleMark) or a themed glyph (Apple's),
+ *  neither of which fits the `(size, color) => JSX` shape every other row's
+ *  icon follows. Same visual language regardless, borrowing SettingsRow's own
+ *  row/border/label styles rather than duplicating them. */
+function ConnectedProviderRow({
+  icon,
+  label,
+  connected,
+  busy,
+  onPress,
+  last = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  connected: boolean;
+  busy: boolean;
+  onPress: () => void;
+  last?: boolean;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const disabled = connected || busy;
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.settingsRow,
+        !last && styles.settingsRowBorder,
+        pressed && !disabled && styles.pressed,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={connected ? `${label}, connected` : `Connect ${label}`}
+      accessibilityState={{ disabled }}
+    >
+      {icon}
+      <Text style={styles.settingsLabel}>{label}</Text>
+      <View style={styles.settingsRight}>
+        {busy ? (
+          <ActivityIndicator size="small" color={colors.t3} />
+        ) : connected ? (
+          <View style={styles.connectedBadge}>
+            <Ionicons name="checkmark-circle" size={15} color={colors.teal} />
+            <Text style={styles.connectedText}>Connected</Text>
+          </View>
+        ) : (
+          <IconChevron size={16} color={colors.t3} />
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * Attach Google or Apple to the account already signed in.
+ *
+ * Distinct from the buttons on /register: those trade a provider token for a
+ * *session*; these attach one to the session that already exists (see
+ * services/socialAuth's "Linking" section). The backend already auto-links by
+ * email when someone taps a social button for an account it recognises — this
+ * is the explicit version, for someone who made a password account first and
+ * wants Google/Apple to work too, without needing to know that tapping the
+ * button anywhere would have quietly done it.
+ *
+ * Absent entirely when neither provider can run here — same rule the sign-in
+ * buttons follow, a row that cannot work is not a row.
+ */
+function ConnectedAccountsSection({ connectedProviders, appleReady, linking, onConnect }: {
+  connectedProviders: SocialProvider[];
+  appleReady: boolean;
+  linking: SocialProvider | null;
+  onConnect: (provider: SocialProvider) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  if (!isGoogleAvailable && !appleReady) return null;
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>CONNECTED ACCOUNTS</Text>
+      <Card style={styles.rowsCard}>
+        {isGoogleAvailable && (
+          <ConnectedProviderRow
+            icon={<GoogleMark size={18} />}
+            label="Google"
+            connected={connectedProviders.includes('google')}
+            busy={linking === 'google'}
+            onPress={() => onConnect('google')}
+            last={!appleReady}
+          />
+        )}
+        {appleReady && (
+          <ConnectedProviderRow
+            icon={<Ionicons name="logo-apple" size={20} color={colors.t1} />}
+            label="Apple"
+            connected={connectedProviders.includes('apple')}
+            busy={linking === 'apple'}
+            onPress={() => onConnect('apple')}
+            last
+          />
+        )}
+      </Card>
+    </View>
+  );
+}
+
 function SupportSection({ version, onSendFeedback }: {
   version: string;
   onSendFeedback: () => void;
@@ -422,11 +540,17 @@ export default function SettingsScreen() {
   // First-run tutorial, step 2: where the zone lives. The flag is namespaced
   // by account (see services/tutorial.ts), so this needs the account's id —
   // this screen has no other reason to fetch it, unlike the map, which
-  // already has one for /nearby/'s self exclusion.
+  // already has one for /nearby/'s self exclusion. `connected_providers`
+  // rides the same response for Connected Accounts below, rather than a
+  // second request for what is already the full profile payload.
   const [tutorialUserId, setTutorialUserId] = useState<number | null>(null);
+  const [connectedProviders, setConnectedProviders] = useState<SocialProvider[]>([]);
   useEffect(() => {
-    api.get<{ id: number }>('/api/users/me/')
-      .then((r) => setTutorialUserId(r.data.id))
+    api.get<{ id: number; connected_providers?: SocialProvider[] }>('/api/users/me/')
+      .then((r) => {
+        setTutorialUserId(r.data.id);
+        setConnectedProviders(r.data.connected_providers ?? []);
+      })
       .catch(() => {});
   }, []);
   const [showZoneTutorial, setShowZoneTutorial] = useState(false);
@@ -441,6 +565,39 @@ export default function SettingsScreen() {
   function takeMeToZone() {
     dismissZoneTutorial();
     router.push('/zone-area');
+  }
+
+  // Connected accounts: Apple's availability is async and iOS-only, same
+  // check the sign-in buttons use, so the row waits on it rather than
+  // guessing. `linking` gates both buttons at once — nothing about the flow
+  // is per-provider once a request is in flight.
+  const [appleReady, setAppleReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    isAppleAvailable().then((ok) => { if (alive) setAppleReady(ok); });
+    return () => { alive = false; };
+  }, []);
+  const [linking, setLinking] = useState<SocialProvider | null>(null);
+  async function connectProvider(provider: SocialProvider) {
+    if (linking) return;
+    setLinking(provider);
+    await runBusy(
+      async () => {
+        const providers = provider === 'google'
+          ? await linkGoogleAccount()
+          : await linkAppleAccount();
+        setConnectedProviders(providers);
+      },
+      () => setLinking(null),
+    ).catch((err) => {
+      // Same rule as the sign-in buttons: backing out of the provider's own
+      // sheet is not a failure worth an alert.
+      if (err instanceof SocialSignInCancelled) return;
+      Alert.alert(
+        'Could not connect',
+        err instanceof SocialSignInError ? err.message : 'Please try again.',
+      );
+    });
   }
 
   const refreshNotifPermission = useCallback(async () => {
@@ -596,6 +753,13 @@ export default function SettingsScreen() {
           onToggleTheme={toggleTheme}
         />
 
+        <ConnectedAccountsSection
+          connectedProviders={connectedProviders}
+          appleReady={appleReady}
+          linking={linking}
+          onConnect={connectProvider}
+        />
+
         <SupportSection version={version} onSendFeedback={sendFeedback} />
 
         <AccountActions
@@ -713,6 +877,13 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 13,
     color: colors.t3,
+  },
+  connectedBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  connectedText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.teal,
   },
 
   // Sign out + delete

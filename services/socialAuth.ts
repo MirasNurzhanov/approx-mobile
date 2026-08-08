@@ -19,7 +19,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import type * as GoogleSigninModule from '@react-native-google-signin/google-signin';
 
-import { BASE_URL, resumeSession } from './api';
+import { api, BASE_URL, resumeSession } from './api';
 
 export type SocialProvider = 'google' | 'apple';
 
@@ -172,9 +172,19 @@ async function exchange(
   };
 }
 
+/** What both providers hand back, before it becomes a session or a link. */
+interface ProviderToken {
+  idToken: string;
+  fullName: string;
+}
+
 // ── Google ───────────────────────────────────────────────────────────────────
 
-export async function signInWithGoogle(): Promise<SocialSignInResult> {
+/** The Google half of both signInWithGoogle and linkGoogleAccount — getting a
+ *  token out of the SDK is identical either way; what happens to it after
+ *  (a new session, or attached to the one already open) is the only
+ *  difference, and it happens in the caller. */
+async function getGoogleIdToken(): Promise<ProviderToken> {
   if (!isGoogleAvailable) {
     throw new SocialSignInError(
       'Google sign-in is not set up in this build.',
@@ -242,12 +252,19 @@ export async function signInWithGoogle(): Promise<SocialSignInResult> {
     );
   }
 
-  return exchange('google', idToken, user.name ?? '');
+  return { idToken, fullName: user.name ?? '' };
+}
+
+export async function signInWithGoogle(): Promise<SocialSignInResult> {
+  const { idToken, fullName } = await getGoogleIdToken();
+  return exchange('google', idToken, fullName);
 }
 
 // ── Apple ────────────────────────────────────────────────────────────────────
 
-export async function signInWithApple(): Promise<SocialSignInResult> {
+/** The Apple half of both signInWithApple and linkAppleAccount — see
+ *  getGoogleIdToken for why this is split the same way. */
+async function getAppleIdToken(): Promise<ProviderToken> {
   let credential: AppleAuthentication.AppleAuthenticationCredential;
   try {
     credential = await AppleAuthentication.signInAsync({
@@ -278,7 +295,61 @@ export async function signInWithApple(): Promise<SocialSignInResult> {
   const { givenName, familyName } = credential.fullName ?? {};
   const fullName = [givenName, familyName].filter(Boolean).join(' ');
 
-  return exchange('apple', credential.identityToken, fullName);
+  return { idToken: credential.identityToken, fullName };
+}
+
+export async function signInWithApple(): Promise<SocialSignInResult> {
+  const { idToken, fullName } = await getAppleIdToken();
+  return exchange('apple', idToken, fullName);
+}
+
+// ── Linking ──────────────────────────────────────────────────────────────────
+//
+// Attaches a provider identity to the account that is *already* signed in,
+// rather than trading it for a new session. Same SDKs, same tokens, a
+// different backend endpoint (`/api/users/social/link/`) and a different
+// client: `api`, not bare `axios`, because this one has to carry the current
+// session's Bearer token, and `exchange()`'s POST deliberately does not — it
+// runs before any session exists.
+
+/** Whoever asked already has an Aura session, so the failure here is "your
+ *  account couldn't be connected", never "sign-in failed" — the sign-in
+ *  already happened; this is what it's attached to. */
+async function link(provider: SocialProvider, idToken: string): Promise<SocialProvider[]> {
+  let data;
+  try {
+    ({ data } = await api.post('/api/users/social/link/', {
+      provider,
+      id_token: idToken,
+    }));
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.data) {
+      const body = err.response.data as { detail?: string; code?: string };
+      throw new SocialSignInError(
+        body.detail || 'That account could not be connected.',
+        body.code || 'server_rejected',
+      );
+    }
+    throw new SocialSignInError(
+      'Could not reach Aura. Check your connection and try again.',
+      'network',
+    );
+  }
+  return (data.connected_providers ?? []) as SocialProvider[];
+}
+
+/** Attach a Google identity to the signed-in account. Returns the account's
+ *  connected providers afterward, so Settings can update in place without a
+ *  second fetch. */
+export async function linkGoogleAccount(): Promise<SocialProvider[]> {
+  const { idToken } = await getGoogleIdToken();
+  return link('google', idToken);
+}
+
+/** Attach an Apple identity to the signed-in account. */
+export async function linkAppleAccount(): Promise<SocialProvider[]> {
+  const { idToken } = await getAppleIdToken();
+  return link('apple', idToken);
 }
 
 /**

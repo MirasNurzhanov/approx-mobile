@@ -46,7 +46,7 @@ const BTN_RADIUS = 14;
 // Apple require their own logo, in their own colours, un-recoloured. These are
 // the official paths, so nothing here is a lookalike.
 
-function GoogleMark({ size = 20 }: { size?: number }) {
+export function GoogleMark({ size = 20 }: { size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 48 48">
       <Path

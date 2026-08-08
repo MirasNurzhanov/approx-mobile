@@ -21,7 +21,6 @@ import { runBusy } from '@/services/busy';
 import { sectionise } from '@/services/interestCategories';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
-import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
 import { AuraMark } from '@/components/ui/AuraMark';
 import { Avatar } from '@/components/ui/Avatar';
@@ -33,7 +32,6 @@ import {
   IconGlobe,
   IconHeart,
   IconImage,
-  IconLogout,
   IconPencil,
   IconSound,
   type IconComponent,
@@ -107,7 +105,6 @@ export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
-  const { confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
@@ -352,15 +349,6 @@ export default function ProfileScreen() {
         {/* Buttons */}
         <View style={styles.btnGroup}>
           <Button label="Edit profile" icon={IconPencil} variant="ghost" size="lg" fullWidth onPress={() => router.push('/edit-profile')} />
-          <Button
-            label="Sign out"
-            icon={IconLogout}
-            variant="dangerTint"
-            size="lg"
-            fullWidth
-            loading={isSigningOut}
-            onPress={confirmLogout}
-          />
         </View>
       </ScrollView>
 

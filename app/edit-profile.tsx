@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
+import { pushProfileUpdate } from '@/services/profileRefresh';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -329,6 +330,7 @@ export default function EditProfileScreen() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setProfile(data);
+      pushProfileUpdate(data);
     }, () => setUploading(false)).catch((e: any) =>
       Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.'),
     );
@@ -358,6 +360,7 @@ export default function EditProfileScreen() {
       setNationality(savedNat);
       origProfession.current  = savedProf;
       setOrigNationality(savedNat);
+      pushProfileUpdate(data);
       router.back();
     }, () => setSaving(false)).catch((e: any) => {
       const msg = e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.';

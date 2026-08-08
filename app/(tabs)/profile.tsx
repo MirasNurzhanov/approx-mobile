@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { sectionise } from '@/services/interestCategories';
+import { registerProfileRefresh } from '@/services/profileRefresh';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
 import { Speedometer } from '@/components/Speedometer';
@@ -154,6 +155,24 @@ export default function ProfileScreen() {
       fetchAll().finally(() => setLoading(false));
     }, [fetchAll])
   );
+
+  // Paints an edit made on /edit-profile the instant it saves, rather than
+  // waiting on the focus effect above to refetch — see services/profileRefresh
+  // for why the gap between those two otherwise shows the old value.
+  useEffect(() => {
+    registerProfileRefresh((fresh) => {
+      setProfile((p) => {
+        const merged = { ...(p ?? {}), ...fresh } as Profile;
+        profileRef.current = merged;
+        _cache = {
+          profile: merged,
+          friendCount: friendCountRef.current,
+          connectionCount: connectionCountRef.current,
+        };
+        return merged;
+      });
+    });
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

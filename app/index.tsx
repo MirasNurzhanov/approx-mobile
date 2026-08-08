@@ -3,7 +3,6 @@ import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
-import { isGuidePending } from '@/services/guide';
 import { hasSeenOnboarding } from '@/services/onboarding';
 
 // Where the app opens. Three destinations, and the distinction between the last
@@ -41,15 +40,7 @@ export default function Index() {
 
     (async () => {
       if (isAuthenticated) {
-        // A sign-up chain that was abandoned halfway. The session is valid, so
-        // every later launch would come straight here and the guide at the end
-        // of that chain would be missed for good — the marker is what lets it
-        // be picked back up. Existing accounts never carry one, which is what
-        // keeps this from being an introduction they have to sit through. See
-         // services/guide.
-        const owedGuide = await isGuidePending();
-        if (cancelled) return;
-        router.replace(owedGuide ? '/getting-started' : '/(tabs)/map');
+        router.replace('/(tabs)/map');
         return;
       }
       const seen = await hasSeenOnboarding();

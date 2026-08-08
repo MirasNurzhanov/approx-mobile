@@ -2227,14 +2227,18 @@ export default function MapScreen() {
   const loadSelf = useCallback(() => {
     api.get<{ id: number; username: string }>('/api/users/me/')
       .then((r) => setCurrentUserId(r.data.id))
-      .catch((e: any) => console.log('[Map] /users/me/ error:', e?.response?.status));
+      .catch((e: any) => console.log(
+        '[Map] /users/me/ error:', e?.response?.status ?? e?.code ?? e?.message,
+      ));
 
     api.get<{ username: string; profile_picture?: string }>('/api/users/profile/')
       .then((r) => {
         console.log('[Map] /users/profile/ response:', r.data.username, r.data.profile_picture);
         setSelfProfile({ username: r.data.username, profile_picture: r.data.profile_picture });
       })
-      .catch((e: any) => console.log('[Map] /users/profile/ error:', e?.response?.status));
+      .catch((e: any) => console.log(
+        '[Map] /users/profile/ error:', e?.response?.status ?? e?.code ?? e?.message,
+      ));
 
     // The zone endpoint answers with either {zone_active, zone_radius, ...} or
     // {active, ...} and may omit the radius — normalize so the owner's circle
@@ -2263,7 +2267,9 @@ export default function MapScreen() {
         };
         setSelfZone(normalized);
       })
-      .catch((e: any) => console.log('[Zone] self zone fetch error:', e?.response?.status));
+      .catch((e: any) => console.log(
+        '[Zone] self zone fetch error:', e?.response?.status ?? e?.code ?? e?.message,
+      ));
 
     fetchFriends();
   }, [fetchFriends]);

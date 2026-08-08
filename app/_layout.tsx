@@ -27,6 +27,7 @@ import { AppThemeProvider, useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
+import { startNotificationRouting } from '@/services/notificationRouting';
 import '@/services/backgroundLocation';
 
 function AppStatusBar() {
@@ -52,6 +53,17 @@ function AppShell() {
     });
 
     return () => sub.remove();
+  }, [isAuthenticated]);
+
+  // Tapping a notification opens what it is about. Gated on being signed in
+  // for the same reason registration is: every destination is behind auth, and
+  // pushing /messages/12 at the login screen would land on a screen that
+  // immediately bounces. A tap that arrives while signed out is dropped rather
+  // than queued — by the time anyone signs in, it is no longer what they came
+  // to the app for.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    return startNotificationRouting();
   }, [isAuthenticated]);
 
   if (isLoading) {
@@ -81,6 +93,7 @@ function AppShell() {
       <Stack.Screen name="privacy"         options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="connections"     options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="permissions"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="notification-settings" options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="nearby"          options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding"      options={{ headerShown: false }} />

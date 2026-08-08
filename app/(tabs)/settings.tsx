@@ -52,6 +52,7 @@ import {
   IconEyeOff,
   IconGhost,
   IconInfo,
+  IconList,
   IconLocate,
   IconLock,
   IconLogout,
@@ -307,6 +308,12 @@ function PreferencesSection({ notifAllowed, onToggleNotifications, darkMode, onT
               <PrefSwitch value={notifAllowed} onValueChange={onToggleNotifications} />
             )
           }
+        />
+        <SettingsRow
+          icon={IconList}
+          label="What to notify me about"
+          onPress={() => router.push('/notification-settings')}
+          right={<IconChevron size={16} color={colors.t3} />}
         />
         <SettingsRow
           icon={IconMoon}

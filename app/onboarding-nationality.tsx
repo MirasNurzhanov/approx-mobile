@@ -26,13 +26,9 @@ export default function OnboardingNationalityScreen() {
     ? COUNTRIES.filter(c => c.name.toLowerCase().includes(query.trim().toLowerCase()))
     : COUNTRIES;
 
-  // Last screen of the sign-up chain, so the guide goes after it rather than
-  // after the map — arriving at the map and being covered by an explanation of
-  // it is the wrong order. `getting-started` sends them on when it is done, and
-  // clears the marker that put them there. Skipping this screen still gets the
-  // guide: skipping a country is not skipping the app.
-  function goToGuide() {
-    router.replace('/getting-started');
+  // Last screen of the sign-up chain.
+  function finish() {
+    router.replace('/(tabs)/map');
   }
 
   async function handleContinue() {
@@ -43,14 +39,14 @@ export default function OnboardingNationalityScreen() {
       }
     } catch {}
     setSaving(false);
-    goToGuide();
+    finish();
   }
 
   return (
     <View style={[s.root, { paddingTop: top }]}>
       <View style={s.topRow}>
         <Pressable
-          onPress={goToGuide}
+          onPress={finish}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Skip"

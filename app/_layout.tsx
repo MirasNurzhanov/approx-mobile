@@ -92,10 +92,6 @@ function AppShell() {
       <Stack.Screen name="interests-setup"         options={{ headerShown: false }} />
       <Stack.Screen name="onboarding-profession"   options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding-nationality"  options={{ headerShown: false, animation: 'slide_from_right' }} />
-      {/* Last stop of the sign-up chain, shown once per new account. No back
-          gesture: everything behind it has already been answered, and swiping
-          out would land on the country picker again. It has its own Skip. */}
-      <Stack.Screen name="getting-started"         options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />

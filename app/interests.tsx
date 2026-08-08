@@ -88,6 +88,8 @@ export default function EditInterestsScreen() {
       );
       const status = e?.response?.status;
       setError(
+
+        
         status === 401
           ? 'Your session has expired. Sign in again to edit interests.'
           : `Could not load interests${status ? ` (${status})` : ''}. Please try again.`,

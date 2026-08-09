@@ -44,7 +44,6 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.CAMERA",
@@ -76,7 +75,7 @@
           "locationAlwaysPermission": "Aura keeps looking for nearby people and music zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
           "locationWhenInUsePermission": "Aura shows you people within about 500m who share your interests, and places you on the map so they can find you. You choose whether your position is exact or rounded to a ~500m area, and you can pause sharing at any time in Settings.",
           "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": false
         }
       ],
       [

@@ -16,6 +16,13 @@ import { useSyncExternalStore } from 'react';
 //     from Settings while we are suspended — so the store re-checks on
 //     foreground rather than trusting what it saw at launch.
 
+// Android deliberately ships without ACCESS_BACKGROUND_LOCATION: app.json sets
+// expo-location's `isAndroidBackgroundLocationEnabled: false`, so the OS has no
+// permission to grant. Asking anyway would show a dialog that can only fail, and
+// Settings would list a row that can never turn green. iOS is untouched — it
+// still declares the background mode and still requests it.
+export const SUPPORTS_BACKGROUND_LOCATION = Platform.OS !== 'android';
+
 export type PermissionKey =
   | 'camera'
   | 'location'
@@ -111,6 +118,9 @@ async function readLocation(): Promise<PermissionInfo> {
 }
 
 async function readLocationBackground(): Promise<PermissionInfo> {
+  if (!SUPPORTS_BACKGROUND_LOCATION) {
+    return { key: 'locationBackground', state: 'unsupported', caveat: null };
+  }
   const foreground = await Location.getForegroundPermissionsAsync();
   if (!foreground.granted) {
     // The OS refuses to even ask for background until foreground is granted.
@@ -155,7 +165,10 @@ export async function check(key: PermissionKey): Promise<PermissionInfo> {
 const REQUESTERS: Record<PermissionKey, () => Promise<{ status: string; canAskAgain: boolean }>> = {
   camera: () => ImagePicker.requestCameraPermissionsAsync(),
   location: () => Location.requestForegroundPermissionsAsync(),
-  locationBackground: () => Location.requestBackgroundPermissionsAsync(),
+  locationBackground: async () => {
+    if (!SUPPORTS_BACKGROUND_LOCATION) return { status: 'denied', canAskAgain: false };
+    return Location.requestBackgroundPermissionsAsync();
+  },
   notifications: () => Notifications.requestPermissionsAsync(),
 };
 
@@ -202,7 +215,7 @@ export function usePermissionStore(): StoreState {
 
 export const ALL_PERMISSIONS: PermissionKey[] = [
   'location',
-  'locationBackground',
+  ...(SUPPORTS_BACKGROUND_LOCATION ? (['locationBackground'] as PermissionKey[]) : []),
   'camera',
   'notifications',
 ];

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
@@ -121,6 +122,17 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 export async function startBackgroundLocationUpdates(): Promise<void> {
   if (isExpoGo) {
     console.log('[BG Location] skipped — not supported in Expo Go');
+    return;
+  }
+
+  // Android has no ACCESS_BACKGROUND_LOCATION to grant, so the permission
+  // check below could only ever refuse. See SUPPORTS_BACKGROUND_LOCATION.
+  //
+  // Unregister rather than just returning: a build from before background
+  // location was disabled may have left this task registered, and
+  // expo-task-manager restores registrations across an app update.
+  if (Platform.OS === 'android') {
+    await stopBackgroundLocationUpdates();
     return;
   }
 

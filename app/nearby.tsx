@@ -11,7 +11,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { api } from '@/services/api';
+import * as Location from 'expo-location';
+
+import { fetchNearbyUsers, isLocationNotAvailable } from '@/services/discovery';
 import { Avatar } from '@/components/ui/Avatar';
 import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
@@ -139,19 +141,55 @@ export default function NearbyListScreen() {
   const [users, setUsers] = useState<NearbyUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  /** Sharing is on and the server is still waiting for our first position.
+   * Held apart from `error` because it is not one: nothing has gone wrong and
+   * there is nothing for the reader to do about it. */
+  const [awaitingFix, setAwaitingFix] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const { data } = await api.get<NearbyUser[]>('/api/proximity/nearby/');
+      // A fix of our own, because this screen has no map watcher to borrow one
+      // from. Only actually used while Paused — a sharing user is answered
+      // from their stored position and `fetchNearbyUsers` ignores it — but it
+      // is cheap enough not to be worth branching on twice. Last-known first,
+      // so the common case costs nothing and the list is not held up waiting
+      // for GPS.
+      let coords: { latitude: number; longitude: number } | null = null;
+      try {
+        const fix =
+          (await Location.getLastKnownPositionAsync()) ??
+          (await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          }));
+        coords = fix
+          ? { latitude: fix.coords.latitude, longitude: fix.coords.longitude }
+          : null;
+      } catch {
+        // No permission, or no fix. `fetchNearbyUsers` returns an empty list
+        // for a paused caller without one, which the empty state explains.
+      }
+
+      const data = await fetchNearbyUsers<NearbyUser>(coords);
       setUsers(Array.isArray(data) ? data : []);
+      setAwaitingFix(false);
       setError(null);
     } catch (e: any) {
+      // Sharing is on, the server has no position for us yet, and we had no
+      // fix of our own to answer with. That is a wait, not a failure and
+      // certainly not "nobody is nearby" — an empty list here would be a claim
+      // about the world that nothing has actually checked.
+      //
+      // Keyed on the server's code rather than the 400, so an unrelated 400
+      // still surfaces as the error it is. See services/discovery.ts.
+      if (isLocationNotAvailable(e)) {
+        setUsers(null);
+        setAwaitingFix(true);
+        setError(null);
+        return;
+      }
       setUsers([]);
-      setError(
-        e?.response?.status === 400
-          ? 'Your location hasn’t been set yet. Open the map once to start sharing it.'
-          : 'Couldn’t load people nearby.',
-      );
+      setAwaitingFix(false);
+      setError('Couldn’t load people nearby.');
     }
   }, []);
 
@@ -187,14 +225,32 @@ export default function NearbyListScreen() {
         <View style={styles.headerText}>
           <Text style={styles.title} accessibilityRole="header">People nearby</Text>
           <Text style={styles.subtitle}>
-            {users === null ? 'Loading…' : `${users.length} within range`}
+            {awaitingFix
+              ? 'Getting your location…'
+              : users === null
+                ? 'Loading…'
+                : `${users.length} within range`}
           </Text>
         </View>
       </View>
 
       {ordered === null ? (
-        <View style={styles.center}>
+        <View
+          style={styles.center}
+          accessible
+          accessibilityLabel={
+            awaitingFix ? 'Getting your location' : 'Loading people nearby'
+          }
+          accessibilityRole="progressbar"
+        >
           <ActivityIndicator color={colors.teal} size="large" />
+          {/* Named rather than a bare spinner. The wait has a cause the reader
+              can otherwise only guess at, and "getting your location" is the
+              difference between waiting and assuming it is broken. Pull to
+              refresh is the retry — nothing loops on its own. */}
+          {awaitingFix ? (
+            <Text style={styles.pendingText}>Getting your location…</Text>
+          ) : null}
         </View>
       ) : (
         <FlatList
@@ -307,6 +363,12 @@ export default function NearbyListScreen() {
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  pendingText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.t3,
+    marginTop: 12,
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   header: {

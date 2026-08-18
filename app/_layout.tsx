@@ -27,6 +27,8 @@ import { AppThemeProvider, useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
+import { refreshPrivacy } from '@/services/privacy';
+import { endStaleSharingSession } from '@/services/sharingSession';
 import { startNotificationRouting } from '@/services/notificationRouting';
 import '@/services/backgroundLocation';
 
@@ -37,6 +39,22 @@ function AppStatusBar() {
 
 function AppShell() {
   const { isLoading, isAuthenticated } = useAuth();
+
+  // Whatever this account's sharing mode was when the app last closed, it was
+  // chosen by a run that no longer exists. Ending it here is what makes going
+  // visible a per-launch decision rather than a setting that quietly persists.
+  // See services/sharingSession.ts for why it presents a token instead of
+  // simply pausing — startup races the user's own tap.
+  //
+  // Gated on being signed in, like the push effect below: there is nobody to
+  // pause otherwise. Runs once per process, and only in the foreground.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    // Re-read afterwards, not before: a screen that mounted first may already
+    // have pulled a sharing mode that this call has just ended, and the store
+    // would otherwise keep showing the user as visible when they are not.
+    endStaleSharingSession().then(() => { refreshPrivacy().catch(() => {}); });
+  }, [isAuthenticated]);
 
   useEffect(() => {
     console.log('[Push] isAuthenticated:', isAuthenticated);

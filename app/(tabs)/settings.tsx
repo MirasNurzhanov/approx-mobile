@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { useAuth } from '@/context/AuthContext';
-import { syncBackgroundLocationSharing } from '@/services/backgroundLocation';
+import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
 import { hasSeenZoneTutorial, markZoneTutorialSeen } from '@/services/tutorial';
 import {
@@ -34,6 +34,11 @@ import {
 } from '@/services/socialAuth';
 import { GoogleMark } from '@/components/SocialAuthButtons';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
+import { LocationSharingConsent } from '@/components/LocationSharingConsent';
+import {
+  LocationVisibilityCard,
+  type SharingPrecision,
+} from '@/components/LocationVisibilityCard';
 import {
   refreshPrivacy,
   updatePrivacy,
@@ -48,9 +53,6 @@ import {
   IconBell,
   IconBlocked,
   IconChevron,
-  IconEye,
-  IconEyeOff,
-  IconGhost,
   IconInfo,
   IconList,
   IconLocate,
@@ -65,7 +67,7 @@ import {
   type IconComponent,
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
-import { fonts, radius } from '@/constants/theme';
+import { fonts } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
@@ -79,20 +81,11 @@ interface SelfZone {
 
 const FEEDBACK_EMAIL = 'support@aura-app.com';
 
-// ─── Location sharing ─────────────────────────────────────────────────────────
-// This replaces the old Active/Ghost/Invisible selector. Ghost was labelled
-// "Friends only" but actually hid coordinates from everyone including friends;
-// it is now Approximate, which is what people assumed it did all along.
-const LOCATION_MODES: {
-  key: LocationSharing;
-  Icon: IconComponent;
-  label: string;
-  sub: string;
-}[] = [
-  { key: 'live',        Icon: IconEye,    label: 'Live',        sub: 'Exact position' },
-  { key: 'approximate', Icon: IconGhost,  label: 'Approximate', sub: 'Within ~500m' },
-  { key: 'paused',      Icon: IconEyeOff, label: 'Paused',      sub: 'Off the map' },
-];
+// ─── Location visibility ──────────────────────────────────────────────────────
+// The status readout, the precision choice and the check in / check out button
+// all live in components/LocationVisibilityCard, shared with Privacy & safety.
+// Two screens carrying their own copy of the most consequential wording in the
+// app is how they end up describing it differently.
 
 // ─── SettingsRow ──────────────────────────────────────────────────────────────
 /**
@@ -167,17 +160,22 @@ function PrefSwitch({
 // calls that change it; these only lay it out, which is what keeps the screen
 // readable as a list of sections rather than 350 lines of nested JSX.
 
-function LocationSharingSection({ settings, failed, onRetry, onSelect }: {
+function LocationSharingSection({
+  settings, failed, saving, onRetry, onCheckIn, onCheckOut, onPrecision,
+}: {
   settings: ReturnType<typeof usePrivacySettings>['settings'];
   failed: boolean;
+  saving: boolean;
   onRetry: () => void;
-  onSelect: (mode: LocationSharing) => void;
+  onCheckIn: (mode: SharingPrecision) => void;
+  onCheckOut: () => void;
+  onPrecision: (mode: SharingPrecision) => void;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>LOCATION SHARING</Text>
+      <Text style={styles.sectionLabel}>LOCATION VISIBILITY</Text>
       {!settings ? (
         <View style={styles.loadingWrap}>
           {failed ? (
@@ -192,28 +190,13 @@ function LocationSharingSection({ settings, failed, onRetry, onSelect }: {
         </View>
       ) : (
         <>
-          <View style={styles.modeRow}>
-            {LOCATION_MODES.map((mode) => {
-              const selected = settings.location_sharing === mode.key;
-              return (
-                <Pressable
-                  key={mode.key}
-                  onPress={() => onSelect(mode.key)}
-                  style={({ pressed }) => [
-                    styles.modeCard,
-                    selected && styles.modeCardSelected,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <mode.Icon size={22} color={selected ? colors.teal : colors.t3} />
-                  <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
-                    {mode.label}
-                  </Text>
-                  <Text style={styles.modeSub}>{mode.sub}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <LocationVisibilityCard
+            settings={settings}
+            saving={saving}
+            onCheckIn={onCheckIn}
+            onCheckOut={onCheckOut}
+            onPrecision={onPrecision}
+          />
           {settings.is_private && (
             <Text style={styles.modeNote}>
               Your account is private — this only controls where you appear on the map.
@@ -645,13 +628,21 @@ export default function SettingsScreen() {
     }, []),
   );
 
-  async function selectLocationSharing(mode: LocationSharing) {
-    if (mode === settings?.location_sharing || saving) return;
+  // The precision asked for but not yet agreed to. Checking *in* publishes your
+  // position, so it goes through the consent sheet first; checking out applies
+  // at once, because a confirmation on the way out would stand between a user
+  // and hiding.
+  const [pendingMode, setPendingMode] = useState<SharingPrecision | null>(null);
+
+  async function applyLocationSharing(mode: LocationSharing) {
     setSaving(true);
     await runBusy(async () => {
       await updatePrivacy({ location_sharing: mode });
-      // Pausing must stop OS tracking now, not at the next app launch.
-      await syncBackgroundLocationSharing();
+      // Pausing must stop OS tracking now, not at the next app launch — and
+      // resuming must start it, or the position would go stale the moment the
+      // app was backgrounded.
+      await syncBackgroundLocation();
+      setPendingMode(null);
     }, () => setSaving(false))
       .catch(() => Alert.alert('Could not update', 'Your previous setting is still in effect.'));
   }
@@ -743,7 +734,17 @@ export default function SettingsScreen() {
             setPrivacyFailed(false);
             refreshPrivacy().catch(() => setPrivacyFailed(true));
           }}
-          onSelect={selectLocationSharing}
+          saving={saving}
+          onCheckIn={setPendingMode}
+          onCheckOut={() => applyLocationSharing('paused')}
+          onPrecision={applyLocationSharing}
+        />
+
+        <LocationSharingConsent
+          mode={pendingMode}
+          busy={saving}
+          onCancel={() => setPendingMode(null)}
+          onConfirm={applyLocationSharing}
         />
 
         <ZoneSection
@@ -820,36 +821,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
   loadingWrap: { paddingVertical: 24, alignItems: 'center' },
 
-  // Visibility mode cards (3-up row)
-  modeRow: { flexDirection: 'row', gap: 8 },
-  modeCard: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    borderRadius: radius.m,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  modeCardSelected: {
-    backgroundColor: colors.tealTint,
-    borderColor: colors.tealLine,
-  },
-  modeLabel: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.t1,
-  },
-  modeLabelSelected: { color: colors.teal },
-  modeSub: {
-    fontFamily: fonts.body,
-    fontSize: 10,
-    color: colors.t3,
-    textAlign: 'center',
-  },
+  // Notes under the location card, and the retry line that replaces it while
+  // the setting is still loading.
   modeNote: {
     fontFamily: fonts.body,
     fontSize: 12,

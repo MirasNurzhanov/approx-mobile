@@ -43,7 +43,12 @@ export function AuraLoader() {
   );
 
   useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
+    // Every loop below is a single Animated composite — stagger included, via
+    // `Animated.delay` as its first step — so there is no raw JS timer for
+    // this effect to leak. `.stop()` on each composite is the only cleanup
+    // that was ever needed, whether the running step is the delay or the
+    // loop it leads into.
+    const runs: Animated.CompositeAnimation[] = [];
 
     // ── Core pulse ────────────────────────────────────────────────────────────
     const coreLoop = Animated.loop(
@@ -63,10 +68,12 @@ export function AuraLoader() {
       ]),
     );
     coreLoop.start();
+    runs.push(coreLoop);
 
     // ── Particles ─────────────────────────────────────────────────────────────
     particleAnims.forEach(({ value: anim }, i) => {
-      const t = setTimeout(() => {
+      const run = Animated.sequence([
+        Animated.delay((i / N_PARTICLES) * 1300),
         Animated.loop(
           Animated.sequence([
             Animated.timing(anim, {
@@ -82,14 +89,16 @@ export function AuraLoader() {
               useNativeDriver: true,
             }),
           ]),
-        ).start();
-      }, (i / N_PARTICLES) * 1300);
-      timers.push(t);
+        ),
+      ]);
+      run.start();
+      runs.push(run);
     });
 
     // ── Wave rings ────────────────────────────────────────────────────────────
     ringAnims.forEach(({ scale, opacity }, i) => {
-      const t = setTimeout(() => {
+      const run = Animated.sequence([
+        Animated.delay((i / 3) * 1700),
         Animated.loop(
           Animated.sequence([
             Animated.parallel([
@@ -111,17 +120,14 @@ export function AuraLoader() {
               Animated.timing(opacity, { toValue: 0.55, duration: 0, useNativeDriver: true }),
             ]),
           ]),
-        ).start();
-      }, (i / 3) * 1700);
-      timers.push(t);
+        ),
+      ]);
+      run.start();
+      runs.push(run);
     });
 
     return () => {
-      // Every stagger timer above is collected in `timers`, so this releases
-      // all of them. Spelled as a call rather than `forEach(clearTimeout)` so
-      // it is unambiguous that each id is cleared.
-      for (const t of timers) clearTimeout(t);
-      coreLoop.stop();
+      runs.forEach((run) => run.stop());
       coreScale.stopAnimation();
       particleAnims.forEach(({ value }) => value.stopAnimation());
       ringAnims.forEach(({ scale, opacity }) => {

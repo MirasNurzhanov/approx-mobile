@@ -38,6 +38,19 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     const location = data?.locations?.at(-1);
     if (!location) return;
 
+    // Paused means there is nothing this task can usefully do, and the server
+    // would refuse the write anyway. Checked here as well as in
+    // `startBackgroundLocationUpdates` because the two answer different
+    // questions: that one stops the OS task at the moment the setting changes,
+    // this one covers a task the OS kept alive across an app update or a
+    // reinstall — expo-task-manager restores registrations, so a task can
+    // outlive the choice that started it.
+    if ((await getCachedLocationSharing()) === 'paused') {
+      console.log('[BG Location] sharing paused, nothing sent');
+      await stopBackgroundLocationUpdates().catch(() => {});
+      return;
+    }
+
     try {
       // Honours the Location sharing setting: paused sends nothing at all,
       // approximate coarsens before transmitting.
@@ -136,9 +149,13 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     return;
   }
 
-  // "Pause location sharing entirely" should stop the phone tracking us at
-  // all, not just stop the uploads. The per-update check in the task is the
-  // correctness guarantee; this is the one that saves the battery.
+  // Paused should stop the phone tracking us at all, not just stop the
+  // uploads: background tracking exists to keep a *published* position
+  // current, and a background-location indicator burning on the status bar of
+  // someone invisible to everyone is the app claiming a need it does not have.
+  // The per-update check in the task is the correctness guarantee; this is the
+  // one that saves the battery. Reached from both mode buttons through
+  // `syncBackgroundLocation`, so it starts on resume as well as stopping.
   if ((await getCachedLocationSharing()) === 'paused') {
     console.log('[BG Location] sharing paused, not starting');
     await stopBackgroundLocationUpdates();
@@ -164,21 +181,23 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'Aura',
-      notificationBody: 'Updating your location to find nearby people',
+      notificationBody: 'You are sharing your location — keeping your place on the map up to date',
       notificationColor: '#00b4a6',
     },
   });
   console.log('[BG Location] started');
 }
 
-/** Start or stop OS-level tracking to match the current sharing mode. Call
- * after changing Location sharing so pausing takes effect immediately rather
- * than at the next app launch. */
-export async function syncBackgroundLocationSharing(): Promise<void> {
-  if ((await getCachedLocationSharing()) === 'paused') {
-    await stopBackgroundLocationUpdates();
-    return;
-  }
+/**
+ * Start or stop OS-level tracking to match the state the app is actually in.
+ *
+ * Call after anything that changes either half of the answer — checking in,
+ * checking out, or changing Location sharing — so it takes effect at that
+ * moment rather than at the next app launch. `startBackgroundLocationUpdates`
+ * owns the conditions; this exists so callers do not have to know what they
+ * are, and so "stop" is reachable without them either.
+ */
+export async function syncBackgroundLocation(): Promise<void> {
   await startBackgroundLocationUpdates();
 }
 

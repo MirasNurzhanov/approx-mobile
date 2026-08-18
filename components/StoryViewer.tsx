@@ -43,7 +43,7 @@ import {
   unsaveStories,
   useStoryArchive,
   type ReactionType,
-  type Story,
+  type FeedStory,
 } from '@/services/stories';
 import { encodeStoryReply } from '@/services/storyReply';
 
@@ -95,7 +95,10 @@ function ProgressBar({ active, past, progress }: {
 }
 
 export interface StoryViewerProps {
-  stories: Story[];
+  // `FeedStory`, not `Story`: this viewer is opened from the chat rings and
+  // the archive as well as from the map, and a story posted while location
+  // sharing was paused has no coordinate to require.
+  stories: FeedStory[];
   onClose: () => void;
   /** Omit to show reaction counts read-only (e.g. in the archive, where the
    * within-500m rule would reject a new reaction anyway). */

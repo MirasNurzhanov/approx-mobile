@@ -57,6 +57,29 @@ const ACCOUNT_SCOPED_KEYS = [
  * Sign-out must never appear to hang because the network is down. */
 const REVOKE_TIMEOUT_MS = 4000;
 
+/**
+ * Take the departing account off the map. Best-effort; never throws.
+ *
+ * See the call site for why sign-out implies this at all. Pausing also
+ * clears the stored position server-side, so this leaves nothing behind for
+ * the account to be found by either.
+ */
+async function pauseLocationSharing(accessToken: string | null): Promise<void> {
+  if (!accessToken) return;
+  try {
+    await axios.patch(
+      `${BASE_URL}/api/users/privacy/`,
+      { location_sharing: 'paused' },
+      {
+        timeout: REVOKE_TIMEOUT_MS,
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+  } catch {
+    // Swallowed on purpose. See above.
+  }
+}
+
 /** True when the session is settled and nothing needs retrying later. */
 async function revokeRefreshToken(refresh: string, accessToken: string | null): Promise<boolean> {
   try {
@@ -102,6 +125,21 @@ export async function performSignOut(): Promise<void> {
     AsyncStorage.getItem('access_token').catch(() => null),
     AsyncStorage.getItem('refresh_token').catch(() => null),
   ]);
+
+  // Off the map, before the credentials that could do it are thrown away.
+  //
+  // Signing out is not the same act as choosing Paused and normally should not
+  // imply it. It does here because sharing has no expiry: left alone, somebody
+  // who signed out would stay on other people's maps indefinitely, pinned to
+  // wherever they last were, with no app running to move them and no screen
+  // left to tell them about it.
+  //
+  // Bare axios with the token passed in, not the `api` instance, and for the
+  // same reason `revokeRefreshToken` below does it: `beginSessionEnd()` above
+  // has already closed that instance, so a request through it would never
+  // leave the device. Best-effort — it never throws, because sign-out has to
+  // work offline, and the setting is still there to change at next sign-in.
+  await pauseLocationSharing(accessToken);
 
   // Server-side revocation, plus push-token unregistration, which the logout
   // endpoint does unconditionally so a signed-out device stops being

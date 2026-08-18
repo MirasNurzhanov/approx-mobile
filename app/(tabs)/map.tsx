@@ -39,6 +39,7 @@ import {
     IconCalendar,
     IconCamera,
     IconClose,
+    IconEyeOff,
     IconHi,
     IconImage,
     IconList,
@@ -76,6 +77,7 @@ import { runBusy } from '@/services/busy';
 import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
+import { fetchMapNearby, isLocationNotAvailable } from '@/services/discovery';
 import { atSharingPrecision, reportLocation, type Coordinates } from '@/services/location';
 import {
   bindForegroundRefresh,
@@ -105,6 +107,7 @@ import {
 } from '@/services/zoneArea';
 import {
     normalizeStories,
+    placedStories,
     recordOwnStory,
     useStoryArchive,
     type ReactionType,
@@ -745,10 +748,12 @@ function AvatarMarker({
  * which nothing else on this map has, in the same purple as the owner's own
  * zone circle.
  */
-function SelfMarker({ coordinate, uri, username }: {
+function SelfMarker({ coordinate, uri, username, hidden = false }: {
   coordinate: { latitude: number; longitude: number };
   uri?: string;
   username: string;
+  /** True while sharing is Paused — nobody else has this marker on their map. */
+  hidden?: boolean;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -778,9 +783,18 @@ function SelfMarker({ coordinate, uri, username }: {
   }, [uri, imageReady]);
 
   return (
-    <Marker coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} zIndex={Z_SELF} tracksViewChanges={!imageReady}>
-      <View style={styles.selfHalo}>
-        <View style={styles.selfCore}>
+    // `hidden` joins `imageReady` in the re-raster key: react-native-maps caches
+    // this marker as a bitmap, so a style change that is not announced here
+    // leaves the old frame on screen and the halo never changes colour.
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={Z_SELF}
+      tracksViewChanges={!imageReady}
+      key={hidden ? 'self-hidden' : 'self-visible'}
+    >
+      <View style={[styles.selfHalo, hidden && styles.selfHaloHidden]}>
+        <View style={[styles.selfCore, hidden && styles.selfCoreHidden]}>
           {uri && !imageFailed ? (
             <Image
               source={{ uri }}
@@ -1164,11 +1178,13 @@ function TopBar({
 // ─── Create Story Modal ───────────────────────────────────────────────────────
 interface CreateStoryModalProps {
   visible: boolean;
+  /** True while location sharing is paused — the story posts, without a pin. */
+  locationless?: boolean;
   onClose: () => void;
   onPost: (text: string, photoUri: string | null) => Promise<void>;
 }
 
-function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
+function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStoryModalProps) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
@@ -1208,7 +1224,11 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
       setPhotoUri(null);
       onClose();
     }, () => setPosting(false))
-      .catch(() => Alert.alert('Failed to post', 'Please try again.'));
+      // Nothing here about location any more. Posting used to be refused while
+      // sharing was paused and this is where that refusal was explained; the
+      // story now posts either way, without a pin, and the line above the
+      // Post button says so before it happens rather than after.
+      .catch(() => { Alert.alert('Failed to post', 'Please try again.'); });
   }
 
   return (
@@ -1241,6 +1261,17 @@ function CreateStoryModal({ visible, onClose, onPost }: CreateStoryModalProps) {
             autoFocus
           />
           <Text style={styles.charCount}>{text.length}/280</Text>
+          {locationless ? (
+            // Stated once, quietly, and only when it applies. Not a warning:
+            // nothing is going wrong, and the story is about to reach exactly
+            // the people it was always going to reach.
+            <View style={styles.storyNoteRow}>
+              <IconEyeOff size={13} color={colors.t3} />
+              <Text style={styles.storyNote}>
+                Location sharing is off — friends will see this story, the map won&apos;t.
+              </Text>
+            </View>
+          ) : null}
           {photoUri ? (
             <View style={styles.photoPreviewContainer}>
               <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" />
@@ -1720,6 +1751,10 @@ export default function MapScreen() {
     ? { stories: openStories.map((s) => stories.find((f) => f.id === s.id) ?? s) }
     : null;
   const [createStoryCoord, setCreateStoryCoord] = useState<{ latitude: number; longitude: number } | null>(null);
+  // Separate from the coordinate above, which is now allowed to be null: a
+  // story does not need a position, so "is the composer open" and "where will
+  // the pin go, if there is one" are two questions.
+  const [composerOpen, setComposerOpen] = useState(false);
   const [clubMeetups, setClubMeetups]   = useState<ClubMeetup[]>([]);
   const [selectedMeetup, setSelectedMeetup] = useState<ClubMeetup | null>(null);
 
@@ -2074,6 +2109,15 @@ export default function MapScreen() {
     () => Array.from({ length: badgeSlots }, (_, i) => drawableBadges[i] ?? null),
     [drawableBadges, badgeSlots],
   );
+  // A slot's identity, not its content: slot 3 is always "badge-slot-3" for
+  // the life of the screen, whichever cluster (or none) currently occupies
+  // it. The pool only grows, so this never reassigns an id already handed
+  // out — the property `key` actually needs, which the slot's own array
+  // position happens to also satisfy but does not make legible as one.
+  const badgeSlotIds = useMemo(
+    () => Array.from({ length: badgeSlots }, (_, i) => `badge-slot-${i}`),
+    [badgeSlots],
+  );
 
   /** Leader lines: the dashes from a moved marker back to where its owner
    *  really is, and from a nudged badge back to the pile it counts. */
@@ -2093,6 +2137,10 @@ export default function MapScreen() {
     () => Array.from({ length: leaderSlots }, (_, i) => leaderLines[i] ?? null),
     [leaderLines, leaderSlots],
   );
+  const leaderSlotIds = useMemo(
+    () => Array.from({ length: leaderSlots }, (_, i) => `leader-slot-${i}`),
+    [leaderSlots],
+  );
 
   /** The same slot pool for the chips that label music zones.
    *
@@ -2110,6 +2158,10 @@ export default function MapScreen() {
   const musicBadges = useMemo(
     () => Array.from({ length: musicBadgeSlots }, (_, i) => drawableMusicBadges[i] ?? null),
     [drawableMusicBadges, musicBadgeSlots],
+  );
+  const musicBadgeSlotIds = useMemo(
+    () => Array.from({ length: musicBadgeSlots }, (_, i) => `music-badge-slot-${i}`),
+    [musicBadgeSlots],
   );
 
   /** Marker position for someone, falling back to their true point before the
@@ -2146,24 +2198,52 @@ export default function MapScreen() {
     hiToastTimer.current = setTimeout(() => setHiToast(false), 1500);
   }
 
+  /** Sharing is on and the server has no position for us yet. */
+  const [awaitingFix, setAwaitingFix] = useState(false);
+
   const fetchMapData = useCallback(async () => {
     try {
-      const r = await api.get<MapNearbyResponse>('/api/map/nearby/');
-      const { users, stories, meetups } = r.data;
+      // Two anchors behind one call. Somebody sharing their location is
+      // answered from the position the server already holds for them; somebody
+      // Paused has no stored position at all, so their device's coordinate
+      // rides along with the request, answers it, and is discarded. See
+      // services/discovery.ts — the map does not need to know which it got.
+      const r = await fetchMapNearby<MapNearbyResponse>(coordsRef.current);
+      // Null means Paused with no fix yet. Nothing to draw and nothing to
+      // clear: the previous frame is still the best answer we have.
+      if (!r) return;
+      const { users, stories, meetups } = r;
       // Stories and meetups are ModelSerializer output, so their coordinates
       // arrive as strings and have to be coerced before they reach a Marker —
       // see services/coords.ts. `users` is hand-assembled server-side and comes
       // through numeric today; it goes through the same gate anyway so one
       // serializer changing shape can't put the redbox back.
       setNearby(withNumericCoordsList(users));
-      const placedStories = normalizeStories(stories);
-      setStories(placedStories);
-      placedStories.forEach(s => { if (s.image) Image.prefetch(s.image); });
+      // `placedStories`, not the plain normaliser: this is the map, and a
+      // story with no coordinate is not a thing it can draw. Those still exist
+      // and still reach their friends — they arrive through the Chats rings,
+      // which is the surface that does not need a position. See
+      // services/stories.ts.
+      const drawable = placedStories(stories);
+      setStories(drawable);
+      drawable.forEach(s => { if (s.image) Image.prefetch(s.image); });
       const now = Date.now();
       setClubMeetups(
         withNumericCoordsList(meetups).filter((e) => new Date(e.expires_at).getTime() > now),
       );
-    } catch {}
+      setAwaitingFix(false);
+    } catch (e) {
+      // Sharing is on but no position has reached the server, and we had no
+      // fix to answer with either — so `fetchMapNearby` could not fall back to
+      // the private query. Say we are still finding it rather than leaving a
+      // map that reads as "nobody is here".
+      //
+      // No retry is started from here. The tick that called this runs again in
+      // POLL_MS and reports a position alongside the next attempt, which is
+      // the existing resume path and is bounded by construction — a retry
+      // scheduled here would be a second loop racing the first.
+      if (isLocationNotAvailable(e)) setAwaitingFix(true);
+    }
   }, []);
 
   function openStoryViewer(authorStories: Story[]) {
@@ -2194,26 +2274,36 @@ export default function MapScreen() {
   }
 
   async function createStory(text: string, photoUri: string | null) {
+    // A position if we have one, and no position is fine. Posting a story does
+    // not require being on the map — the server drops the coordinate anyway
+    // while sharing is paused, and refusing here would only turn that into a
+    // failure the user has to decode.
     const c = createStoryCoord ?? coordsRef.current;
-    if (!c) throw new Error('No location');
-    const lat = parseFloat(c.latitude.toFixed(6));
-    const lng = parseFloat(c.longitude.toFixed(6));
+    const position = c
+      ? {
+          latitude: parseFloat(c.latitude.toFixed(6)),
+          longitude: parseFloat(c.longitude.toFixed(6)),
+        }
+      : {};
     try {
       // The photo goes straight to Cloudinary; Django only ever sees the URL.
       // One hop instead of two, and no Railway worker held for the transfer.
       const imageUrl = photoUri ? await uploadImageToCloudinary(photoUri) : null;
       const response = await api.post('/api/stories/', {
         content: text,
-        latitude: lat,
-        longitude: lng,
+        ...position,
         ...(imageUrl ? { image_url: imageUrl } : {}),
       });
       // The POST echoes the story back through the same serializer as the map
       // poll, so its coordinates need the same coercion — this is the one path
       // that puts a marker on screen without going through fetchMapData first.
       const [newStory] = normalizeStories([response.data]);
-      if (!newStory) throw new Error('Story saved without a usable position');
-      setStories(prev => [...prev, newStory]);
+      if (!newStory) throw new Error('Story saved but came back unreadable');
+      // Only on the map if it came back with somewhere to be. A story posted
+      // while paused is saved, is in the archive, and reaches friends through
+      // Chats — it simply has no pin, and the missing marker is the feature.
+      const [drawable] = placedStories([newStory]);
+      if (drawable) setStories(prev => [...prev, drawable]);
       recordOwnStory(newStory);
       setTimeout(() => fetchMapData(), 500);
     } catch (error: any) {
@@ -2233,10 +2323,13 @@ export default function MapScreen() {
       ));
 
     api.get<{ username: string; profile_picture?: string }>('/api/users/profile/')
-      .then((r) => {
-        console.log('[Map] /users/profile/ response:', r.data.username, r.data.profile_picture);
-        setSelfProfile({ username: r.data.username, profile_picture: r.data.profile_picture });
-      })
+      .then((r) => setSelfProfile({
+        username: r.data.username,
+        profile_picture: r.data.profile_picture,
+      }))
+      // The failure is worth a line; the success is not. This logged the
+      // username and the photo URL on every focus, which put a signed-in
+      // person's identity into any log anyone happened to be capturing.
       .catch((e: any) => console.log(
         '[Map] /users/profile/ error:', e?.response?.status ?? e?.code ?? e?.message,
       ));
@@ -2368,38 +2461,37 @@ export default function MapScreen() {
     if (currentUserIdRef.current === null) loadSelf();
 
     await Promise.allSettled([
-      // Honours the Location sharing setting; sends nothing when paused.
-      // Speed rides along on the same request — the server buckets it into a
-      // coarse class and never stores the figure itself.
+      // Honours the Location sharing setting; sends nothing when paused, and
+      // the server would refuse it anyway. Speed rides along on the same
+      // request — the server buckets it into a coarse class and never stores
+      // the figure itself.
       reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current),
+      // Independent of the line above, which is the whole point: browsing does
+      // not depend on publishing, and a paused user reaches the map through
+      // the private query instead.
       fetchMapData(),
     ]);
   }, [fetchMapData, loadSelf]);
 
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Mirrors AppState into render-visible state, so the polling effect below
+  // can simply depend on it instead of an interval being started/stopped
+  // from inside this subscription's own callback.
+  const [appActive, setAppActive] = useState(() => AppState.currentState === 'active');
 
-  // Start the tick when coords first arrive; stop when the component unmounts.
   useEffect(() => {
-    if (!coords) return;
-    tick();
-    tickRef.current = setInterval(tick, POLL_MS);
-    return () => {
-      if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
-    };
-  }, [!!coords]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Pause the tick when the app goes to the background and resume on return.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') {
-        if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
-      } else if (coordsRef.current && !tickRef.current) {
-        tick();
-        tickRef.current = setInterval(tick, POLL_MS);
-      }
-    });
+    const sub = AppState.addEventListener('change', (next) => setAppActive(next === 'active'));
     return () => sub.remove();
-  }, [tick]);
+  }, []);
+
+  // Poll on an interval while there are coords to report and the app is in
+  // the foreground; torn down and restarted whenever either condition flips,
+  // which is what pauses the tick in the background and resumes it on return.
+  useEffect(() => {
+    if (!coords || !appActive) return;
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => clearInterval(id);
+  }, [!!coords, appActive, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Register tick as the global refresh so other screens can trigger it
   useEffect(() => {
@@ -2607,6 +2699,15 @@ export default function MapScreen() {
   // button clears whatever height the arc reaches across its own footprint.
   const locateBottom = bottomInset + navArcClearance(LOCATE_INSET, LOCATE_SIZE) + 12;
 
+  // Whether the map's own controls are reachable at all. A sheet or a
+  // full-screen viewer covers them with a backdrop, so anything left drawn
+  // underneath is visible-but-dead rather than merely hidden.
+  const chromeVisible =
+    mapVisible && !selectedUser && !selectedMeetup && !storyViewer && !composerOpen;
+
+  // The strip directly under the top bar, where the map's notices sit.
+  const overlayTop = topInset + 52 + (awaitingFix ? 46 : 0);
+
   const region: Region | undefined = displayCoords
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
@@ -2695,8 +2796,12 @@ export default function MapScreen() {
             }, ZOOM_SETTLE_MS);
           }}
           onLongPress={() => {
-            if (!coords) return;
-            setCreateStoryCoord(coords);
+            // No `if (!coords) return` any more. Not having a fix - because
+            // sharing is paused, or the permission was never granted - is no
+            // longer a reason a story cannot be written; it only means the
+            // story will not be a pin.
+            setCreateStoryCoord(coords ?? null);
+            setComposerOpen(true);
             setLocationToast(true);
             if (locationToastTimer.current) clearTimeout(locationToastTimer.current);
             locationToastTimer.current = setTimeout(() => setLocationToast(false), 2000);
@@ -2783,7 +2888,7 @@ export default function MapScreen() {
               with its circle, and an unmounted Marker does not reliably go. */}
           {musicBadges.map((z, i) => (
             <MusicZoneBadge
-              key={`music-badge-slot-${i}`}
+              key={musicBadgeSlotIds[i]}
               center={z?.center ?? displayCoords}
               radius={z?.radius ?? 0}
               mine={z?.mine}
@@ -2823,7 +2928,7 @@ export default function MapScreen() {
               full transparency rather than unmounting — see PARKED_MARKERS. */}
           {leaders.map((line, i) => (
             <Polyline
-              key={`leader-slot-${i}`}
+              key={leaderSlotIds[i]}
               coordinates={line ?? [displayCoords, displayCoords]}
               strokeColor={line ? 'rgba(244,244,246,0.28)' : 'transparent'}
               strokeWidth={1}
@@ -2918,7 +3023,7 @@ export default function MapScreen() {
               wide and deaf to taps. See PARKED_MARKERS. */}
           {badges.map((cluster, i) => (
             <ClusterMarker
-              key={`cluster-slot-${i}`}
+              key={badgeSlotIds[i]}
               coordinate={cluster ? cluster.position : displayCoords}
               count={cluster ? cluster.count : 0}
               parked={!cluster}
@@ -2933,6 +3038,11 @@ export default function MapScreen() {
             coordinate={posFor(SELF_KEY, displayCoords)}
             uri={selfProfile?.profile_picture}
             username={selfProfile?.username ?? ''}
+            // Drawn muted while Paused, because the owner's own marker is the
+            // only thing on this screen that could be read as "this is what
+            // everyone else sees". While paused it is not — nobody sees it —
+            // and the map should say so where the question is being asked.
+            hidden={sharing === 'paused'}
           />
 
           {/* `isDrawable` as well as the numeric coercion at the boundary: the
@@ -2972,13 +3082,28 @@ export default function MapScreen() {
         onList={() => router.push('/nearby')}
       />
 
+      {/* Sharing is on, the first position has not landed, and the map is
+          therefore empty for a reason that has nothing to do with who is
+          around. Stated, because an unexplained empty map reads as a broken
+          one — and because the honest answer is "not yet", not "nobody". */}
+      {chromeVisible && awaitingFix ? (
+        <View
+          style={[styles.pendingChip, { top: topInset + 52 }]}
+          accessible
+          accessibilityRole="alert"
+        >
+          <ActivityIndicator size="small" color={colors.t2} />
+          <Text style={styles.pendingChipText}>Getting your location…</Text>
+        </View>
+      ) : null}
+
       {/* The one place the map admits it is drawing on a shifted basemap.
           Stated rather than silently corrected: everything here — your dot,
           everyone else's, the zone outline — is in true GPS coordinates and
           agrees with itself, but the tiles underneath are offset. */}
       {chinaOffsetNotice && mapVisible ? (
         <View
-          style={[styles.offsetNotice, { top: topInset + 52 }]}
+          style={[styles.offsetNotice, { top: overlayTop }]}
           accessible
           accessibilityRole="alert"
         >
@@ -3035,14 +3160,15 @@ export default function MapScreen() {
       })()}
 
       <CreateStoryModal
-        visible={createStoryCoord !== null}
-        onClose={() => setCreateStoryCoord(null)}
+        visible={composerOpen}
+        locationless={sharing === 'paused' || (!createStoryCoord && !coords)}
+        onClose={() => { setComposerOpen(false); setCreateStoryCoord(null); }}
         onPost={createStory}
       />
 
       {/* Hi sent toast */}
       {hiToast && (
-        <View style={[styles.hiToast, { top: topInset + 104 }]} pointerEvents="none">
+        <View style={[styles.hiToast, { top: overlayTop + 52 }]} pointerEvents="none">
           <IconHi size={16} color={colors.teal} />
           <Text style={styles.hiToastText}>Hi sent</Text>
         </View>
@@ -3050,9 +3176,13 @@ export default function MapScreen() {
 
       {/* Story location toast */}
       {locationToast && (
-        <View style={[styles.hiToast, { top: topInset + 104 }]} pointerEvents="none">
+        <View style={[styles.hiToast, { top: overlayTop + 52 }]} pointerEvents="none">
           <IconPin size={16} color={colors.teal} />
-          <Text style={styles.hiToastText}>Story will be posted at your current location</Text>
+          <Text style={styles.hiToastText}>
+            {sharing === 'paused' || !coords
+              ? 'Story will be shared with friends, without a map location'
+              : 'Story will be posted at your current location'}
+          </Text>
         </View>
       )}
 
@@ -3072,7 +3202,7 @@ export default function MapScreen() {
           Hidden while a sheet or full-screen overlay owns the screen: the user
           sheet reaches 400pt up with a backdrop over everything below it, so a
           button left there is both covered and unreachable. */}
-      {mapVisible && !selectedUser && !selectedMeetup && !storyViewer && createStoryCoord === null && (
+      {chromeVisible && (
         <LocateButton state={locateState} bottom={locateBottom} onPress={handleLocatePress} />
       )}
 
@@ -3348,6 +3478,32 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontWeight: '600',
     fontSize: 12,
     color: colors.bg,
+  },
+
+  //: Checked out. Grey rather than purple, and no lit halo — the marker still
+  //: has to be findable by its owner, so this dims it rather than hiding it.
+  selfHaloHidden: { backgroundColor: 'rgba(140,140,150,0.14)' },
+  selfCoreHidden: { borderColor: colors.t3 },
+
+  // ── "Getting your location" chip ──
+  pendingChip: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: radius.m,
+    backgroundColor: withAlpha(colors.bg, 0.92),
+    borderWidth: 1,
+    borderColor: colors.border,
+    zIndex: 99,
+  },
+  pendingChipText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.t2,
   },
 
   // ── Basemap offset notice (mainland China only) ──
@@ -3741,6 +3897,19 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontSize: 12,
     textAlign: 'right',
     marginBottom: 12,
+  },
+  storyNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  storyNote: {
+    flex: 1,
+    fontFamily: fonts.body,
+    color: colors.t3,
+    fontSize: 12,
+    lineHeight: 16,
   },
   photoPreviewContainer: {
     marginBottom: 12,

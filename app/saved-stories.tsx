@@ -31,7 +31,7 @@ import {
   refreshSaved,
   unsaveStories,
   useStoryArchive,
-  type Story,
+  type FeedStory,
 } from '@/services/stories';
 
 // The story archive behind Profile → "My stories". "Mine" is every story the
@@ -52,7 +52,7 @@ function fmtDate(iso: string): string {
 
 // ─── Story card ───────────────────────────────────────────────────────────────
 function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPress }: {
-  story: Story;
+  story: FeedStory;
   showAuthor: boolean;
   selectMode: boolean;
   selected: boolean;
@@ -263,7 +263,7 @@ export default function SavedStoriesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [viewerStory, setViewerStory] = useState<Story | null>(null);
+  const [viewerStory, setViewerStory] = useState<FeedStory | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   useEffect(() => {

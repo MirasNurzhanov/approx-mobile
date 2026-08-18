@@ -69,9 +69,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Aura keeps looking for nearby people and music zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
-          "locationAlwaysPermission": "Aura keeps looking for nearby people and music zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
-          "locationWhenInUsePermission": "Aura shows you people within about 500m who share your interests, and places you on the map so they can find you. You choose whether your position is exact or rounded to a ~500m area, and you can pause sharing at any time in Settings.",
+          "locationAlwaysAndWhenInUsePermission": "Only while you are sharing your location, Aura keeps your position current in the background so people nearby see where you are and you are told when someone is close. It stops the moment you choose Paused or close Aura. This is optional — sharing works while the app is open without it.",
+          "locationAlwaysPermission": "Only while you are sharing your location, Aura keeps your position current in the background so people nearby see where you are and you are told when someone is close. It stops the moment you choose Paused or close Aura. This is optional — sharing works while the app is open without it.",
+          "locationWhenInUsePermission": "Aura uses your location to show you people nearby who share your interests. Sharing starts Paused every time you open Aura: while it is Paused your location answers only your own searches and is never saved or shown to anyone. You are shown to other people only after you choose Live or Approximate yourself, on a screen explaining what that means, and it ends when you choose Paused or close Aura.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": false,
           "isAndroidForegroundServiceEnabled": false

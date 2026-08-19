@@ -122,7 +122,10 @@ export default function EditInterestsScreen() {
 
 
   async function handleSave() {
-    const toDeselect = interests.filter((i) => initialSelected.has(i.id)).map((i) => i.id);
+    const toDeselect: number[] = [];
+    for (const i of interests) {
+      if (initialSelected.has(i.id)) toDeselect.push(i.id);
+    }
     const toSelect = Array.from(selected);
 
     setSaving(true);

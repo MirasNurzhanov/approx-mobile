@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -221,10 +222,13 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
         {loading ? (
           <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
         ) : (
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {interests.map((interest) => (
+          <FlatList
+            data={interests}
+            keyExtractor={(interest) => String(interest.id)}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item: interest }) => (
               <Pressable
-                key={interest.id}
                 style={[styles.interestRow, selectedId === interest.id && styles.interestRowActive]}
                 onPress={() => onSelect(interest)}
               >
@@ -236,11 +240,11 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
                   <Ionicons name="checkmark" size={18} color={colors.teal} />
                 )}
               </Pressable>
-            ))}
-            {interests.length === 0 && (
-              <Text style={styles.interestEmpty}>Nothing matches “{query.trim()}”.</Text>
             )}
-          </ScrollView>
+            ListEmptyComponent={
+              <Text style={styles.interestEmpty}>Nothing matches “{query.trim()}”.</Text>
+            }
+          />
         )}
       </View>
     </Modal>

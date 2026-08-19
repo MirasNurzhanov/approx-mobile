@@ -88,6 +88,9 @@ export function SwiftsFeed() {
   const [muted, setMuted] = useState(true);
   const [height, setHeight] = useState(0);
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds its
+  // own `useEffect(load, [load])` below — an unstable identity would re-run
+  // the fetch every render instead of once on mount.
   const load = useCallback(() => {
     getSwifts()
       .then((data) => {

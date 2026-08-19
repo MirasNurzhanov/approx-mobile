@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -117,7 +117,7 @@ export function TrimSlider({
   startX.set(toX(startMs));
   endX.set(toX(endMs));
 
-  const emit = useCallback((xStart: number, xEnd: number, commit: boolean) => {
+  const emit = (xStart: number, xEnd: number, commit: boolean) => {
     const start = Math.round((xStart / travel) * safeDuration);
     const end = Math.round((xEnd / travel) * safeDuration);
     if (commit) {
@@ -128,7 +128,7 @@ export function TrimSlider({
     } else {
       onChange(start, end);
     }
-  }, [travel, safeDuration, onChange, onCommit, format]);
+  };
 
   /** Pixels the handles must stay apart to honour `minLengthMs`. */
   const minGap = (minLengthMs / safeDuration) * travel;

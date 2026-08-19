@@ -524,6 +524,9 @@ export default function ZoneScreen() {
   // moment it returns. The first focus is skipped — the load above is already
   // in flight for it, and two GETs on mount is one too many.
   const firstFocus = useRef(true);
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
+  // against `useFocusEffect` re-subscribing every render if this hook ever
+  // bails compilation, not a fix for anything broken today.
   useFocusEffect(useCallback(() => {
     if (firstFocus.current) {
       firstFocus.current = false;

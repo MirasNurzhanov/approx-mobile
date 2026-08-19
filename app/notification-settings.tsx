@@ -158,6 +158,9 @@ export default function NotificationSettingsScreen() {
 
   // Re-checked on focus, not once on mount: the banner offers a trip to system
   // settings, and coming back with the permission granted has to clear it.
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
+  // against `useFocusEffect` re-subscribing every render if this hook ever
+  // bails compilation, not a fix for anything broken today.
   useFocusEffect(
     useCallback(() => {
       let active = true;

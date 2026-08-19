@@ -27,7 +27,7 @@ export function InterestChipIcon({
   const { colors: c } = useTheme()
   if (icon) return <Text style={interestChipStyles.emoji}>{icon}</Text>
   const Icon = iconForInterest(name)
-  return <Icon size={16} color={color ?? c.t2} />
+  return Icon({ size: 16, color: color ?? c.t2 })
 }
 
 const interestChipStyles = StyleSheet.create({

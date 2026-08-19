@@ -871,7 +871,7 @@ function useClubChat(
       const t = setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
       return () => clearTimeout(t);
     }
-  }, [messages.length]);
+  }, [messages.length, loadingMore]);
 
   // ── Send text / image ─────────────────────────────────────────────────────
   function sendText() {
@@ -1074,6 +1074,9 @@ export default function ClubChatScreen() {
   } = chat;
 
   // ── Ownership — fetch on mount and re-check whenever screen is focused ────
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
+  // against `useFocusEffect` re-subscribing every render if this hook ever
+  // bails compilation, not a fix for anything broken today.
   const fetchRole = useCallback(async () => {
     try {
       const { data } = await clubsApi.get(clubId);

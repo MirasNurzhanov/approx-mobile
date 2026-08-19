@@ -51,11 +51,13 @@ export default function ConnectionsScreen() {
     }>('/api/friends/list/');
 
     const friendIds = new Set(data.friends.map((f) => f.id));
+    const connectionsOnly: Person[] = [];
+    for (const c of data.connections) {
+      if (!friendIds.has(c.id)) connectionsOnly.push({ ...c, tier: 'connection' as const });
+    }
     setPeople([
       ...data.friends.map((f) => ({ ...f, tier: 'friend' as const })),
-      ...data.connections
-        .filter((c) => !friendIds.has(c.id))
-        .map((c) => ({ ...c, tier: 'connection' as const })),
+      ...connectionsOnly,
     ]);
   }, []);
 

@@ -1,13 +1,28 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
 import { reportLocation } from './location';
 import { getCachedLocationSharing } from './privacy';
 
+// Same guard as services/socialAuth.ts and services/notifications.ts, for the
+// same reason: Expo Go's shell app has no way to declare the background modes
+// and entitlements a *third-party* app's `startLocationUpdatesAsync` needs, so
+// calling it there is a native call the binary cannot actually service —
+// exactly the shape of crash that leaves no JS error to catch.
+const isExpoGo = Constants.appOwnership === 'expo';
+
 const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
+const ZONE_NOTIFICATION_COOLDOWN_MS = 30 * 60 * 1000;
+
+interface LastZoneNotified {
+  username: string;
+  timestamp: number;
+}
 
 export const BACKGROUND_LOCATION_TASK = 'aura-background-location';
 
@@ -22,6 +37,19 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     }
     const location = data?.locations?.at(-1);
     if (!location) return;
+
+    // Paused means there is nothing this task can usefully do, and the server
+    // would refuse the write anyway. Checked here as well as in
+    // `startBackgroundLocationUpdates` because the two answer different
+    // questions: that one stops the OS task at the moment the setting changes,
+    // this one covers a task the OS kept alive across an app update or a
+    // reinstall — expo-task-manager restores registrations, so a task can
+    // outlive the choice that started it.
+    if ((await getCachedLocationSharing()) === 'paused') {
+      console.log('[BG Location] sharing paused, nothing sent');
+      await stopBackgroundLocationUpdates().catch(() => {});
+      return;
+    }
 
     try {
       // Honours the Location sharing setting: paused sends nothing at all,
@@ -45,45 +73,44 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     try {
       const { data: nearbyUsers } = await api.get<
         {
-          id: number; username: string; zone_active?: boolean; zone_radius?: number;
-          zone_mode?: 'radius' | 'region'; distance_km?: number;
+          id: number; username: string; distance_km?: number;
           zone_audio_url?: string | null;
-          music_zone_radius?: number; music_zone_separate?: boolean;
+          music_zone_radius?: number;
         }[]
       >('/api/proximity/nearby/');
 
       // "You entered a zone — tap to listen", so this has to agree with what is
-      // actually audible. Three rules, all mirroring _trigger_zone_music_alerts
+      // actually audible. Two rules, both mirroring _trigger_zone_music_alerts
       // on the server, because a push that fires on different terms to the
       // server's own alert is two features disagreeing about one event.
       const zoneUser = nearbyUsers.find((u) => {
         // 1. There must be something to listen to. Not `zone_active` — that
         //    switch removes the circle drawn around someone on the map, which
         //    is a different question. The server only sends `zone_audio_url`
-        //    to viewers allowed to hear it, so its presence already means both
-        //    "there is music" and "you may play it".
+        //    to viewers allowed to hear it, and withholds it entirely from
+        //    someone who has switched their music zone off, so its presence
+        //    already means all three of "there is music", "it is playing" and
+        //    "you may play it".
         if (!u.zone_audio_url) return false;
 
-        // 2. A region zone is a city border, not a listening range, and its
-        //    owner never chose it as one. Walking into a 500m circle is an
-        //    event; being in the same city as a friend is the standing state
-        //    of most friendships, and pushing on it would fire for every
-        //    friend who lives there. Giving the music its own range is exactly
-        //    how someone in region mode opts back in — that range is a circle.
-        if (u.zone_mode === 'region' && !u.music_zone_separate) return false;
-
-        // 3. Earshot, not the zone. `music_zone_radius` arrives already
-        //    resolved — the server sends `music_radius_m`, which is the
-        //    separate dial or the zone's own radius inherited — so this is the
-        //    distance the track really carries. Comparing against
-        //    `zone_radius` fired at the wrong distance in both directions for
-        //    anyone who had separated the two.
-        const earshot = u.music_zone_radius ?? u.zone_radius ?? 500;
-        return (u.distance_km ?? Infinity) * 1000 < earshot;
+        // 2. The music zone, not the map zone. `music_zone_radius` is always
+        //    the music zone's own number — it never inherits `zone_radius`,
+        //    and `zone_mode` does not come into it: a music zone is a circle
+        //    even for someone whose map zone is a city border. Comparing
+        //    against `zone_radius` fired at the wrong distance in both
+        //    directions.
+        const reach = u.music_zone_radius ?? 0;
+        return (u.distance_km ?? Infinity) * 1000 < reach;
       });
       if (zoneUser) {
-        const lastNotified = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
-        if (lastNotified !== zoneUser.username) {
+        const stored = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
+        const lastNotified: LastZoneNotified | null = stored ? JSON.parse(stored) : null;
+        const withinCooldown =
+          lastNotified != null &&
+          lastNotified.username === zoneUser.username &&
+          Date.now() - lastNotified.timestamp < ZONE_NOTIFICATION_COOLDOWN_MS;
+
+        if (!withinCooldown) {
           await Notifications.scheduleNotificationAsync({
             content: {
               title: '🎵 You entered a zone!',
@@ -91,7 +118,10 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
             },
             trigger: null,
           });
-          await AsyncStorage.setItem(LAST_ZONE_NOTIFIED_KEY, zoneUser.username);
+          await AsyncStorage.setItem(
+            LAST_ZONE_NOTIFIED_KEY,
+            JSON.stringify({ username: zoneUser.username, timestamp: Date.now() }),
+          );
         }
       } else {
         await AsyncStorage.removeItem(LAST_ZONE_NOTIFIED_KEY);
@@ -103,9 +133,29 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 );
 
 export async function startBackgroundLocationUpdates(): Promise<void> {
-  // "Pause location sharing entirely" should stop the phone tracking us at
-  // all, not just stop the uploads. The per-update check in the task is the
-  // correctness guarantee; this is the one that saves the battery.
+  if (isExpoGo) {
+    console.log('[BG Location] skipped — not supported in Expo Go');
+    return;
+  }
+
+  // Android has no ACCESS_BACKGROUND_LOCATION to grant, so the permission
+  // check below could only ever refuse. See SUPPORTS_BACKGROUND_LOCATION.
+  //
+  // Unregister rather than just returning: a build from before background
+  // location was disabled may have left this task registered, and
+  // expo-task-manager restores registrations across an app update.
+  if (Platform.OS === 'android') {
+    await stopBackgroundLocationUpdates();
+    return;
+  }
+
+  // Paused should stop the phone tracking us at all, not just stop the
+  // uploads: background tracking exists to keep a *published* position
+  // current, and a background-location indicator burning on the status bar of
+  // someone invisible to everyone is the app claiming a need it does not have.
+  // The per-update check in the task is the correctness guarantee; this is the
+  // one that saves the battery. Reached from both mode buttons through
+  // `syncBackgroundLocation`, so it starts on resume as well as stopping.
   if ((await getCachedLocationSharing()) === 'paused') {
     console.log('[BG Location] sharing paused, not starting');
     await stopBackgroundLocationUpdates();
@@ -131,21 +181,23 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: 'Aura',
-      notificationBody: 'Updating your location to find nearby people',
+      notificationBody: 'You are sharing your location — keeping your place on the map up to date',
       notificationColor: '#00b4a6',
     },
   });
   console.log('[BG Location] started');
 }
 
-/** Start or stop OS-level tracking to match the current sharing mode. Call
- * after changing Location sharing so pausing takes effect immediately rather
- * than at the next app launch. */
-export async function syncBackgroundLocationSharing(): Promise<void> {
-  if ((await getCachedLocationSharing()) === 'paused') {
-    await stopBackgroundLocationUpdates();
-    return;
-  }
+/**
+ * Start or stop OS-level tracking to match the state the app is actually in.
+ *
+ * Call after anything that changes either half of the answer — checking in,
+ * checking out, or changing Location sharing — so it takes effect at that
+ * moment rather than at the next app launch. `startBackgroundLocationUpdates`
+ * owns the conditions; this exists so callers do not have to know what they
+ * are, and so "stop" is reachable without them either.
+ */
+export async function syncBackgroundLocation(): Promise<void> {
   await startBackgroundLocationUpdates();
 }
 

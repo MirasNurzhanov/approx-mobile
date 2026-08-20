@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,7 +19,7 @@ import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { ZonePlayer } from '@/components/ZonePlayer';
-import { IconClose, IconInfo, IconLock, IconMusic, IconUpload } from '@/components/ui/icons';
+import { IconClose, IconInfo, IconLock, IconMusic, IconSound, IconUpload } from '@/components/ui/icons';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -42,11 +42,18 @@ import { RADIUS_MAX_M, RADIUS_MIN_M } from '@/services/zoneArea';
 // a way to change the track.
 //
 // The *zone's* radius is still not here — that dial lives on Zone Size, next to
-// the place picker it shares a decision with. What is here is how far the music
-// carries, which turns out to be a different question with a different answer:
-// people widen a zone to be found and narrow their music so only the next table
-// hears it. One number could not serve both, so there are two, and the second
-// one stays invisible until someone switches it on.
+// the place picker it shares a decision with. What is here is the music zone:
+// its own switch and its own radius. People widen a zone to be found and narrow
+// their music so only the next table hears it; one number could not serve both,
+// so there are two circles and this screen owns the second one.
+//
+// There is one switch for it, not two. It used to be a mute called "Sound zone"
+// sitting above a second switch that chose whether the music borrowed the map
+// zone's radius instead of using its own — and a music zone that silently
+// followed the map zone was indistinguishable from not having one. Now the
+// switch means what it says: on draws a circle, off removes it from everyone's
+// map, and the track and the radius wait untouched underneath for it to come
+// back on.
 //
 // Two things can fill the one audio slot — an Apple Music track or an upload —
 // and the last one picked wins. A zone plays one thing.
@@ -62,18 +69,23 @@ interface ZoneState {
   zone_radius?: number;
   zone_audio?: string | null;
   zone_audio_url?: string | null;
-  /** Read only, and only to phrase the copy: a zone that covers a whole city
-   *  has no radius to quote, so "within 500 m" would be a lie there. */
+  /** Never read here, and listed only so the server's echo round-trips intact.
+   *  The music zone is always a circle of its own, so nothing on this screen
+   *  has to care whether the *map* zone is a radius or a city border. */
   effective_zone_mode?: 'radius' | 'region';
 
-  /** The music zone — how far the sound carries, which this screen *does* set.
-   *  While `music_zone_separate` is false it follows `zone_radius`.
-   *  `music_radius_m` is the server resolving that fallback; listed so it
-   *  round-trips, but the copy below derives it rather than waiting for it. */
-  music_zone_separate?: boolean;
+  /** The music zone's on/off, and the only one it has. Off means there is no
+   *  music zone: nobody hears the track, nobody is alerted, and no circle is
+   *  drawn on anyone's map — the owner's included. The track and the radius
+   *  stay exactly as they were. Absent means on: it is the server's default,
+   *  and a build that predates the field must not read a missing key as
+   *  silence. */
+  music_zone_active?: boolean;
+
+  /** How far the music carries, which this screen *does* set. Always the music
+   *  zone's own number — it never inherits `zone_radius`. */
   music_zone_radius?: number;
   music_zone_alerts?: boolean;
-  music_radius_m?: number;
 
   zone_apple_id?: string;
   zone_apple_title?: string;
@@ -90,19 +102,23 @@ interface ZoneState {
 
 /** Decorative level meter on the upload tile. Fixed shape: it stands for
  *  "audio goes here", it is not a reading of anything. */
-const WAVE = [7, 13, 22, 15, 28, 20, 34, 24, 16, 27, 11, 20, 31, 18, 9, 15, 24, 13, 7, 17];
+// Bar heights carry an id because several repeat, so the height alone cannot
+// identify a bar. Built once at module scope — the waveform is decorative and
+// fixed, so these ids are stable for the life of the app.
+const WAVE = [7, 13, 22, 15, 28, 20, 34, 24, 16, 27, 11, 20, 31, 18, 9, 15, 24, 13, 7, 17]
+  .map((h, i) => ({ id: `wave-${i}`, h }));
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 // One component per band of the screen. The screen owns the zone state and the
 // PATCHes; these only render it.
 
 /** The track itself, the loop window, and who can hear it. */
-function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, trimmed, audience, onEditLoop }: {
+function NowPlayingSection({ zone, audioUrl, title, musicRadius, silent, trimmed, audience, onEditLoop }: {
   zone: ZoneState;
   audioUrl: string | null;
   title: string | null;
-  earshot: number;
-  inheritsRegion: boolean;
+  musicRadius: number;
+  silent: boolean;
   trimmed: boolean;
   audience: Audience;
   onEditLoop: () => void;
@@ -122,10 +138,14 @@ function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, tri
           url={audioUrl}
           title={title ?? 'Zone audio'}
           artwork={zone.zone_apple_artwork}
+          // The player still works with the music zone off — this is your own
+          // track on your own screen, and the switch is about other people. The
+          // subtitle is the only thing that changes, because "loops for anyone
+          // within 200 m" would be describing something that is not happening.
           subtitle={
-            inheritsRegion
-              ? 'Loops for anyone inside your zone'
-              : `Loops for anyone within ${fmtRadius(earshot)}`
+            silent
+              ? 'Your music zone is off — nobody else can hear this'
+              : `Loops for anyone within ${fmtRadius(musicRadius)}`
           }
           startMs={zone.zone_track_start_ms ?? 0}
           endMs={zone.zone_track_end_ms ?? null}
@@ -135,8 +155,8 @@ function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, tri
         <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>
             Nothing is playing in your zone yet. Pick a song from Apple Music
-            or upload your own track below — anyone who walks into earshot
-            can then choose to play it.
+            or upload your own track below — anyone who walks into your music
+            zone can then choose to play it.
           </Text>
         </View>
       )}
@@ -186,23 +206,31 @@ function NowPlayingSection({ zone, audioUrl, title, earshot, inheritsRegion, tri
 }
 
 /**
- * How far the sound carries.
+ * Whether there is a music zone at all, and how far it reaches.
  *
  * A zone is a radar and a music zone is a speaker, and they were one number.
  * Widening your zone to be found by more people also handed all of them your
  * track; narrowing it so only the next table hears the music also took you off
- * everyone else's map. Two dials now, and the second one only exists once you
- * ask for it — while the switch is off earshot is still the zone, exactly as it
- * always was.
+ * everyone else's map. Two circles now, and this one is the speaker.
+ *
+ * One switch, after two false starts. `zone_active` in Settings removes the map
+ * circle and deliberately leaves the music playing, so it was never this. Then
+ * there were two here: a mute called "Sound zone", and "a separate zone for
+ * music" that chose whether the music borrowed `zone_radius` instead of using
+ * its own — which meant a music zone could be on and yet have no circle of its
+ * own to show for it. Off now means gone: no circle on your map, none on
+ * anyone else's, nothing audible. The track and the radius stay put, so
+ * switching back on restores exactly what was there.
  */
-function EarshotSection({ musicSeparate, musicRadius, earshot, inheritsRegion, musicAlerts, saving, onToggleSeparate, onRadiusChange, onRadiusCommit, onToggleAlerts }: {
-  musicSeparate: boolean;
+function MusicZoneSection({ musicActive, musicRadius, hasTrack, musicAlerts, saving, onToggleActive, onRadiusChange, onRadiusCommit, onToggleAlerts }: {
+  musicActive: boolean;
   musicRadius: number;
-  earshot: number;
-  inheritsRegion: boolean;
+  /** Whether anything is loaded. An empty zone is drawn for nobody, here or on
+   *  the map, so the copy must not promise a circle that is not there. */
+  hasTrack: boolean;
   musicAlerts: boolean;
   saving: boolean;
-  onToggleSeparate: (v: boolean) => void;
+  onToggleActive: (v: boolean) => void;
   onRadiusChange: (next: number) => void;
   onRadiusCommit: (next: number) => void;
   onToggleAlerts: (v: boolean) => void;
@@ -211,33 +239,37 @@ function EarshotSection({ musicSeparate, musicRadius, earshot, inheritsRegion, m
   const styles = makeStyles(colors);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>HOW FAR IT CARRIES</Text>
+      <Text style={styles.sectionLabel}>THE MUSIC ZONE</Text>
 
       <View style={styles.controlRow}>
-        <IconMusic size={18} color={colors.t2} />
+        <IconSound size={18} color={colors.t2} />
         <View style={styles.controlText}>
-          <Text style={styles.controlLabel}>A separate zone for music</Text>
+          <Text style={styles.controlLabel}>Music zone</Text>
           <Text style={styles.controlHint}>
-            {musicSeparate
-              ? `People hear you within ${fmtRadius(earshot)}, whatever size your zone is.`
-              : inheritsRegion
-                ? 'Off — the music reaches everyone inside the place your zone covers.'
-                : `Off — the music reaches as far as your zone does (${fmtRadius(earshot)}).`}
+            {musicActive
+              ? hasTrack
+                ? `On — friends within ${fmtRadius(musicRadius)} see it on the map and can play your track.`
+                : `On, and waiting for a track. Nothing is drawn on anyone's map until you pick one below.`
+              : 'Off — the circle is gone from the map and nobody hears your track. Your zone and the track stay as they are.'}
           </Text>
         </View>
         <Switch
-          value={musicSeparate}
-          onValueChange={onToggleSeparate}
+          value={musicActive}
+          onValueChange={onToggleActive}
           trackColor={{ false: colors.surface2, true: colors.teal }}
           thumbColor={colors.t1}
           ios_backgroundColor={colors.surface2}
         />
       </View>
 
-      {musicSeparate && (
+      {/* The dial is hidden rather than disabled while the zone is off. A
+          greyed-out dial still reads as a setting you are being denied; a
+          missing one reads as a question that does not apply yet, which is
+          what "how big is the circle that is not there" is. */}
+      {musicActive && (
         <View style={styles.dialCard}>
           <View style={styles.readoutRow}>
-            <Text style={styles.readoutLabel}>Earshot</Text>
+            <Text style={styles.readoutLabel}>Reaches</Text>
             <Text style={styles.readout}>{fmtRadius(musicRadius)}</Text>
           </View>
           <RadiusSlider
@@ -253,13 +285,16 @@ function EarshotSection({ musicSeparate, musicRadius, earshot, inheritsRegion, m
         </View>
       )}
 
+      {/* Outside the gate on purpose: this switch is both directions at once,
+          and being told about a friend's music is still worth having when you
+          have no music zone of your own. */}
       <View style={styles.controlRow}>
         <Ionicons name="notifications-outline" size={18} color={colors.t2} />
         <View style={styles.controlText}>
           <Text style={styles.controlLabel}>Tell me about music zones</Text>
           <Text style={styles.controlHint}>
             {musicAlerts
-              ? 'When a friend walks into earshot of your track — and when you walk into theirs.'
+              ? 'When a friend walks into your music zone — and when you walk into theirs.'
               : 'Off. Zones still work; nobody is told about them.'}
           </Text>
         </View>
@@ -420,11 +455,11 @@ function UploadSection({ isUpload, uploading, uploadPct, title, onPick, onRemove
           {/* Decorative while idle; while uploading the same bars fill left
               to right, so the tile becomes its own progress meter. */}
           <View style={styles.wave}>
-            {WAVE.map((h, i) => {
+            {WAVE.map(({ id, h }, i) => {
               const reached = uploading && (i / WAVE.length) * 100 <= (uploadPct ?? 0);
               return (
                 <View
-                  key={i}
+                  key={id}
                   style={[
                     styles.waveBar,
                     { height: h },
@@ -457,7 +492,7 @@ function UploadSection({ isUpload, uploading, uploadPct, title, onPick, onRemove
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
@@ -489,6 +524,9 @@ export default function ZoneScreen() {
   // moment it returns. The first focus is skipped — the load above is already
   // in flight for it, and two GETs on mount is one too many.
   const firstFocus = useRef(true);
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
+  // against `useFocusEffect` re-subscribing every render if this hook ever
+  // bails compilation, not a fix for anything broken today.
   useFocusEffect(useCallback(() => {
     if (firstFocus.current) {
       firstFocus.current = false;
@@ -507,16 +545,14 @@ export default function ZoneScreen() {
     ? (appleTitle ?? uploadName ?? trackTitle(audioUrl))
     : null;
 
-  const musicSeparate = zone.music_zone_separate ?? false;
+  /** Absent means on — see `music_zone_active` on ZoneState. */
+  const musicActive = zone.music_zone_active ?? true;
+  /** The zone is off *and* there is something it would otherwise be playing. A
+   *  switch with an empty slot under it is not worth mentioning anywhere:
+   *  nobody could hear you either way. */
+  const silent = !musicActive && Boolean(audioUrl);
   const musicRadius = zone.music_zone_radius ?? 200;
-  /** What earshot is right now — the separate dial, or the zone it inherits.
-   *  Derived rather than read from the server's `music_radius_m`, which is the
-   *  same formula one round trip behind while a switch is still saving. */
-  const earshot = musicSeparate ? musicRadius : (zone.zone_radius ?? 500);
   const musicAlerts = zone.music_zone_alerts ?? true;
-  /** True when earshot is a shape rather than a distance — a region zone that
-   *  the music is still following. Nothing here can quote a radius for it. */
-  const inheritsRegion = !musicSeparate && zone.effective_zone_mode === 'region';
   /** True once a window has been chosen — a null end is the whole track. */
   const trimmed = zone.zone_track_end_ms != null;
 
@@ -538,15 +574,15 @@ export default function ZoneScreen() {
     });
   }
 
-  function setMusicSeparate(separate: boolean) {
-    // The radius travels with the switch. Turning it on for the first time
-    // would otherwise save `separate: true` against whatever the server's
+  function setMusicActive(on: boolean) {
+    // The radius travels with the switch. Turning the zone on for the first
+    // time would otherwise save `active: true` against whatever the server's
     // default happens to be, and the dial below would render a number nobody
     // chose.
     patchZone(
-      separate ? { music_zone_separate: true, music_zone_radius: musicRadius }
-               : { music_zone_separate: false },
-      { music_zone_separate: separate },
+      on ? { music_zone_active: true, music_zone_radius: musicRadius }
+         : { music_zone_active: false },
+      { music_zone_active: on },
     );
   }
 
@@ -668,23 +704,22 @@ export default function ZoneScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Adding and removing the zone lives in Settings → Zone on the map,
-            and only there. This screen is the music.
+        {/* Adding and removing the zone on the map lives in Settings → Zone on
+            the map, and only there. This screen is the music, and the music
+            zone is its own circle with its own switch.
 
-            There is deliberately no "your zone is off, so nobody can hear this"
-            note any more, because it is no longer true: the map switch removes
-            the circle drawn around you and leaves the sound alone. What silences
-            a track is clearing it, right here. When earshot is inherited rather
-            than separate the zone's radius is still the distance it carries —
-            that is a number, not an on/off — so the line below says which
-            distance is in force instead. */}
-        {!active && !musicSeparate && audioUrl && (
+            The note says so, because the two are easy to conflate: the map
+            switch being off does not silence anything, and people who have
+            turned it off need telling that their music zone is still out there.
+            Suppressed when the music zone is off, where it would be flatly
+            wrong — that switch says what it did on its own row. */}
+        {!active && audioUrl && musicActive && (
           <View style={styles.offNote}>
             <IconInfo size={16} color={colors.t2} />
             <Text style={styles.offNoteText}>
-              Your zone isn’t shown on the map, but this still plays for anyone
-              within {fmtRadius(earshot)}. Give the music its own range below to
-              set that separately.
+              Your zone isn’t shown on the map, but your music zone is: this
+              plays for anyone within {fmtRadius(musicRadius)}. The switch below
+              is the one that removes it.
             </Text>
           </View>
         )}
@@ -693,21 +728,20 @@ export default function ZoneScreen() {
           zone={zone}
           audioUrl={audioUrl}
           title={title}
-          earshot={earshot}
-          inheritsRegion={inheritsRegion}
+          musicRadius={musicRadius}
+          silent={silent}
           trimmed={trimmed}
           audience={audience}
           onEditLoop={() => router.push('/zone-trim')}
         />
 
-        <EarshotSection
-          musicSeparate={musicSeparate}
+        <MusicZoneSection
+          musicActive={musicActive}
           musicRadius={musicRadius}
-          earshot={earshot}
-          inheritsRegion={inheritsRegion}
+          hasTrack={Boolean(audioUrl)}
           musicAlerts={musicAlerts}
           saving={saving}
-          onToggleSeparate={setMusicSeparate}
+          onToggleActive={setMusicActive}
           onRadiusChange={(next) => setZone((z) => ({ ...z, music_zone_radius: next }))}
           onRadiusCommit={commitMusicRadius}
           onToggleAlerts={setMusicAlerts}
@@ -841,7 +875,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.t3,
   },
 
-  // ── Earshot dial ──
+  // ── Music zone dial ──
   dialCard: {
     marginTop: 14,
     padding: 16,

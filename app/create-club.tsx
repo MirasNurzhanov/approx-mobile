@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -10,7 +11,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -56,7 +56,10 @@ function EmblemPicker({ emblemUri, onPick }: { emblemUri: string | null; onPick:
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
-    <TouchableOpacity style={styles.emblemWrap} onPress={onPick} activeOpacity={0.8}>
+    <Pressable
+      style={({ pressed }) => [styles.emblemWrap, pressed && { opacity: 0.8 }]}
+      onPress={onPick}
+    >
       {emblemUri ? (
         <Image source={{ uri: emblemUri }} style={styles.emblemImage} />
       ) : (
@@ -68,7 +71,7 @@ function EmblemPicker({ emblemUri, onPick }: { emblemUri: string | null; onPick:
       <View style={styles.emblemBadge}>
         <Ionicons name="camera" size={13} color={colors.bg} />
       </View>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -219,10 +222,13 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
         {loading ? (
           <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
         ) : (
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {interests.map((interest) => (
+          <FlatList
+            data={interests}
+            keyExtractor={(interest) => String(interest.id)}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item: interest }) => (
               <Pressable
-                key={interest.id}
                 style={[styles.interestRow, selectedId === interest.id && styles.interestRowActive]}
                 onPress={() => onSelect(interest)}
               >
@@ -234,11 +240,11 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
                   <Ionicons name="checkmark" size={18} color={colors.teal} />
                 )}
               </Pressable>
-            ))}
-            {interests.length === 0 && (
-              <Text style={styles.interestEmpty}>Nothing matches “{query.trim()}”.</Text>
             )}
-          </ScrollView>
+            ListEmptyComponent={
+              <Text style={styles.interestEmpty}>Nothing matches “{query.trim()}”.</Text>
+            }
+          />
         )}
       </View>
     </Modal>

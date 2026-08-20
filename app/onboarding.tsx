@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -50,15 +50,20 @@ const LIGHT = {
 } as const;
 
 export default function OnboardingScreen() {
-  const styles = useMemo(() => makeStyles(LIGHT), []);
+  const styles = makeStyles(LIGHT);
   const { bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const flatRef = useRef<FlatList>(null);
 
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const i = viewableItems[0]?.index;
-    if (i != null) setIndex(i);
-  }).current;
+  // FlatList rejects a changing `onViewableItemsChanged`, so this identity has
+  // to be created once. `useState` with an initialiser gives that guarantee
+  // without a ref that render would then have to read back.
+  const [onViewableItemsChanged] = useState(() => {
+    return ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const i = viewableItems[0]?.index;
+      if (i != null) setIndex(i);
+    };
+  });
 
   function goNext() {
     if (index < SLIDES.length - 1) {
@@ -97,8 +102,8 @@ export default function OnboardingScreen() {
       />
 
       <View style={styles.dots}>
-        {SLIDES.map((_, i) => (
-          <View key={i} style={[styles.dot, i === index && styles.dotActive]} />
+        {SLIDES.map((slide, i) => (
+          <View key={slide.id} style={[styles.dot, i === index && styles.dotActive]} />
         ))}
       </View>
 

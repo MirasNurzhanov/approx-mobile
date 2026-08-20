@@ -138,8 +138,15 @@ export default function PermissionsScreen() {
     }
   }
 
-  const paused = settings?.location_sharing === 'paused';
-  const approximate = settings?.location_sharing === 'approximate';
+  // `!== 'live' && !== 'approximate'` rather than `=== 'paused'`, so that a
+  // settings object we have not loaded yet — or one that failed to load —
+  // reads as hidden. The old form made `undefined` fall through to "you are on
+  // the map right now", which is the one direction this screen must never be
+  // wrong in: it would tell somebody they were visible when they were not, or
+  // worse, reassure them the opposite way round after a failed fetch.
+  const sharingKnown = settings?.location_sharing;
+  const paused = sharingKnown !== 'live' && sharingKnown !== 'approximate';
+  const approximate = sharingKnown === 'approximate';
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
@@ -163,6 +170,22 @@ export default function PermissionsScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* The distinction this screen is most likely to be misread on, said
+            first and unconditionally. Letting Aura read your location is not
+            the same as other people being able to see it — that takes choosing
+            Live or Approximate in Privacy & safety. It is not implied by
+            anything on this page, and none of these switches can turn it on. */}
+        <Card style={styles.noticeCard}>
+          <Text style={styles.noticeTitle}>
+            {paused ? 'Nobody can see your location' : 'You are on the map right now'}
+          </Text>
+          <Text style={styles.noticeBody}>
+            {paused
+              ? 'Location permission lets Aura show you who is nearby. You are only shown to other people once you choose Live or Approximate in Privacy & safety — never automatically, and never just because this permission is granted.'
+              : 'People nearby can see you, including with Aura in the background, until you choose Paused in Privacy & safety or close Aura.'}
+          </Text>
+        </Card>
+
         {/* An OS permission being granted is not the same as Aura using it.
             Someone who paused sharing should see that here, not conclude the
             permission is broken. */}

@@ -5,6 +5,8 @@ import Animated, {
   useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
+  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -15,12 +17,13 @@ import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
+import { NAV_ARC_R_OUT } from '@/components/navArc';
 import { IconSwift, type IconComponent } from '@/components/ui/icons';
 import { useScrollNav } from '@/context/ScrollNavContext';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { refreshAlertsCount, useAlertsCount } from '@/services/alerts';
 import { api } from '@/services/api';
-import { MAX_SCALE_FIXED, type as typography } from '@/constants/theme';
+import { MAX_SCALE_FIXED, lightColors, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
@@ -30,7 +33,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 // ─── Geometry ─────────────────────────────────────────────────────────────────
 const { width: W } = Dimensions.get('window');
-const R_OUT  = W / 2 - 4;
+const R_OUT  = NAV_ARC_R_OUT;
 const R_IN   = R_OUT * 0.5;
 const R_ICO  = (R_OUT + R_IN) / 2;
 const SVG_W  = W;
@@ -42,30 +45,6 @@ const SLIM_H = 56; // slim tab bar row height
 
 const SPRING = { damping: 18, stiffness: 150, mass: 0.9 };
 const FADE   = { duration: 200, easing: Easing.out(Easing.cubic) };
-
-/**
- * How far above the safe-area inset a control of `width`, inset `fromRight`
- * points from the right edge, has to sit to clear the nav arc.
- *
- * Takes the control's whole footprint rather than a single x on purpose: the
- * arc rises toward the middle of the screen, so a control near the right edge
- * is tallest under its *inner* edge. Measuring at its centre leaves the arc
- * cutting through the bottom corner nearest the middle.
- *
- * Measured against the expanded arc, not the collapsed slim bar: overshooting
- * while collapsed only leaves a larger gap, whereas undershooting overlaps.
- */
-export function navArcClearance(fromRight: number, width: number): number {
-  const centre = W / 2;
-  const near = fromRight;          // the control's right side
-  const far = fromRight + width;   // its left side
-  // Closest the footprint gets to the arc's apex, where the arc is tallest.
-  const d =
-    near <= centre && far >= centre
-      ? 0
-      : Math.min(Math.abs(centre - near), Math.abs(centre - far));
-  return d >= R_OUT ? 0 : Math.sqrt(R_OUT * R_OUT - d * d);
-}
 
 // ─── Badge indices ────────────────────────────────────────────────────────────
 const CHAT_IDX = 2; // 'Chat' is index 2
@@ -187,8 +166,16 @@ const GLOW_ARC = [
   `A ${R_OUT} ${R_OUT} 0 0 0 ${(CX + R_OUT).toFixed(2)} ${CY.toFixed(2)}`,
 ].join(' ');
 
+interface SpeedometerProps {
+  /** Name of a SECTIONS entry (e.g. 'settings') to spotlight — every other
+   *  wedge dims and this one pulses coral. Used by the zone tutorial to point
+   *  at Settings without a static colour override fighting the arc's own
+   *  active/inactive colours once the tutorial ends. */
+  highlightSection?: string;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
-export function Speedometer() {
+export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
   const router            = useRouter();
   const pathname          = usePathname();
   const { bottom: safeBottom } = useSafeAreaInsets();
@@ -217,6 +204,28 @@ export function Speedometer() {
     },
     [reduceMotion],
   );
+
+  // Coral pulse for the tutorial-spotlighted wedge. A plain 0↔1 loop rather
+  // than routing through `animate`: this one has to keep running the whole
+  // time the tutorial is up, not settle once like every other value here.
+  const highlightPulse = useSharedValue(0);
+  useEffect(() => {
+    highlightPulse.set(
+      highlightSection && !reduceMotion
+        ? withRepeat(
+            withSequence(
+              withTiming(1, { duration: 650, easing: Easing.out(Easing.cubic) }),
+              withTiming(0, { duration: 650, easing: Easing.in(Easing.cubic) }),
+            ),
+            -1,
+          )
+        : 0,
+    );
+  }, [highlightSection, reduceMotion, highlightPulse]);
+  const highlightStyle = useAnimatedStyle(() => ({
+    opacity: 0.55 + highlightPulse.get() * 0.45,
+    transform: [{ scale: 1 + highlightPulse.get() * 0.18 }],
+  }));
 
   // ── Chat badge: unread messages only ─────────────────────────────────────────
   // Pending Hi requests used to be counted here too. They are part of Alerts
@@ -266,57 +275,64 @@ export function Speedometer() {
   // Sync needle when route changes. The shared value is Reanimated's, not
   // React's, so driving it from an effect is the point of the effect.
   useEffect(() => {
-    needleAngle.value = animate(SECTIONS[activeIdx].mid, true);
-  }, [activeIdx, animate]);
+    needleAngle.set(animate(SECTIONS[activeIdx].mid, true));
+  }, [activeIdx, animate, needleAngle]);
 
   // Animate transition when collapsed state or safeBottom changes
+  // Declared above the effect that reads it, so on any commit where both run
+  // this one lands first and that read sees the current inset.
   const safeBottomRef = useRef(safeBottom);
-  safeBottomRef.current = safeBottom;
+  const collapsedRef = useRef(collapsed);
+  useEffect(() => {
+    safeBottomRef.current = safeBottom;
+    collapsedRef.current = collapsed;
+  });
 
   useEffect(() => {
-    // Immediate layout update for safeBottom change (no spring)
-    containerH.value = collapsed
-      ? SLIM_H + safeBottom
-      : SVG_H + safeBottom;
-  }, [safeBottom]);
+    // Immediate layout update for safeBottom change (no spring). `collapsed` is
+    // read through the ref rather than depended on: the effect below already
+    // owns collapse, and letting it re-run this one would snap the bar to its
+    // new height first and swallow that animation.
+    containerH.set(collapsedRef.current ? SLIM_H + safeBottom : SVG_H + safeBottom);
+  }, [safeBottom, containerH]);
 
   useEffect(() => {
-    containerH.value = animate(
+    containerH.set(animate(
       collapsed ? SLIM_H + safeBottomRef.current : SVG_H + safeBottomRef.current,
       true,
-    );
-    collapseProgress.value = animate(collapsed ? 1 : 0, false);
-  }, [collapsed]);
+    ));
+    collapseProgress.set(animate(collapsed ? 1 : 0, false));
+  }, [collapsed, animate, containerH, collapseProgress]);
 
   function handlePress(idx: number) {
     // The needle still moves on the press, so the arc answers the tap at once.
     // Which wedge is *lit* follows the route, since that is what it reports —
     // lighting it here as well meant a failed navigation left the arc claiming
     // to be somewhere the app never went.
-    needleAngle.value = animate(SECTIONS[idx].mid, true);
+    needleAngle.set(animate(SECTIONS[idx].mid, true));
     router.navigate(SECTIONS[idx].route as any);
   }
 
   const lineProps = useAnimatedProps(() => {
-    const r = (needleAngle.value * Math.PI) / 180;
+    const r = (needleAngle.get() * Math.PI) / 180;
     return { x2: CX + NEEDLE * Math.cos(r), y2: CY - NEEDLE * Math.sin(r) };
   });
 
   const dotProps = useAnimatedProps(() => {
-    const r = (needleAngle.value * Math.PI) / 180;
+    const r = (needleAngle.get() * Math.PI) / 180;
     return { cx: CX + NEEDLE * Math.cos(r), cy: CY - NEEDLE * Math.sin(r) };
   });
 
   const containerStyle = useAnimatedStyle(() => ({
-    height: containerH.value,
+    height: containerH.get(),
   }));
 
   const svgFadeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(collapseProgress.value, [0, 1], [1, 0], Extrapolation.CLAMP),
+    opacity: interpolate(collapseProgress.get(), [0, 1], [1, 0], Extrapolation.CLAMP),
   }));
 
   const slimFadeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(collapseProgress.value, [0, 1], [0, 1], Extrapolation.CLAMP),
+    opacity: interpolate(collapseProgress.get(), [0, 1], [0, 1], Extrapolation.CLAMP),
   }));
 
   return (
@@ -340,7 +356,7 @@ export function Speedometer() {
 
               {SECTIONS.map((s, i) => (
                 <Path
-                  key={i}
+                  key={s.name}
                   d={sectorPath(s.start, s.end)}
                   fill={i === activeIdx ? colors.teal : colors.surface}
                   // Used to be a flat "#000000" at 2px — a hard black ring
@@ -371,11 +387,18 @@ export function Speedometer() {
             const isActive = i === activeIdx;
             const pos = polar(R_ICO, s.mid);
             const badge = badgeFor(i, chatBadge, alertsBadge);
+            const isHighlighted = highlightSection === s.name;
+            const isDimmed = !!highlightSection && !isHighlighted;
+            const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.bg : colors.t3;
             return (
               <Pressable
-                key={i}
+                key={s.name}
                 onPress={() => handlePress(i)}
-                style={[styles.iconBtn, { left: pos.x - 26, top: pos.y - 24 }]}
+                style={[
+                  styles.iconBtn,
+                  { left: pos.x - 26, top: pos.y - 24 },
+                  isDimmed && styles.tutorialDimmed,
+                ]}
                 hitSlop={10}
                 // One node per tab, so the badge is read as part of the tab
                 // ("Chat, 3 unread") instead of as a stray number after it.
@@ -384,18 +407,15 @@ export function Speedometer() {
                 accessibilityState={{ selected: isActive }}
                 accessibilityLabel={tabLabel(s.label, badge)}
               >
-                <SectionGlyph
-                  section={s}
-                  active={isActive}
-                  size={18}
-                  color={isActive ? colors.bg : colors.t3}
-                />
+                <Animated.View style={isHighlighted ? highlightStyle : undefined}>
+                  <SectionGlyph section={s} active={isActive} size={18} color={wedgeColor} />
+                </Animated.View>
                 <Text
                   numberOfLines={1}
                   // The arc geometry is fixed, so the label is capped rather
                   // than allowed to scale until it clips.
                   maxFontSizeMultiplier={MAX_SCALE_FIXED}
-                  style={[styles.label, { color: isActive ? colors.bg : colors.t3 }]}
+                  style={[styles.label, { color: wedgeColor }]}
                 >
                   {s.label}
                 </Text>
@@ -425,11 +445,14 @@ export function Speedometer() {
             {SECTIONS.map((s, i) => {
               const isActive = i === activeIdx;
               const badge = badgeFor(i, chatBadge, alertsBadge);
+              const isHighlighted = highlightSection === s.name;
+              const isDimmed = !!highlightSection && !isHighlighted;
+              const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.teal : colors.t3;
               return (
                 <Pressable
-                  key={i}
+                  key={s.name}
                   onPress={() => handlePress(i)}
-                  style={styles.slimBtn}
+                  style={[styles.slimBtn, isDimmed && styles.tutorialDimmed]}
                   hitSlop={10}
                   // The collapsed bar has no visible text at all, so without
                   // this it is six unnamed buttons to a screen reader.
@@ -438,13 +461,8 @@ export function Speedometer() {
                   accessibilityState={{ selected: isActive }}
                   accessibilityLabel={tabLabel(s.label, badge)}
                 >
-                  <View style={{ position: 'relative' }}>
-                    <SectionGlyph
-                      section={s}
-                      active={isActive}
-                      size={22}
-                      color={isActive ? colors.teal : colors.t3}
-                    />
+                  <Animated.View style={[{ position: 'relative' }, isHighlighted && highlightStyle]}>
+                    <SectionGlyph section={s} active={isActive} size={22} color={wedgeColor} />
                     {badge > 0 && (
                       <View style={styles.badgeSlim} importantForAccessibility="no-hide-descendants">
                         <Text style={styles.badgeText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
@@ -452,7 +470,7 @@ export function Speedometer() {
                         </Text>
                       </View>
                     )}
-                  </View>
+                  </Animated.View>
                 </Pressable>
               );
             })}
@@ -517,6 +535,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
+  tutorialDimmed: { opacity: 0.35 },
   label: {
     // Was 8pt — below the legibility floor. 11 is the smallest size in the
     // scale, and the arc has room for it.

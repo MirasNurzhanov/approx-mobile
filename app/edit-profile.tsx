@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -9,11 +9,11 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
+import { pushProfileUpdate } from '@/services/profileRefresh';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -35,6 +36,60 @@ interface Profile {
   profile_picture?: string;
   profession?: string | null;
   nationality?: string | null;
+}
+
+// ─── Editable fields ──────────────────────────────────────────────────────────
+// Everything the form itself edits, as one unit: these five are the only state
+// this screen sets in bulk — once from the initial fetch, once from a
+// successful save — while each also changes on its own as the user types or
+// picks. One reducer for both stories beats a matching pair of setters at
+// every call site.
+interface EditableFields {
+  username: string;
+  bio: string;
+  profession: string | null;
+  nationality: string | null;
+  /** The server's nationality as of the last load/save — drives the lock,
+   *  separately from the value itself. */
+  origNationality: string | null;
+}
+
+const initialFields: EditableFields = {
+  username: '',
+  bio: '',
+  profession: null,
+  nationality: null,
+  origNationality: null,
+};
+
+type FieldsAction =
+  /** Bulk-loads all five from a server `Profile`, on initial fetch and again
+   *  after a successful save — the only two moments they change as a unit. */
+  | { type: 'synced'; data: Profile }
+  | { type: 'username'; value: string }
+  | { type: 'bio'; value: string }
+  | { type: 'profession'; value: string | null }
+  | { type: 'nationality'; value: string | null };
+
+function fieldsReducer(state: EditableFields, action: FieldsAction): EditableFields {
+  switch (action.type) {
+    case 'synced':
+      return {
+        username: action.data.username,
+        bio: action.data.bio ?? '',
+        profession: action.data.profession ?? null,
+        nationality: action.data.nationality ?? null,
+        origNationality: action.data.nationality ?? null,
+      };
+    case 'username':
+      return { ...state, username: action.value };
+    case 'bio':
+      return { ...state, bio: action.value };
+    case 'profession':
+      return { ...state, profession: action.value };
+    case 'nationality':
+      return { ...state, nationality: action.value };
+  }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,7 +119,11 @@ function AvatarPicker({ pictureUrl, initial, bgColor, uploading, onPick }: {
   const styles = makeStyles(colors);
   return (
     <>
-      <TouchableOpacity style={styles.avatarWrap} onPress={onPick} activeOpacity={0.85} disabled={uploading}>
+      <Pressable
+        style={({ pressed }) => [styles.avatarWrap, pressed && { opacity: 0.85 }]}
+        onPress={onPick}
+        disabled={uploading}
+      >
         <View style={[styles.avatarRing, { borderColor: bgColor + '55' }]}>
           <View style={[styles.avatar, { backgroundColor: bgColor }]}>
             {pictureUrl
@@ -81,7 +140,7 @@ function AvatarPicker({ pictureUrl, initial, bgColor, uploading, onPick }: {
         <View style={styles.cameraBadge}>
           <Ionicons name="camera" size={12} color="#fff" />
         </View>
-      </TouchableOpacity>
+      </Pressable>
       <Text style={styles.avatarHint}>Tap to change photo</Text>
     </>
   );
@@ -106,13 +165,21 @@ function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone
       <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
         <View style={styles.modalHandle} />
         <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+          <Pressable
+            onPress={onCancel}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalCancel}>Cancel</Text>
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.modalTitle}>Profession</Text>
-          <TouchableOpacity onPress={onDone} hitSlop={10}>
+          <Pressable
+            onPress={onDone}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalDone}>Done</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         <FlatList
@@ -128,10 +195,14 @@ function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone
           renderItem={({ item }) => {
             const sel = draft === item.key;
             return (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => onDraftChange(sel ? null : item.key)}
-                style={[styles.profCard, { width: CARD_W }, sel && styles.profCardSel]}
-                activeOpacity={0.75}
+                style={({ pressed }) => [
+                  styles.profCard,
+                  { width: CARD_W },
+                  sel && styles.profCardSel,
+                  pressed && { opacity: 0.75 },
+                ]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: sel }}
                 accessibilityLabel={item.label}
@@ -140,7 +211,7 @@ function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone
                 <Text style={[styles.profCardLabel, sel && styles.profCardLabelSel]} numberOfLines={2}>
                   {item.label}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             );
           }}
         />
@@ -171,13 +242,21 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
       <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
         <View style={styles.modalHandle} />
         <View style={styles.modalHeader}>
-          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+          <Pressable
+            onPress={onCancel}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalCancel}>Cancel</Text>
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.modalTitle}>Nationality</Text>
-          <TouchableOpacity onPress={onDone} hitSlop={10}>
+          <Pressable
+            onPress={onDone}
+            hitSlop={10}
+            style={({ pressed }) => pressed && { opacity: 0.2 }}
+          >
             <Text style={styles.modalDone}>Done</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         <View style={styles.searchBar}>
@@ -194,9 +273,13 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
             returnKeyType="search"
           />
           {query.length > 0 && (
-            <TouchableOpacity onPress={() => onQueryChange('')} hitSlop={10}>
+            <Pressable
+              onPress={() => onQueryChange('')}
+              hitSlop={10}
+              style={({ pressed }) => pressed && { opacity: 0.2 }}
+            >
               <Ionicons name="close-circle" size={18} color={colors.t3} />
-            </TouchableOpacity>
+            </Pressable>
           )}
         </View>
 
@@ -211,10 +294,9 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
           renderItem={({ item }) => {
             const sel = draft === item.code;
             return (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => onDraftChange(sel ? null : item.code)}
-                style={[styles.natRow, sel && styles.natRowSel]}
-                activeOpacity={0.7}
+                style={({ pressed }) => [styles.natRow, sel && styles.natRowSel, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
                 accessibilityState={{ selected: sel }}
                 accessibilityLabel={item.name}
@@ -222,7 +304,7 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
                 <Text style={styles.natFlag}>{flagEmoji(item.code)}</Text>
                 <Text style={[styles.natName, sel && styles.natNameSel]}>{item.name}</Text>
                 {sel && <Ionicons name="checkmark" size={18} color={colors.teal} />}
-              </TouchableOpacity>
+              </Pressable>
             );
           }}
           ItemSeparatorComponent={() => <View style={styles.natSep} />}
@@ -236,14 +318,11 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
 export default function EditProfileScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
 
   const [profile,   setProfile]   = useState<Profile | null>(null);
-  const [username,  setUsername]  = useState('');
-  const [bio,       setBio]       = useState('');
-  const [profession,  setProfession]  = useState<string | null>(null);
-  const [nationality, setNationality] = useState<string | null>(null);
+  const [fields, dispatch] = useReducer(fieldsReducer, initialFields);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -255,22 +334,17 @@ export default function EditProfileScreen() {
   const [draftNat,  setDraftNat]  = useState<string | null>(null);
   const [natQuery,  setNatQuery]  = useState('');
 
-  // Track server-loaded values to decide what to PATCH and whether nationality is locked
-  const origProfession  = useRef<string | null>(null);
-  const origNationality = useRef<string | null>(null);
+  // Track the server-loaded profession to decide what to PATCH. Stays a ref
+  // — only `save` ever reads it — while `fields.origNationality` is state,
+  // because the lock it drives is read while rendering the field.
+  const origProfession = useRef<string | null>(null);
 
   useEffect(() => {
     api.get<Profile>('/api/users/profile/')
       .then((r) => {
         setProfile(r.data);
-        setUsername(r.data.username);
-        setBio(r.data.bio ?? '');
-        const prof = r.data.profession ?? null;
-        const nat  = r.data.nationality ?? null;
-        setProfession(prof);
-        setNationality(nat);
-        origProfession.current  = prof;
-        origNationality.current = nat;
+        dispatch({ type: 'synced', data: r.data });
+        origProfession.current = r.data.profession ?? null;
       })
       .catch((e) => console.log('[EditProfile] fetch error:', e?.response?.status))
       .finally(() => setLoading(false));
@@ -300,35 +374,31 @@ export default function EditProfileScreen() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setProfile(data);
+      pushProfileUpdate(data);
     }, () => setUploading(false)).catch((e: any) =>
       Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload photo.'),
     );
   }
 
   async function save() {
-    if (!username.trim() || saving) return;
+    if (!fields.username.trim() || saving) return;
     setSaving(true);
     await runBusy(async () => {
       const payload: Record<string, any> = {
-        username: username.trim(),
-        bio: bio.trim(),
+        username: fields.username.trim(),
+        bio: fields.bio.trim(),
       };
-      if (profession !== origProfession.current) {
-        payload.profession = profession;
+      if (fields.profession !== origProfession.current) {
+        payload.profession = fields.profession;
       }
       // Nationality can only be set once: only include when original was null and user chose one
-      if (origNationality.current === null && nationality !== null) {
-        payload.nationality = nationality;
+      if (fields.origNationality === null && fields.nationality !== null) {
+        payload.nationality = fields.nationality;
       }
       const { data } = await api.patch<Profile>('/api/users/profile/', payload);
-      const savedProf = data.profession ?? null;
-      const savedNat  = data.nationality ?? null;
-      setUsername(data.username);
-      setBio(data.bio ?? '');
-      setProfession(savedProf);
-      setNationality(savedNat);
-      origProfession.current  = savedProf;
-      origNationality.current = savedNat;
+      dispatch({ type: 'synced', data });
+      origProfession.current = data.profession ?? null;
+      pushProfileUpdate(data);
       router.back();
     }, () => setSaving(false)).catch((e: any) => {
       const msg = e?.response?.data?.username?.[0] ?? e?.response?.data?.detail ?? 'Could not save changes.';
@@ -337,31 +407,40 @@ export default function EditProfileScreen() {
   }
 
   // ── Derived display values ─────────────────────────────────────────────────
-  const professionLabel    = profession ? PROFESSIONS.find(p => p.key === profession)?.label ?? profession : null;
-  const nationalityCountry = nationality ? COUNTRIES.find(c => c.code === nationality) : null;
-  const nationalityLocked  = origNationality.current !== null;
+  const professionLabel    = fields.profession ? PROFESSIONS.find(p => p.key === fields.profession)?.label ?? fields.profession : null;
+  const nationalityCountry = fields.nationality ? COUNTRIES.find(c => c.code === fields.nationality) : null;
+  const nationalityLocked  = fields.origNationality !== null;
   const filteredCountries  = natQuery.trim()
     ? COUNTRIES.filter(c => c.name.toLowerCase().includes(natQuery.trim().toLowerCase()))
     : COUNTRIES;
 
-  const initial = (username || profile?.username || '?').charAt(0).toUpperCase();
-  const bgColor = avatarColor(username || profile?.username || '?');
+  const initial = (fields.username || profile?.username || '?').charAt(0).toUpperCase();
+  const bgColor = avatarColor(fields.username || profile?.username || '?');
 
   return (
     <View style={styles.root}>
 
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.2 }]}
+        >
           <Ionicons name="chevron-back" size={26} color={colors.teal} />
-        </TouchableOpacity>
+        </Pressable>
         <Text style={styles.headerTitle}>Edit Profile</Text>
-        <TouchableOpacity onPress={save} disabled={saving || !username.trim()} hitSlop={12} style={styles.saveBtn}>
+        <Pressable
+          onPress={save}
+          disabled={saving || !fields.username.trim()}
+          hitSlop={12}
+          style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.2 }]}
+        >
           {saving
             ? <ActivityIndicator color={colors.teal} size="small" />
-            : <Text style={[styles.saveText, !username.trim() && { opacity: 0.4 }]}>Save</Text>
+            : <Text style={[styles.saveText, !fields.username.trim() && { opacity: 0.4 }]}>Save</Text>
           }
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {loading ? (
@@ -387,8 +466,8 @@ export default function EditProfileScreen() {
             <Text style={styles.fieldLabel}>Username</Text>
             <TextInput
               style={styles.fieldInput}
-              value={username}
-              onChangeText={setUsername}
+              value={fields.username}
+              onChangeText={(value) => dispatch({ type: 'username', value })}
               placeholder="Username"
               placeholderTextColor={colors.t3}
               selectionColor={colors.teal}
@@ -401,8 +480,8 @@ export default function EditProfileScreen() {
             <Text style={styles.fieldLabel}>Bio</Text>
             <TextInput
               style={[styles.fieldInput, styles.fieldTextarea]}
-              value={bio}
-              onChangeText={setBio}
+              value={fields.bio}
+              onChangeText={(value) => dispatch({ type: 'bio', value })}
               placeholder="Tell people about yourself…"
               placeholderTextColor={colors.t3}
               selectionColor={colors.teal}
@@ -410,22 +489,21 @@ export default function EditProfileScreen() {
               maxLength={200}
               textAlignVertical="top"
             />
-            <Text style={styles.charCount}>{bio.length} / 200</Text>
+            <Text style={styles.charCount}>{fields.bio.length} / 200</Text>
 
             {/* ── Profession ── */}
             <Text style={styles.fieldLabel}>Profession</Text>
-            <TouchableOpacity
-              style={[styles.fieldInput, styles.fieldRow]}
-              onPress={() => { setDraftProf(profession); setShowProfPicker(true); }}
-              activeOpacity={0.7}
+            <Pressable
+              style={({ pressed }) => [styles.fieldInput, styles.fieldRow, pressed && { opacity: 0.7 }]}
+              onPress={() => { setDraftProf(fields.profession); setShowProfPicker(true); }}
               accessibilityRole="button"
               accessibilityLabel={professionLabel ?? 'Not set — tap to choose'}
             >
-              <Text style={[styles.fieldRowValue, !profession && styles.fieldRowPlaceholder]}>
+              <Text style={[styles.fieldRowValue, !fields.profession && styles.fieldRowPlaceholder]}>
                 {professionLabel ?? 'Not set'}
               </Text>
               <Ionicons name="chevron-forward" size={18} color={colors.t3} />
-            </TouchableOpacity>
+            </Pressable>
 
             {/* ── Nationality ── */}
             <Text style={styles.fieldLabel}>Nationality</Text>
@@ -434,7 +512,7 @@ export default function EditProfileScreen() {
                 <Text style={styles.fieldRowValue}>
                   {nationalityCountry
                     ? `${flagEmoji(nationalityCountry.code)}  ${nationalityCountry.name}`
-                    : nationality}
+                    : fields.nationality}
                 </Text>
                 <View style={styles.lockedGroup}>
                   <Ionicons name="lock-closed-outline" size={13} color={colors.t3} />
@@ -442,20 +520,19 @@ export default function EditProfileScreen() {
                 </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={[styles.fieldInput, styles.fieldRow]}
-                onPress={() => { setDraftNat(nationality); setNatQuery(''); setShowNatPicker(true); }}
-                activeOpacity={0.7}
+              <Pressable
+                style={({ pressed }) => [styles.fieldInput, styles.fieldRow, pressed && { opacity: 0.7 }]}
+                onPress={() => { setDraftNat(fields.nationality); setNatQuery(''); setShowNatPicker(true); }}
                 accessibilityRole="button"
                 accessibilityLabel={nationalityCountry ? nationalityCountry.name : 'Not set — tap to choose'}
               >
-                <Text style={[styles.fieldRowValue, !nationality && styles.fieldRowPlaceholder]}>
+                <Text style={[styles.fieldRowValue, !fields.nationality && styles.fieldRowPlaceholder]}>
                   {nationalityCountry
                     ? `${flagEmoji(nationalityCountry.code)}  ${nationalityCountry.name}`
                     : 'Not set'}
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color={colors.t3} />
-              </TouchableOpacity>
+              </Pressable>
             )}
           </ScrollView>
         </KeyboardAvoidingView>
@@ -466,7 +543,7 @@ export default function EditProfileScreen() {
         draft={draftProf}
         onDraftChange={setDraftProf}
         onCancel={() => setShowProfPicker(false)}
-        onDone={() => { setProfession(draftProf); setShowProfPicker(false); }}
+        onDone={() => { dispatch({ type: 'profession', value: draftProf }); setShowProfPicker(false); }}
       />
 
       <NationalityPickerModal
@@ -477,7 +554,7 @@ export default function EditProfileScreen() {
         onDraftChange={setDraftNat}
         onQueryChange={setNatQuery}
         onCancel={() => { setShowNatPicker(false); setNatQuery(''); }}
-        onDone={() => { setNationality(draftNat); setShowNatPicker(false); setNatQuery(''); }}
+        onDone={() => { dispatch({ type: 'nationality', value: draftNat }); setShowNatPicker(false); setNatQuery(''); }}
       />
 
     </View>

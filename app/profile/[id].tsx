@@ -5,10 +5,10 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -95,9 +95,15 @@ function ProfileHeader({ username, relationship, top, onBack, onMenu }: {
   const styles = makeStyles(colors);
   return (
     <View style={[styles.header, { paddingTop: top + 6 }]}>
-      <TouchableOpacity onPress={onBack} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel="Back">
+      <Pressable
+        onPress={onBack}
+        hitSlop={12}
+        style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.2 }]}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+      >
         <IconBack size={24} color={colors.teal} />
-      </TouchableOpacity>
+      </Pressable>
 
       <View style={styles.headerCenter} accessible accessibilityRole="header">
         <Text style={styles.headerTitle} numberOfLines={1}>{username}</Text>
@@ -106,9 +112,15 @@ function ProfileHeader({ username, relationship, top, onBack, onMenu }: {
         </View>
       </View>
 
-      <TouchableOpacity onPress={onMenu} hitSlop={12} style={styles.headerBtn} accessibilityRole="button" accessibilityLabel={`More options for ${username}`}>
+      <Pressable
+        onPress={onMenu}
+        hitSlop={12}
+        style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.2 }]}
+        accessibilityRole="button"
+        accessibilityLabel={`More options for ${username}`}
+      >
         <IconMore size={22} color={colors.t3} />
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }
@@ -199,8 +211,8 @@ function InterestsSection({ interests }: { interests: Interest[] }) {
             </View>
           )}
           <View style={styles.chipWrap}>
-            {group.items.map((tag, i) => (
-              <View key={i} style={styles.chip}>
+            {group.items.map((tag) => (
+              <View key={tag.name} style={styles.chip}>
                 <Text style={styles.chipText}>{tag.name}</Text>
               </View>
             ))}
@@ -224,11 +236,10 @@ function ClubsSection({ clubs, onOpenClub }: {
         <Text style={styles.clubsEmpty}>Not a member of any clubs yet</Text>
       ) : (
         clubs.map(club => (
-          <TouchableOpacity
+          <Pressable
             key={club.id}
-            style={styles.clubRow}
+            style={({ pressed }) => [styles.clubRow, pressed && { opacity: 0.7 }]}
             onPress={() => onOpenClub(club.id)}
-            activeOpacity={0.7}
           >
             {club.emblem ? (
               <Image source={{ uri: club.emblem }} style={styles.clubEmblem} />
@@ -245,7 +256,7 @@ function ClubsSection({ clubs, onOpenClub }: {
                 </Text>
               </View>
             )}
-          </TouchableOpacity>
+          </Pressable>
         ))
       )}
     </View>
@@ -266,30 +277,41 @@ function RelationshipActions({ relationship, actionLoading, onSendHi, onAcceptHi
   return (
     <View style={styles.section}>
       {relationship === 'stranger' && (
-        <TouchableOpacity style={[styles.btnPrimary, actionLoading === 'hi' && styles.btnOff]} onPress={onSendHi} disabled={actionLoading !== null} activeOpacity={0.8}>
+        <Pressable
+          style={({ pressed }) => [styles.btnPrimary, actionLoading === 'hi' && styles.btnOff, pressed && { opacity: 0.8 }]}
+          onPress={onSendHi}
+          disabled={actionLoading !== null}
+        >
           {actionLoading === 'hi'
             ? <ActivityIndicator color={colors.bg} size="small" />
             : <Text style={styles.btnPrimaryText}>Send Hi 👋</Text>
           }
-        </TouchableOpacity>
+        </Pressable>
       )}
       {relationship === 'hi_sent' && (
-        <TouchableOpacity style={[styles.btnPrimary, styles.btnOff]} disabled activeOpacity={1}>
+        <Pressable style={[styles.btnPrimary, styles.btnOff]} disabled>
           <Text style={styles.btnPrimaryText}>Hi Sent ✓</Text>
-        </TouchableOpacity>
+        </Pressable>
       )}
       {relationship === 'hi_received' && (
-        <TouchableOpacity style={[styles.btnPrimary, actionLoading === 'accept' && styles.btnOff]} onPress={onAcceptHi} disabled={actionLoading !== null} activeOpacity={0.8}>
+        <Pressable
+          style={({ pressed }) => [styles.btnPrimary, actionLoading === 'accept' && styles.btnOff, pressed && { opacity: 0.8 }]}
+          onPress={onAcceptHi}
+          disabled={actionLoading !== null}
+        >
           {actionLoading === 'accept'
             ? <ActivityIndicator color={colors.bg} size="small" />
             : <Text style={styles.btnPrimaryText}>Accept Hi 👋</Text>
           }
-        </TouchableOpacity>
+        </Pressable>
       )}
       {(relationship === 'connected' || relationship === 'friend') && (
-        <TouchableOpacity style={styles.btnPrimary} onPress={onMessage} activeOpacity={0.8}>
+        <Pressable
+          style={({ pressed }) => [styles.btnPrimary, pressed && { opacity: 0.8 }]}
+          onPress={onMessage}
+        >
           <Text style={styles.btnPrimaryText}>Message 💬</Text>
-        </TouchableOpacity>
+        </Pressable>
       )}
     </View>
   );
@@ -433,9 +455,12 @@ export default function UserProfileScreen() {
     return (
       <View style={[styles.root, styles.center]}>
         <Text style={styles.errorText}>Profile not found</Text>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backLink}>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [styles.backLink, pressed && { opacity: 0.2 }]}
+        >
           <Text style={styles.backLinkText}>Go back</Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
     );
   }

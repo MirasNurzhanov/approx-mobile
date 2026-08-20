@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,7 +20,7 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -859,14 +859,19 @@ function useClubChat(
       ws.current?.close();
       ws.current = null;
     };
-  }, [clubId]);
+    // expo-router's `router` is a module singleton, so it never changes and
+    // listing it cannot reconnect the socket.
+  }, [clubId, router]);
 
   // ── Scroll to bottom ──────────────────────────────────────────────────────
   useEffect(() => {
     if (messages.length > 0 && !loadingMore) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+      // Cleared on re-run and on unmount: messages can land faster than the
+      // 50ms delay, and every superseded timer would otherwise still fire.
+      const t = setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+      return () => clearTimeout(t);
     }
-  }, [messages.length]);
+  }, [messages.length, loadingMore]);
 
   // ── Send text / image ─────────────────────────────────────────────────────
   function sendText() {
@@ -1045,7 +1050,7 @@ function useMeetupProposal(clubId: number) {
 
 export default function ClubChatScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { id, name, emblem, memberCount } = useLocalSearchParams<{
     id: string;
     name?: string;
@@ -1069,6 +1074,9 @@ export default function ClubChatScreen() {
   } = chat;
 
   // ── Ownership — fetch on mount and re-check whenever screen is focused ────
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
+  // against `useFocusEffect` re-subscribing every render if this hook ever
+  // bails compilation, not a fix for anything broken today.
   const fetchRole = useCallback(async () => {
     try {
       const { data } = await clubsApi.get(clubId);
@@ -1076,8 +1084,9 @@ export default function ClubChatScreen() {
     } catch {}
   }, [clubId]);
 
-  useEffect(() => { fetchRole(); }, [fetchRole]);
-
+  // `useFocusEffect` runs on the screen's first focus as well as every later
+  // one, so the mount effect that used to sit above this was a second, identical
+  // request for the same club on every open.
   useFocusEffect(useCallback(() => { fetchRole(); }, [fetchRole]));
 
   // ── Delete proposal ───────────────────────────────────────────────────────

@@ -1,9 +1,7 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -17,19 +15,14 @@ import axios from 'axios';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import DatePickerField from '@/components/DatePickerField';
+import SocialAuthButtons from '@/components/SocialAuthButtons';
 import { loginRequest } from '@/services/auth';
 import { runBusy } from '@/services/busy';
 import { BASE_URL } from '@/services/api';
 import { fonts, lightColors as L, radius } from '@/constants/theme';
 
-const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
-const MONTH_KEYS = ['01','02','03','04','05','06','07','08','09','10','11','12'];
-const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const CURRENT_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 100 }, (_, i) => String(CURRENT_YEAR - i));
-
-const ITEM_H = 44;
-const BLOB   = 300;
+const BLOB = 300;
 
 type FieldErrors = Record<string, string[]>;
 
@@ -74,197 +67,6 @@ const ai = StyleSheet.create({
   inputFocused: { borderColor: L.teal },
   inputError:   { borderColor: L.red },
   error: { fontFamily: fonts.body, fontSize: 12, color: L.red },
-});
-
-// ─── Wheel column ─────────────────────────────────────────────────────────────
-
-interface WheelProps {
-  items: string[];
-  labels?: string[];
-  selectedIdx: number;
-  onSelect: (idx: number) => void;
-}
-
-function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
-  const padded = ['', '', ...items, '', ''];
-  const [activeIdx, setActiveIdx] = useState(selectedIdx);
-  const ref = useRef<FlatList<string>>(null);
-
-  return (
-    <View style={wh.wrap}>
-      <FlatList
-        ref={ref}
-        data={padded}
-        keyExtractor={(_, i) => String(i)}
-        renderItem={({ index }) => {
-          const ai = index - 2;
-          const isSel = ai === activeIdx;
-          const text = ai >= 0 && ai < items.length ? (labels ? labels[ai] : items[ai]) : '';
-          return (
-            <View style={wh.item}>
-              <Text style={[wh.label, isSel && wh.labelSel]}>{text}</Text>
-            </View>
-          );
-        }}
-        snapToInterval={ITEM_H}
-        decelerationRate="fast"
-        showsVerticalScrollIndicator={false}
-        getItemLayout={(_, i) => ({ length: ITEM_H, offset: ITEM_H * i, index: i })}
-        initialScrollIndex={selectedIdx}
-        scrollEventThrottle={16}
-        onScroll={(e) => {
-          const i = Math.round(e.nativeEvent.contentOffset.y / ITEM_H);
-          const c = Math.max(0, Math.min(i, items.length - 1));
-          if (c !== activeIdx) setActiveIdx(c);
-        }}
-        onMomentumScrollEnd={(e) => {
-          const i = Math.round(e.nativeEvent.contentOffset.y / ITEM_H);
-          const c = Math.max(0, Math.min(i, items.length - 1));
-          setActiveIdx(c);
-          onSelect(c);
-        }}
-      />
-    </View>
-  );
-}
-
-const wh = StyleSheet.create({
-  wrap: { flex: 1, height: ITEM_H * 5, overflow: 'hidden' },
-  item: { height: ITEM_H, justifyContent: 'center', alignItems: 'center' },
-  label:    { fontFamily: fonts.body, color: L.t3, fontSize: 15 },
-  labelSel: { fontFamily: fonts.body, color: L.t1, fontWeight: '600', fontSize: 16 },
-});
-
-// ─── DatePickerField ──────────────────────────────────────────────────────────
-
-interface DatePickerFieldProps {
-  value: string;
-  onChange: (v: string) => void;
-  error?: string | null;
-}
-
-function DatePickerField({ value, onChange, error }: DatePickerFieldProps) {
-  const [open, setOpen] = useState(false);
-
-  const [dayIdx,   setDayIdx]   = useState(() => { const i = DAYS.indexOf(value.split('-')[2]);       return i >= 0 ? i : 0;  });
-  const [monthIdx, setMonthIdx] = useState(() => { const i = MONTH_KEYS.indexOf(value.split('-')[1]); return i >= 0 ? i : 0;  });
-  const [yearIdx,  setYearIdx]  = useState(() => { const i = YEARS.indexOf(value.split('-')[0]);       return i >= 0 ? i : 20; });
-
-  const displayValue = value ? `${DAYS[dayIdx]} ${MONTH_LABELS[monthIdx]} ${YEARS[yearIdx]}` : '';
-
-  function handleDone() {
-    onChange(`${YEARS[yearIdx]}-${MONTH_KEYS[monthIdx]}-${DAYS[dayIdx]}`);
-    setOpen(false);
-  }
-
-  return (
-    <View style={dp.wrapper}>
-      <Text style={dp.fieldLabel}>Date of birth</Text>
-      <Pressable
-        onPress={() => setOpen(true)}
-        style={[dp.trigger, !!error && dp.triggerError]}
-      >
-        <Text style={displayValue ? dp.valueText : dp.placeholder}>
-          {displayValue || 'DD Mon YYYY'}
-        </Text>
-      </Pressable>
-      {error ? <Text style={dp.error}>{error}</Text> : null}
-
-      <Modal visible={open} transparent animationType="fade">
-        <View style={dp.overlay}>
-          <View style={dp.sheet}>
-            <Text style={dp.sheetTitle}>Date of birth</Text>
-            <View style={dp.wheelRow}>
-              <View pointerEvents="none" style={dp.band} />
-              <Wheel items={DAYS}       selectedIdx={dayIdx}   onSelect={setDayIdx}   />
-              <Wheel items={MONTH_KEYS} labels={MONTH_LABELS}  selectedIdx={monthIdx} onSelect={setMonthIdx} />
-              <Wheel items={YEARS}      selectedIdx={yearIdx}  onSelect={setYearIdx}  />
-            </View>
-            <View style={dp.sheetBtns}>
-              <Pressable
-                onPress={() => setOpen(false)}
-                style={({ pressed }) => [dp.modalBtn, dp.modalBtnSecondary, pressed && dp.pressed]}
-              >
-                <Text style={dp.modalBtnTextSecondary}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleDone}
-                style={({ pressed }) => [dp.modalBtn, dp.modalBtnPrimary, pressed && dp.pressed]}
-              >
-                <Text style={dp.modalBtnTextPrimary}>Done</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
-}
-
-const dp = StyleSheet.create({
-  wrapper:   { gap: 4 },
-  fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '500', color: L.t2 },
-  trigger: {
-    backgroundColor: L.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: L.border,
-    paddingHorizontal: 14,
-    height: 52,
-    justifyContent: 'center',
-  },
-  triggerError: { borderColor: L.red },
-  valueText:   { fontFamily: fonts.body, fontSize: 15, color: L.t1 },
-  placeholder: { fontFamily: fonts.body, fontSize: 15, color: L.t3 },
-  error:       { fontFamily: fonts.body, fontSize: 12, color: L.red },
-
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  sheet: {
-    width: '100%',
-    backgroundColor: L.surface,
-    borderRadius: radius.l,
-    borderWidth: 1,
-    borderColor: L.border,
-    padding: 20,
-  },
-  sheetTitle: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: 17,
-    color: L.t1,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  wheelRow: { flexDirection: 'row', gap: 4 },
-  band: {
-    position: 'absolute',
-    top: ITEM_H * 2,
-    left: 0,
-    right: 0,
-    height: ITEM_H,
-    backgroundColor: L.surface2,
-    borderRadius: radius.s,
-  },
-  sheetBtns: { flexDirection: 'row', gap: 12, marginTop: 20 },
-  modalBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  modalBtnPrimary:   { backgroundColor: L.teal, borderColor: 'transparent' },
-  modalBtnSecondary: { backgroundColor: 'transparent', borderColor: L.border },
-  modalBtnTextPrimary:   { fontFamily: fonts.body, fontWeight: '600', fontSize: 15, color: L.bg },
-  modalBtnTextSecondary: { fontFamily: fonts.body, fontWeight: '600', fontSize: 15, color: L.t1 },
-  pressed: { opacity: 0.65 },
 });
 
 // ─── RegisterScreen ───────────────────────────────────────────────────────────
@@ -340,6 +142,12 @@ export default function RegisterScreen() {
           </View>
         ) : null}
 
+        {/* On the autofill props through this form, see app/login.tsx for the
+            contract. The difference here is `newPassword`, which asks the OS to
+            *generate and save* rather than to fill something it already has.
+            Both password boxes carry it: iOS looks for a matching pair to
+            recognise a confirmation field, and marking only the first makes the
+            suggested password fill the top box and leave the bottom one empty. */}
         <View style={rs.form}>
           <AuthInput
             label="Username"
@@ -348,6 +156,8 @@ export default function RegisterScreen() {
             onChangeText={setUsername}
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="username-new"
+            textContentType="nickname"
             error={fe('username')}
           />
           <AuthInput
@@ -358,6 +168,11 @@ export default function RegisterScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="email"
+            // The account identifier, so this is what the saved credential gets
+            // filed under. `emailAddress` would save an address with no login
+            // attached to it.
+            textContentType="username"
             error={fe('email')}
           />
           <DatePickerField value={dob} onChange={setDob} error={fe('date_of_birth')} />
@@ -367,6 +182,12 @@ export default function RegisterScreen() {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+            autoComplete="new-password"
+            textContentType="newPassword"
+            // Handed to iOS's strong-password generator so what it invents is
+            // something the server will accept. Django's default validators
+            // want 8+ characters and not all digits; this clears both.
+            passwordRules="minlength: 12; required: lower; required: upper; required: digit;"
             error={fe('password')}
           />
           <AuthInput
@@ -375,6 +196,8 @@ export default function RegisterScreen() {
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
+            autoComplete="new-password"
+            textContentType="newPassword"
             error={fe('confirm_password')}
           />
         </View>
@@ -391,6 +214,10 @@ export default function RegisterScreen() {
             : <Text style={rs.btnLabel}>Create Account</Text>
           }
         </Pressable>
+
+        <View style={rs.social}>
+          <SocialAuthButtons disabled={submitting} />
+        </View>
 
         <View style={rs.signinRow}>
           <Text style={rs.signinText}>Already have an account? </Text>
@@ -468,6 +295,8 @@ const rs = StyleSheet.create({
     fontSize: 17,
     color: L.bg,
   },
+
+  social: { marginTop: 20 },
 
   signinRow: {
     flexDirection: 'row',

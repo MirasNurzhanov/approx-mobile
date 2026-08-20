@@ -5,11 +5,18 @@ import { setOnAuthFailure } from '@/services/api';
 import { getAccessToken, loginRequest } from '@/services/auth';
 import { markOnboardingSeen } from '@/services/onboarding';
 import { flushPendingRevocations, performSignOut } from '@/services/signOut';
+import type { SocialSignInResult } from '@/services/socialAuth';
 
 interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  /** Finishes a Google/Apple sign-in whose tokens are already stored.
+   *
+   * Separate from `login` because the credential work happened in
+   * services/socialAuth — by the time this is called the session exists, and
+   * all that is left is flipping the flag and picking where to land. */
+  completeSocialSignIn: (result: SocialSignInResult) => void;
   /** Tears the session down without asking. Used by flows that have already
    * confirmed — account deletion — and by `confirmLogout`. */
   logout: () => Promise<void>;
@@ -66,6 +73,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     markOnboardingSeen();
     setIsAuthenticated(true);
     router.replace('/(tabs)/map');
+  }
+
+  function completeSocialSignIn({ created, needsDateOfBirth }: SocialSignInResult) {
+    markOnboardingSeen();
+    setIsAuthenticated(true);
+    // Order matters, and it is not "new users here, old users there". A date of
+    // birth is the age gate, so it comes before anything else the app would
+    // show — including for the returning account whose first attempt was
+    // interrupted before they answered. The birthday screen sends them on to
+    // interests itself.
+    if (needsDateOfBirth) {
+      router.replace('/social-birthday');
+    } else if (created) {
+      router.replace('/interests-setup');
+    } else {
+      router.replace('/(tabs)/map');
+    }
   }
 
   async function logout() {
@@ -131,7 +155,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ isAuthenticated, isLoading, login, logout, confirmLogout, isSigningOut }}
+      value={{
+        isAuthenticated, isLoading, login, completeSocialSignIn,
+        logout, confirmLogout, isSigningOut,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -6,7 +6,9 @@ import { stopBackgroundLocationUpdates } from './backgroundLocation';
 import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
 import { resetOwnMotion } from './ownMotion';
+import { resetNotificationPrefs } from './notificationPrefs';
 import { resetPrivacy } from './privacy';
+import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
 import { resetRegionCache } from './zoneArea';
 
@@ -34,6 +36,11 @@ const ACCOUNT_SCOPED_KEYS = [
   'refresh_token',
   'chat_last_seen',
   'last_zone_notified',
+  // The feature tutorial (services/tutorial.ts) is deliberately NOT here —
+  // its keys are namespaced by user id, not flat flags, so it does not need
+  // wiping on sign-out to behave correctly for the next account. Clearing it
+  // here would undo that: the same account would see it again every time
+  // they logged back in.
   // The on-device activity feed is gone (alerts come from the server now), but
   // devices that ran an older build still hold its keys — and they hold the
   // previous account's alerts. Kept in the list so signing out clears them.
@@ -49,6 +56,29 @@ const ACCOUNT_SCOPED_KEYS = [
 /** Server round trip gets this long before we give up and finish locally.
  * Sign-out must never appear to hang because the network is down. */
 const REVOKE_TIMEOUT_MS = 4000;
+
+/**
+ * Take the departing account off the map. Best-effort; never throws.
+ *
+ * See the call site for why sign-out implies this at all. Pausing also
+ * clears the stored position server-side, so this leaves nothing behind for
+ * the account to be found by either.
+ */
+async function pauseLocationSharing(accessToken: string | null): Promise<void> {
+  if (!accessToken) return;
+  try {
+    await axios.patch(
+      `${BASE_URL}/api/users/privacy/`,
+      { location_sharing: 'paused' },
+      {
+        timeout: REVOKE_TIMEOUT_MS,
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+  } catch {
+    // Swallowed on purpose. See above.
+  }
+}
 
 /** True when the session is settled and nothing needs retrying later. */
 async function revokeRefreshToken(refresh: string, accessToken: string | null): Promise<boolean> {
@@ -96,6 +126,21 @@ export async function performSignOut(): Promise<void> {
     AsyncStorage.getItem('refresh_token').catch(() => null),
   ]);
 
+  // Off the map, before the credentials that could do it are thrown away.
+  //
+  // Signing out is not the same act as choosing Paused and normally should not
+  // imply it. It does here because sharing has no expiry: left alone, somebody
+  // who signed out would stay on other people's maps indefinitely, pinned to
+  // wherever they last were, with no app running to move them and no screen
+  // left to tell them about it.
+  //
+  // Bare axios with the token passed in, not the `api` instance, and for the
+  // same reason `revokeRefreshToken` below does it: `beginSessionEnd()` above
+  // has already closed that instance, so a request through it would never
+  // leave the device. Best-effort — it never throws, because sign-out has to
+  // work offline, and the setting is still there to change at next sign-in.
+  await pauseLocationSharing(accessToken);
+
   // Server-side revocation, plus push-token unregistration, which the logout
   // endpoint does unconditionally so a signed-out device stops being
   // addressable even when the token it sent was already expired.
@@ -115,6 +160,12 @@ export async function performSignOut(): Promise<void> {
 
   await AsyncStorage.multiRemove(ACCOUNT_SCOPED_KEYS).catch(() => {});
 
+  // The Google SDK keeps its own idea of who is signed in, on the far side of
+  // AsyncStorage. Left alone, the next tap on the Google button re-signs the
+  // same account in with no chooser — which reads as the sign-out having
+  // failed, and makes a shared phone impossible to switch accounts on.
+  await clearGoogleSession();
+
   // In-memory stores. These survive navigation, so without this the next
   // account inherits the previous user's privacy settings, block list and
   // story archive.
@@ -126,6 +177,10 @@ export async function performSignOut(): Promise<void> {
   await resetRegionCache().catch(() => {});
   resetBlocked();
   resetAlertsCount();
+  // Which notifications the previous account wanted is theirs, not the next
+  // person's — and the switches would otherwise be drawn from their answers
+  // until the new account's own settings were fetched.
+  resetNotificationPrefs();
   // Otherwise a user who signed out mid-journey leaves the next session
   // starting in "driving" — with nearby prompts quietly suppressed for someone
   // who is sitting still.

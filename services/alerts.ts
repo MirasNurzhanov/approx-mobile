@@ -58,6 +58,10 @@ export interface Notification {
   story_id?: number | null;
   story_image?: string | null;
   story_excerpt?: string | null;
+  /** What it is about, for club and meetup alerts. */
+  club_id?: number | null;
+  club_name?: string | null;
+  event_id?: number | null;
 }
 
 export interface AlertsData {
@@ -110,6 +114,14 @@ export function isProximity(n: Notification): boolean {
 export function isStoryAlert(n: Notification): boolean {
   const t = n.notification_type ?? '';
   return t === 'story_reaction' || t === 'story_reply';
+}
+
+/** Club activity: a meetup proposed, a verdict on one, or being added to a
+ *  club. All three open a club rather than a person, which is what separates
+ *  them from every other row in the feed. */
+export function isClubAlert(n: Notification): boolean {
+  const t = n.notification_type ?? '';
+  return t === 'club_event' || t === 'club_event_status' || t === 'club_invite';
 }
 
 /** Endpoint paths for answering a request, by kind. */

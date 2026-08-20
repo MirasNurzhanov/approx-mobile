@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -40,6 +40,8 @@ import {
   type RegionCandidate,
   type RegionSummary,
   type ZoneMode,
+  type ZoneType,
+  zoneTypeForRegion,
 } from '@/services/zoneArea';
 
 /** How long to sit on a keystroke before asking the server.
@@ -65,7 +67,7 @@ const MIN_QUERY_LEN = 2;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ZoneState {
-  zone_mode?: ZoneMode;
+  zone_type?: ZoneType;
   zone_radius?: number;
   zone_region?: number | null;
   zone_region_detail?: RegionSummary | null;
@@ -197,9 +199,11 @@ function ZonePreview({ mapRef, themeMode, mode, region, coords, previewCoords, p
           {/* One polygon per piece, not per ring: a region straddling the
               dateline is cut in two at ±180 so it draws as an island group
               rather than as a band around the planet. */}
-          {mode === 'region' && previewRings.map((piece, i) => (
+          {mode === 'region' && previewRings.map((piece) => (
             <Polygon
-              key={i}
+              // Keyed on where the piece starts: the split is deterministic, so
+              // a piece keeps its identity until the region itself changes.
+              key={`${piece[0].latitude},${piece[0].longitude}`}
               coordinates={piece}
               fillColor="rgba(139,92,246,0.12)"
               strokeColor="rgba(139,92,246,0.55)"
@@ -541,15 +545,16 @@ function useZonePreview({ mapRef, coords, outline, mode, region, radiusM }: {
   region: RegionSummary | null;
   radiusM: number;
 }) {
+  // Memoized by hand rather than left to the compiler: both of these are read
+  // from the dependency array of the re-framing effect below, so their identity
+  // is what decides whether the map animates. That guarantee has to hold even
+  // if the compiler ever bails on this hook.
   const previewCoords = useMemo(
     () => (coords ? wgs84ToGcj02(coords.latitude, coords.longitude) : null),
     [coords],
   );
   /** The outline, split at the antimeridian and shifted for the basemap. */
-  const previewRings = useMemo(
-    () => (outline ? ringsForDisplay(outline, shiftForDisplay) : []),
-    [outline],
-  );
+  const previewRings = outline ? ringsForDisplay(outline, shiftForDisplay) : [];
   const previewViewport = useCallback((target: RegionSummary) => {
     const box = regionViewport(target);
     return { ...box, ...wgs84ToGcj02(box.latitude, box.longitude) };
@@ -628,10 +633,62 @@ function useRegionSearch(query: string) {
   };
 }
 
+// ─── Region search/lookup UI ───────────────────────────────────────────────────
+// The typed query, the traced candidates, and the error under them: these four
+// change as one unit at the two moments that matter — adopting a region clears
+// all of it, and starting a fresh trace clears everything but the query —
+// while staying independent of the persisted `region`/`mode` setting itself,
+// which has its own revert-on-failure path this state never touches.
+interface SearchState {
+  query: string;
+  lookupError: string | null;
+  /** Ranked alternatives, when the server would not choose for us. Kept
+   *  separate from `useRegionSearch`'s typed-search results even though they
+   *  render alike: these are places that provably contain you and were
+   *  declined only for lack of confidence, so they carry reasons and never
+   *  need the "not where you are" check that a typed search does. */
+  choices: RegionCandidate[];
+  choicesFor: 'city' | 'district' | null;
+}
+
+const initialSearch: SearchState = {
+  query: '',
+  lookupError: null,
+  choices: [],
+  choicesFor: null,
+};
+
+type SearchAction =
+  | { type: 'queryChanged'; query: string }
+  /** A trace just started: drop whatever the last one found, but leave the
+   *  typed query — tracing and typing are different ways to look, not a reset
+   *  of each other. */
+  | { type: 'lookupStarted' }
+  | { type: 'lookupError'; message: string }
+  | { type: 'candidatesFound'; choices: RegionCandidate[]; choicesFor: 'city' | 'district'; message: string }
+  /** A region was adopted, whether traced or searched for — the lookup UI has
+   *  nothing left to show. */
+  | { type: 'regionAdopted' };
+
+function searchReducer(state: SearchState, action: SearchAction): SearchState {
+  switch (action.type) {
+    case 'queryChanged':
+      return { ...state, query: action.query };
+    case 'lookupStarted':
+      return { ...state, lookupError: null, choices: [], choicesFor: null };
+    case 'lookupError':
+      return { ...state, lookupError: action.message };
+    case 'candidatesFound':
+      return { ...state, choices: action.choices, choicesFor: action.choicesFor, lookupError: action.message };
+    case 'regionAdopted':
+      return initialSearch;
+  }
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneAreaScreen() {
   const { colors, themeMode } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
@@ -644,24 +701,14 @@ export default function ZoneAreaScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [lookupError, setLookupError] = useState<string | null>(null);
   /** Which of the two lookup buttons is in flight, so only that one spins. */
   const [locating, setLocating] = useState<'city' | 'district' | null>(null);
-
-  /** Ranked alternatives, when the server would not choose for us.
-   *
-   * Kept separate from search results even though they render alike: these are
-   * places that provably contain you and were declined only for lack of
-   * confidence, so they carry reasons and never need the "not where you are"
-   * check that a typed search does. */
-  const [choices, setChoices] = useState<RegionCandidate[]>([]);
-  const [choicesFor, setChoicesFor] = useState<'city' | 'district' | null>(null);
 
   // Search — the way out when tracing finds nothing. `results === null` is the
   // idle state, an empty array is a search that genuinely found nothing, and
   // the two need to look different on screen.
-  const [query, setQuery] = useState('');
-  const { results, searchError, searching } = useRegionSearch(query);
+  const [search, dispatchSearch] = useReducer(searchReducer, initialSearch);
+  const { results, searchError, searching } = useRegionSearch(search.query);
 
   const mapRef = useRef<MapView | null>(null);
 
@@ -677,7 +724,11 @@ export default function ZoneAreaScreen() {
 
       if (zoneRes.status === 'fulfilled') {
         const z = zoneRes.value.data;
-        setMode(z.zone_mode === 'region' && z.zone_region ? 'region' : 'radius');
+        // The screen offers two buttons; the server stores three types. Both
+        // polygon types land on the Place tab, and which one it was is
+        // recoverable from the region itself, so nothing is lost collapsing
+        // them here.
+        setMode(z.zone_type !== 'circle' && z.zone_region ? 'region' : 'radius');
         setRadiusM(z.zone_radius && z.zone_radius > 0 ? z.zone_radius : 500);
         if (z.zone_region_detail) setRegion(z.zone_region_detail);
       }
@@ -703,7 +754,7 @@ export default function ZoneAreaScreen() {
 
   // ── Save ───────────────────────────────────────────────────────────────────
   // Everything saves as you touch it, matching the zone-music screen next door.
-  const save = useCallback(async (patch: Partial<ZoneState>, revert: () => void) => {
+  async function save(patch: Partial<ZoneState>, revert: () => void) {
     setSaving(true);
     await runBusy(
       () => api.patch('/api/users/zone/', patch),
@@ -718,15 +769,15 @@ export default function ZoneAreaScreen() {
         'Please try again.',
       );
     });
-  }, []);
+  }
 
-  const commitRadius = useCallback((next: number) => {
+  function commitRadius(next: number) {
     const previous = radiusM;
     setRadiusM(next);
     save({ zone_radius: next }, () => setRadiusM(previous));
-  }, [radiusM, save]);
+  }
 
-  const commitMode = useCallback((next: ZoneMode) => {
+  function commitMode(next: ZoneMode) {
     if (next === mode) return;
     // Switching to region without one picked would be rejected by the server,
     // so the tab moves the UI but only persists once a place exists.
@@ -737,32 +788,32 @@ export default function ZoneAreaScreen() {
     const previous = mode;
     setMode(next);
     save(
-      next === 'region' ? { zone_mode: next, zone_region: region!.id } : { zone_mode: next },
+      next === 'region'
+        ? { zone_type: zoneTypeForRegion(region), zone_region: region!.id }
+        : { zone_type: 'circle' },
       () => setMode(previous),
     );
-  }, [mode, region, save]);
+  }
 
   /** The one way a region is adopted, whether it was traced or searched for.
    *
    * Both routes land here so the save, the mode switch, the revert-on-failure
    * and the cleared error state cannot drift apart between them. */
-  const commitRegion = useCallback((next: RegionSummary) => {
+  function commitRegion(next: RegionSummary) {
     const previous = region;
     setRegion(next);
     setMode('region');
-    setLookupError(null);
-    // Clearing the box is enough to empty the results — they are derived from
-    // it — so there is nothing else to reset here.
-    setQuery('');
-    setChoices([]);
-    setChoicesFor(null);
-    save({ zone_mode: 'region', zone_region: next.id }, () => {
+    // Clearing the query box is enough to empty the search results — they are
+    // derived from it — so the reducer resetting the rest of the lookup UI
+    // alongside it is all that's needed here.
+    dispatchSearch({ type: 'regionAdopted' });
+    save({ zone_type: zoneTypeForRegion(next), zone_region: next.id }, () => {
       setRegion(previous);
       if (!previous) setMode('radius');
     });
-  }, [region, save]);
+  }
 
-  const clearRegion = useCallback(() => {
+  function clearRegion() {
     const previous = region;
     if (!previous) return;
     // The outline follows the region — it is matched against it, not stored
@@ -772,11 +823,11 @@ export default function ZoneAreaScreen() {
     // region mode pointed at the region just cleared would keep the old city
     // on everyone's map while this screen showed nothing chosen.
     setMode('radius');
-    save({ zone_mode: 'radius' }, () => {
+    save({ zone_type: 'circle' }, () => {
       setRegion(previous);
       setMode('region');
     });
-  }, [region, save]);
+  }
 
   // ── Lookup ───────────────────────────────────────────────────────────────
   /** Trace the place the user is standing in, at one of the two sizes.
@@ -786,9 +837,7 @@ export default function ZoneAreaScreen() {
    * larger one on someone's behalf is not a rounding error. */
   async function traceMyPlace(level: 'city' | 'district') {
     setLocating(level);
-    setLookupError(null);
-    setChoices([]);
-    setChoicesFor(null);
+    dispatchSearch({ type: 'lookupStarted' });
     // The lookup runs in its own function so that its several early exits all
     // land on the `setLocating(null)` below. That used to be a `finally`, which
     // React Compiler cannot compile — it gives up on this whole screen, and the
@@ -801,7 +850,7 @@ export default function ZoneAreaScreen() {
     try {
       const position = coords ?? (await currentCoords());
       if (!position) {
-        setLookupError('Location is off, so there is nothing to trace. Find your place by name below instead.');
+        dispatchSearch({ type: 'lookupError', message: 'Location is off, so there is nothing to trace. Find your place by name below instead.' });
         return;
       }
       setCoords(position);
@@ -816,33 +865,38 @@ export default function ZoneAreaScreen() {
       // rather than guessing — a wrong region here is not wrong once, it gets
       // stored and answers for everyone who stands here afterwards.
       if (lookup.candidates.length) {
-        setChoices(lookup.candidates);
-        setChoicesFor(level);
-        setLookupError(
-          lookup.outcome === 'ambiguous'
-            ? `More than one ${level} fits where you are. Pick the one you mean.`
-            : `Nothing here is clearly your ${level}. These are the closest — pick one, or find it by name below.`,
-        );
+        dispatchSearch({
+          type: 'candidatesFound',
+          choices: lookup.candidates,
+          choicesFor: level,
+          message:
+            lookup.outcome === 'ambiguous'
+              ? `More than one ${level} fits where you are. Pick the one you mean.`
+              : `Nothing here is clearly your ${level}. These are the closest — pick one, or find it by name below.`,
+        });
         return;
       }
 
       if (level === 'district' && lookup.cityName) {
-        setLookupError(
-          `No district is mapped inside ${lookup.cityName}. Tap “Use my city” to cover all of it, or find it by name below.`,
-        );
+        dispatchSearch({
+          type: 'lookupError',
+          message: `No district is mapped inside ${lookup.cityName}. Tap “Use my city” to cover all of it, or find it by name below.`,
+        });
       } else {
-        setLookupError(
-          level === 'district'
+        dispatchSearch({
+          type: 'lookupError',
+          message: level === 'district'
             ? 'No district is mapped where you are. Try your city, or find it by name below.'
             : 'Nothing mapped covers where you are. Try finding it by name below.',
-        );
+        });
       }
     } catch (e: any) {
-      setLookupError(
-        e?.response?.status === 503
+      dispatchSearch({
+        type: 'lookupError',
+        message: e?.response?.status === 503
           ? 'Place lookups are busy right now. Try again in a moment.'
           : 'Could not find your area right now.',
-      );
+      });
     }
   }
 
@@ -904,10 +958,10 @@ export default function ZoneAreaScreen() {
             region={region}
             locating={locating}
             saving={saving}
-            lookupError={lookupError}
-            choices={choices}
-            choicesFor={choicesFor}
-            query={query}
+            lookupError={search.lookupError}
+            choices={search.choices}
+            choicesFor={search.choicesFor}
+            query={search.query}
             results={results}
             searching={searching}
             searchError={searchError}
@@ -915,7 +969,7 @@ export default function ZoneAreaScreen() {
             onClearRegion={clearRegion}
             onTrace={traceMyPlace}
             onPickRegion={commitRegion}
-            onQueryChange={setQuery}
+            onQueryChange={(query) => dispatchSearch({ type: 'queryChanged', query })}
           />
         )}
 

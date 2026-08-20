@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -57,7 +57,7 @@ const FAULT_TITLE: Record<AppleMusicFault, string> = {
 
 export default function ZoneAppleMusicScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
 
@@ -124,7 +124,7 @@ export default function ZoneAppleMusicScreen() {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const pick = useCallback(async (song: AppleSong) => {
+  const pick = async (song: AppleSong) => {
     setPicking(song.id);
     setError(null);
     try {
@@ -137,7 +137,7 @@ export default function ZoneAppleMusicScreen() {
       setError(e instanceof AppleMusicError ? e.message : 'Could not set that track.');
       setPicking(null);
     }
-  }, [router]);
+  };
 
   return (
     <View style={styles.root}>

@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/ui/Card';
 import { IconBack, IconClose } from '@/components/ui/icons';
-import { iconForPlatform, platformName } from '@/components/ui/platformIcons';
+import { iconForPlatform, platformName } from '@/components/ui/platformMeta';
 import {
   addLink,
   deleteLink,

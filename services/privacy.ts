@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { api } from './api';
+import { forgetSharingSession, rememberSharingSession } from './sharingSession';
 
 // Single source of truth for privacy settings, shared by the Privacy & safety
 // screen and the Settings tab so a change on one updates the other without a
@@ -16,6 +17,11 @@ export type LocationSharing = 'live' | 'approximate' | 'paused';
 
 export interface PrivacySettings {
   location_sharing: LocationSharing;
+  /** Which run of the app turned sharing on; null while paused. Held in memory
+   * by services/sharingSession.ts and deliberately never written to disk — a
+   * token that survived a restart would be the "previous preference says you
+   * were visible" the whole mechanism exists to prevent. */
+  sharing_session?: string | null;
   is_private: boolean;
   visibility_interests: Audience;
   visibility_stories: Audience;
@@ -61,13 +67,35 @@ const listeners = new Set<() => void>();
 function setState(next: State) {
   state = next;
   if (next.settings) {
+    // The mode is mirrored to disk so the background task can read it. The
+    // session token deliberately is not: it lives in memory for exactly as
+    // long as this run of the app does, and that is what makes going visible
+    // a per-launch decision instead of a stored preference.
     AsyncStorage.setItem(SHARING_STORAGE, next.settings.location_sharing).catch(() => {});
+    // Unowned: this runs for reads as well as writes, and a token merely read
+    // back belongs to whichever run set it. It still clears on a null, which
+    // is the only direction a read may safely move it. `updatePrivacy` claims
+    // ownership explicitly for the writes it makes.
+    rememberSharingSession(next.settings.sharing_session);
   }
   listeners.forEach((l) => l());
 }
 
-/** The sharing mode, readable from a background task. Defaults to 'live',
- * matching a brand-new account that has never opened the privacy screen. */
+/**
+ * The sharing mode, readable from a background task.
+ *
+ * Defaults to 'paused' when nothing is known, which is both the server's
+ * default for a new account and the safe direction to be wrong in. It used to
+ * default to 'live', from when that was the server default — a fail-*open*
+ * guess that would have had a brand-new install transmitting a position before
+ * its owner had chosen anything. The server refuses those writes now (403), so
+ * nothing leaked, but a client that has to be caught by the server is a client
+ * making the wrong assumption.
+ *
+ * Only reached on a genuinely cold start: every change writes the mirror, so a
+ * returning sharer reads their real mode off disk. The cost of being wrong here
+ * is one tick of the map answered by the private query, which is read-only.
+ */
 export async function getCachedLocationSharing(): Promise<LocationSharing> {
   if (state.settings) return state.settings.location_sharing;
   try {
@@ -76,7 +104,7 @@ export async function getCachedLocationSharing(): Promise<LocationSharing> {
   } catch {
     // Fall through to the default.
   }
-  return 'live';
+  return 'paused';
 }
 
 function subscribe(listener: () => void): () => void {
@@ -124,6 +152,7 @@ export function useLocationSharing(): LocationSharing | null {
  */
 export async function resetPrivacy(): Promise<void> {
   setState({ settings: null });
+  forgetSharingSession();
   try {
     await AsyncStorage.removeItem(SHARING_STORAGE);
   } catch {}
@@ -146,6 +175,10 @@ export async function updatePrivacy(patch: Partial<PrivacySettings>): Promise<vo
   try {
     const { data } = await api.patch<PrivacySettings>('/api/users/privacy/', patch);
     setState({ settings: data });
+    // Ours: the server minted this in response to a request this run made, so
+    // the startup call may present it and be told to leave us alone. See
+    // services/sharingSession.ts.
+    rememberSharingSession(data.sharing_session, true);
   } catch (e) {
     if (previous) setState({ settings: previous });
     throw e;

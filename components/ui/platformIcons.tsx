@@ -1,7 +1,7 @@
 import Svg, { Circle, G, Path, Rect } from 'react-native-svg';
 
 import { lightColors as colors } from '@/constants/theme';
-import { IconGlobe, type IconComponent, type IconProps } from './icons';
+import { type IconProps } from './icons';
 
 // Platform glyphs for profile links, drawn locally.
 //
@@ -96,37 +96,4 @@ export function IconGitHub({ size = 24, color = colors.t2 }: IconProps) {
       </G>
     </Svg>
   );
-}
-
-/** Keys match the backend's `platform` values in users/links.py. */
-export const PLATFORM_ICONS: Record<string, IconComponent> = {
-  instagram: IconInstagram,
-  spotify: IconSpotify,
-  telegram: IconTelegram,
-  tiktok: IconTikTok,
-  youtube: IconYouTube,
-  x: IconX,
-  github: IconGitHub,
-  website: IconGlobe,
-};
-
-/** Never throws on an unknown platform — the backend allows any valid https
- * URL, so new or unrecognised hosts are expected and get the globe. */
-export function iconForPlatform(platform?: string): IconComponent {
-  return PLATFORM_ICONS[platform ?? 'website'] ?? IconGlobe;
-}
-
-export const PLATFORM_NAMES: Record<string, string> = {
-  instagram: 'Instagram',
-  spotify: 'Spotify',
-  telegram: 'Telegram',
-  tiktok: 'TikTok',
-  youtube: 'YouTube',
-  x: 'X',
-  github: 'GitHub',
-  website: 'Website',
-};
-
-export function platformName(platform?: string): string {
-  return PLATFORM_NAMES[platform ?? 'website'] ?? 'Website';
 }

@@ -1,8 +1,7 @@
-import { useMemo } from 'react';
 import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { hostOf, type ProfileLink } from '@/services/links';
-import { iconForPlatform, platformName } from '@/components/ui/platformIcons';
+import { iconForPlatform, platformName } from '@/components/ui/platformMeta';
 import { fonts, radius, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -67,7 +66,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function ProfileLinkRow({ link }: { link: ProfileLink }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const Icon = iconForPlatform(link.platform);
   const host = hostOf(link.url);
   return (
@@ -78,7 +77,7 @@ export function ProfileLinkRow({ link }: { link: ProfileLink }) {
       accessibilityLabel={`${platformName(link.platform)}, ${link.label}`}
       accessibilityHint={`Opens ${host} outside Aura`}
     >
-      <Icon size={18} color={colors.teal} />
+      {Icon({ size: 18, color: colors.teal })}
       <Text style={styles.label} numberOfLines={1}>{link.label}</Text>
       <Text style={styles.host} numberOfLines={1} importantForAccessibility="no">
         {host}

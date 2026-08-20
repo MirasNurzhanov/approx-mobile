@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,8 +11,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
+  type PanResponderInstance,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
@@ -24,18 +24,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { REACTIONS } from '@/components/storyReactions';
 import { Avatar } from '@/components/ui/Avatar';
 import { Scrim } from '@/components/ui/Scrim';
 import {
   IconBookmark,
   IconChevron,
   IconClose,
-  IconFunny,
-  IconInsight,
-  IconLike,
   IconPin,
-  IconStar,
-  type IconComponent,
 } from '@/components/ui/icons';
 import { fonts, radius, type } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -47,7 +43,7 @@ import {
   unsaveStories,
   useStoryArchive,
   type ReactionType,
-  type Story,
+  type FeedStory,
 } from '@/services/stories';
 import { encodeStoryReply } from '@/services/storyReply';
 
@@ -62,14 +58,7 @@ import { encodeStoryReply } from '@/services/storyReply';
 
 export const STORY_DURATION_MS = 7_000;
 
-export const REACTIONS: { type: ReactionType; Icon: IconComponent }[] = [
-  { type: 'like',        Icon: IconLike },
-  { type: 'funny',       Icon: IconFunny },
-  { type: 'helpful',     Icon: IconInsight },
-  { type: 'interesting', Icon: IconStar },
-];
-
-export function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return 'just now';
@@ -79,7 +68,7 @@ export function timeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export function timeLeft(expiresAt: string): string {
+function timeLeft(expiresAt: string): string {
   const diff = new Date(expiresAt).getTime() - Date.now();
   if (diff <= 0) return 'expired';
   const hrs = Math.floor(diff / 3_600_000);
@@ -95,7 +84,7 @@ function ProgressBar({ active, past, progress }: {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const style = useAnimatedStyle(() => {
-    const pct = active ? progress.value : past ? 1 : 0;
+    const pct = active ? progress.get() : past ? 1 : 0;
     return { width: `${pct * 100}%` };
   });
   return (
@@ -106,7 +95,10 @@ function ProgressBar({ active, past, progress }: {
 }
 
 export interface StoryViewerProps {
-  stories: Story[];
+  // `FeedStory`, not `Story`: this viewer is opened from the chat rings and
+  // the archive as well as from the map, and a story posted while location
+  // sharing was paused has no coordinate to require.
+  stories: FeedStory[];
   onClose: () => void;
   /** Omit to show reaction counts read-only (e.g. in the archive, where the
    * within-500m rule would reject a new reaction anyway). */
@@ -119,7 +111,7 @@ export interface StoryViewerProps {
 
 export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId }: StoryViewerProps) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);
@@ -138,8 +130,10 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     setIndex(i);
   }
 
+  // Read only from the pan handler and the auto-advance timer, both of which
+  // run after the commit this effect follows.
   const goToRef = useRef(goTo);
-  goToRef.current = goTo;
+  useEffect(() => { goToRef.current = goTo; });
 
   // Auto-advance, paused while the reply input is focused.
   useEffect(() => {
@@ -147,25 +141,34 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
       cancelAnimation(progress);
       return;
     }
-    progress.value = 0;
-    progress.value = withTiming(1, { duration: STORY_DURATION_MS });
+    progress.set(0);
+    progress.set(withTiming(1, { duration: STORY_DURATION_MS }));
     const timer = setTimeout(() => goToRef.current(indexRef.current + 1), STORY_DURATION_MS);
     return () => {
       cancelAnimation(progress);
       clearTimeout(timer);
     };
-  }, [index, replyFocused]);
+  }, [index, replyFocused, progress]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy),
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dx < -40) goToRef.current(indexRef.current + 1);
-        else if (gs.dx > 40) goToRef.current(indexRef.current - 1);
-      },
-    })
-  ).current;
+  // Built once, in an effect rather than during render. The handlers have to
+  // read `.current` to stay on the live story, and the compiler counts every
+  // ref read reachable from a render-time call as a render-time read — which a
+  // `useRef`/`useState` initialiser is. Inside an effect it is simply allowed.
+  // Costs one extra render on mount; the gesture is live well before a finger
+  // can arrive, since the viewer fades in first.
+  const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
+  useEffect(() => {
+    setPanResponder(
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gs) =>
+          Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy),
+        onPanResponderRelease: (_, gs) => {
+          if (gs.dx < -40) goToRef.current(indexRef.current + 1);
+          else if (gs.dx > 40) goToRef.current(indexRef.current - 1);
+        },
+      }),
+    );
+  }, []);
 
   const story = stories[index];
   if (!story) return null;
@@ -218,7 +221,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   return (
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={styles.svContainer} {...panResponder.panHandlers}>
+      <View style={styles.svContainer} {...(panResponder?.panHandlers ?? {})}>
         {/* Background — photo fills the screen; a text-only story gets a soft
             vertical wash rather than flat black, which read as a dead screen. */}
         <View style={[StyleSheet.absoluteFill, styles.svBackdrop]} />
@@ -232,16 +235,14 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
             old 30/30 split left a dead 40% down the middle where a tap did
             nothing at all. Everything interactive renders after these and so
             takes precedence. */}
-        <TouchableOpacity
+        <Pressable
           style={styles.svNavLeft}
-          activeOpacity={1}
           onPress={() => goTo(index - 1)}
           accessibilityRole="button"
           accessibilityLabel="Previous story"
         />
-        <TouchableOpacity
+        <Pressable
           style={styles.svNavRight}
-          activeOpacity={1}
           onPress={() => goTo(index + 1)}
           accessibilityRole="button"
           accessibilityLabel="Next story"
@@ -259,8 +260,8 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
         {/* Progress bars, flush to the top edge where a story's are expected
             to be. They used to sit in a rounded translucent box of their own. */}
         <View style={[styles.svProgressRow, { top: top + 8 }]} pointerEvents="none">
-          {stories.map((_, i) => (
-            <ProgressBar key={i} active={i === index} past={i < index} progress={progress} />
+          {stories.map((s, i) => (
+            <ProgressBar key={s.id} active={i === index} past={i < index} progress={progress} />
           ))}
         </View>
 
@@ -276,26 +277,30 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
             </Text>
           </View>
           {canSave && (
-            <TouchableOpacity
+            <Pressable
               onPress={toggleSave}
               hitSlop={12}
-              style={[styles.svGlassBtn, isSaved && styles.svGlassBtnActive]}
+              style={({ pressed }) => [
+                styles.svGlassBtn,
+                isSaved && styles.svGlassBtnActive,
+                pressed && { opacity: 0.7 },
+              ]}
               accessibilityRole="button"
               accessibilityLabel={isSaved ? 'Remove from saved' : 'Save story'}
               accessibilityState={{ selected: isSaved, disabled: togglingSave }}
             >
               <IconBookmark size={16} color={isSaved ? colors.teal : colors.t1} filled={isSaved} />
-            </TouchableOpacity>
+            </Pressable>
           )}
-          <TouchableOpacity
+          <Pressable
             onPress={onClose}
             hitSlop={12}
-            style={styles.svGlassBtn}
+            style={({ pressed }) => [styles.svGlassBtn, pressed && { opacity: 0.7 }]}
             accessibilityRole="button"
             accessibilityLabel="Close stories"
           >
             <IconClose size={17} color={colors.t1} />
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         {/* Story text. Legible now because the bottom scrim runs underneath
@@ -327,18 +332,21 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
               onSubmitEditing={sendReply}
               returnKeyType="send"
             />
-            <TouchableOpacity
-              style={[styles.svReplySend, replyText.trim().length > 0 && styles.svReplySendActive]}
+            <Pressable
+              style={({ pressed }) => [
+                styles.svReplySend,
+                replyText.trim().length > 0 && styles.svReplySendActive,
+                pressed && { opacity: 0.8 },
+              ]}
               onPress={sendReply}
               disabled={replyText.trim().length === 0 || sendingReply}
-              activeOpacity={0.8}
             >
               {sendingReply ? (
                 <ActivityIndicator size="small" color={colors.bg} />
               ) : (
                 <IconChevron size={16} color={replyText.trim() ? colors.bg : colors.t3} />
               )}
-            </TouchableOpacity>
+            </Pressable>
           </View>
         )}
 

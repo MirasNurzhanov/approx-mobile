@@ -13,7 +13,20 @@ import { api } from './api';
 // not move.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+/** What the map *draws*: a circle, or a traced outline. Two values because
+ *  both polygon zone types render identically — the map has never needed to
+ *  know which of them it is looking at. Still what `/nearby/` sends. */
 export type ZoneMode = 'radius' | 'region';
+
+/** What the zone *is*, as the backend stores and tests it.
+ *
+ * Finer than `ZoneMode` on purpose: a district and a city draw the same and
+ * behave very differently, and the server keys its containment on this. The
+ * screen still offers two buttons — Circle and Place — and resolves the place
+ * to one of the two polygon types from the region the user picked, so the
+ * distinction lives in the data rather than in a third button nobody asked for.
+ */
+export type ZoneType = 'circle' | 'district' | 'city';
 
 /** The two sizes a region zone comes in. `other` exists because the cache also
  *  holds things that are neither — a province, a country — reachable by search
@@ -233,6 +246,21 @@ export async function searchRegions(query: string): Promise<RegionSummary[]> {
 }
 
 /** "City" / "District" — the size label shown beside a place's name. */
+/** The zone type a picked region becomes.
+ *
+ * `other` has no honest answer, and the server refuses it for both types — it
+ * is what the classifier says when a place is *neither* size on offer, meaning
+ * a province or a country, and a zone covering one of those is not something
+ * the two buttons are promising. `city` is returned so the request is
+ * well-formed and comes back as a readable 400 rather than being silently
+ * dropped here. It should not arise in practice: the picker only ever searches
+ * `city,district`.
+ */
+export function zoneTypeForRegion(region: { kind: RegionKind } | null | undefined): ZoneType {
+  if (!region) return 'circle';
+  return region.kind === 'district' ? 'district' : 'city';
+}
+
 export function kindLabel(kind: RegionKind): string {
   if (kind === 'city') return 'City';
   if (kind === 'district') return 'District';

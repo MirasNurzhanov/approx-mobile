@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Modal,
   Pressable,
   RefreshControl,
@@ -100,14 +101,14 @@ function ClubHero({ club, memberCount, myRole, isMember, onOpenChat }: {
         <Image source={{ uri: club.emblem }} style={styles.emblem} />
       ) : (
         <View style={styles.emblemFallback}>
-          <Text style={styles.emblemInitial}>{club.name.charAt(0).toUpperCase()}</Text>
+          <Text style={styles.emblemInitial}>{club.name?.charAt(0)?.toUpperCase() ?? '?'}</Text>
         </View>
       )}
 
-      <Text style={styles.clubName}>{club.name}</Text>
+      <Text style={styles.clubName}>{club.name ?? ''}</Text>
 
       <View style={styles.metaRow}>
-        {club.interest && (
+        {club.interest?.name && (
           <View style={styles.interestBadge}>
             <Text style={styles.interestIcon}>{club.interest.icon}</Text>
             <Text style={styles.interestName}>{club.interest.name}</Text>
@@ -230,9 +231,14 @@ function InviteModal({ visible, query, results, searching, invitingIds, bottom, 
         {searching ? (
           <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
         ) : results.length > 0 ? (
-          <ScrollView style={styles.inviteList} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {results.map((user) => (
-              <View key={user.id} style={styles.inviteRow}>
+          <FlatList
+            style={styles.inviteList}
+            data={results}
+            keyExtractor={(user) => String(user.id)}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item: user }) => (
+              <View style={styles.inviteRow}>
                 <Avatar uri={user.profile_picture} name={user.username} size="sm" />
                 <Text style={styles.inviteUsername} numberOfLines={1}>@{user.username}</Text>
                 <Pressable
@@ -247,8 +253,8 @@ function InviteModal({ visible, query, results, searching, invitingIds, bottom, 
                   )}
                 </Pressable>
               </View>
-            ))}
-          </ScrollView>
+            )}
+          />
         ) : query.length > 0 ? (
           <Text style={styles.inviteEmpty}>No users found.</Text>
         ) : null}
@@ -330,13 +336,32 @@ function useClubInvite(clubId: number, members: ClubMember[], onInvited: () => P
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
+/**
+ * Reads the route and hands the club id down as a `key`.
+ *
+ * The key is the whole point: navigating from one club to another can reuse
+ * this screen rather than pushing a new one, and a reused component keeps the
+ * state it already had — so the previous club stayed on screen while `clubId`
+ * had already moved on. This used to be papered over with an effect that
+ * re-derived `club`/`members`/`loading` from the cache whenever `clubId`
+ * changed, which meant every such navigation rendered the stale club once and
+ * then immediately re-rendered with the right one.
+ *
+ * Keying on the id makes a different club a different component instance, so
+ * the `useState` initialisers below run again and the first render is already
+ * correct. React's own answer to "reset all state when a prop changes".
+ */
 export default function ClubDetailScreen() {
+  const { id, fromCreate } = useLocalSearchParams<{ id: string; fromCreate?: string }>();
+  const clubId = Number(id);
+  return <ClubDetail key={clubId} clubId={clubId} fromCreate={fromCreate} />;
+}
+
+function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: string }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { id, fromCreate } = useLocalSearchParams<{ id: string; fromCreate?: string }>();
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
-  const clubId = Number(id);
   const cached = _clubCache.get(clubId);
 
   const [club, setClub] = useState<Club | null>(cached?.club ?? null);
@@ -368,7 +393,10 @@ export default function ClubDetailScreen() {
     const meId = meRes.status === 'fulfilled' ? meRes.value.data.id : null;
     if (meId) setCurrentUserId(meId);
 
-    if (clubRes.status === 'fulfilled') {
+    // `fulfilled` only means the request didn't reject — an empty body still
+    // resolves with `data: null`, and caching that would poison every later
+    // visit to this club with a club-shaped `null`.
+    if (clubRes.status === 'fulfilled' && clubRes.value.data) {
       let clubData = clubRes.value.data;
       if (meId && !clubData.my_role && !clubData.is_member) {
         const myMembership = fetchedMembers.find((m) => Number(m.user.id) === Number(meId));
@@ -441,8 +469,13 @@ export default function ClubDetailScreen() {
 
   // ── Delete Club ───────────────────────────────────────────────────────────
   function handleDeleteClub() {
+    // A real guard, not a `!` assertion: both callers of this function only
+    // reach it once `club` has been confirmed non-null by the render below,
+    // but the two are otherwise unconnected — this makes that true by
+    // construction rather than by every caller remembering to check first.
+    if (!club) return;
     Alert.alert(
-      `Delete ${club!.name}?`,
+      `Delete ${club.name}?`,
       'This removes all members and events and cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -466,7 +499,8 @@ export default function ClubDetailScreen() {
 
   // ── Club manage (creator header button) ───────────────────────────────────
   function openClubManage() {
-    Alert.alert(club!.name, undefined, [
+    if (!club) return;
+    Alert.alert(club.name, undefined, [
       { text: 'Delete Club', style: 'destructive', onPress: handleDeleteClub },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -581,7 +615,7 @@ export default function ClubDetailScreen() {
               pathname: '/clubs/[id]/chat',
               params: {
                 id: club.id,
-                name: club.name,
+                name: club.name ?? '',
                 emblem: club.emblem ?? '',
                 memberCount: members.length || club.member_count,
               },

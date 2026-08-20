@@ -1,7 +1,7 @@
 import { useIsFocused } from '@react-navigation/native';
-import { Audio, type AVPlaybackStatus } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState } from 'react-native';
 
 /**
  * The sound behind a zone track, and nothing else.
@@ -64,19 +64,24 @@ export function useZonePlayback({
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState<number | null>(null);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<AudioPlayer | null>(null);
+  const subRef = useRef<{ remove: () => void } | null>(null);
   /** Same reason as `rangeRef`: the status callback is bound once at load. */
   const onDurationRef = useRef(onDuration);
-  onDurationRef.current = onDuration;
   const onPositionRef = useRef(onPosition);
-  onPositionRef.current = onPosition;
+  useEffect(() => {
+    onDurationRef.current = onDuration;
+    onPositionRef.current = onPosition;
+  });
   /** Set on unmount so a load that is still in flight unloads itself instead
    *  of playing into a screen that is gone. */
   const goneRef = useRef(false);
 
-  const unload = useCallback(async () => {
+  const unload = useCallback(() => {
     const sound = soundRef.current;
     soundRef.current = null;
+    subRef.current?.remove();
+    subRef.current = null;
     setState('idle');
     setPosition(0);
     setDuration(null);
@@ -84,8 +89,10 @@ export function useZonePlayback({
     // on a card whose audio has been unloaded.
     onPositionRef.current?.(null);
     if (!sound) return;
-    await sound.stopAsync().catch(() => {});
-    await sound.unloadAsync().catch(() => {});
+    try {
+      sound.pause();
+      sound.remove();
+    } catch {}
   }, []);
 
   // Unload on unmount, and whenever the track itself changes.
@@ -106,18 +113,21 @@ export function useZonePlayback({
   // Native looping is only correct while the window *is* the whole file: it
   // wraps to zero, which on a trimmed track is not where the loop restarts.
   // Handing the job back and forth as the range changes keeps the untrimmed
-  // case gapless — expo-av loops seamlessly, the status callback cannot — while
-  // letting `onStatus` own the seam whenever there is a real window.
+  // case gapless — the native player loops seamlessly, the status callback
+  // cannot — while letting `onStatus` own the seam whenever there is a real
+  // window.
   useEffect(() => {
-    soundRef.current?.setIsLoopingAsync(endMs == null).catch(() => {});
+    if (soundRef.current) soundRef.current.loop = endMs == null;
   }, [endMs]);
 
   /** Pause without unloading, so resuming picks up where it stopped. */
-  const pause = useCallback(async () => {
+  const pause = useCallback(() => {
     const sound = soundRef.current;
     if (!sound) return;
     setState('paused');
-    await sound.pauseAsync().catch(() => {});
+    try {
+      sound.pause();
+    } catch {}
   }, []);
 
   // Playback belongs to the card in front of you. Switching tabs, opening
@@ -126,7 +136,7 @@ export function useZonePlayback({
   // autoplay out was that sound should never outlive the intent to hear it.
   const focused = useIsFocused();
   const focusedRef = useRef(true);
-  focusedRef.current = focused;
+  useEffect(() => { focusedRef.current = focused; });
   useEffect(() => { if (!focused) pause(); }, [focused, pause]);
 
   useEffect(() => {
@@ -137,115 +147,93 @@ export function useZonePlayback({
   }, [pause]);
 
   /** The loop window, as the props currently describe it. Held in a ref because
-   *  the status callback is handed to expo-av once, at load, and would
+   *  the status callback is handed to expo-audio once, at load, and would
    *  otherwise keep testing against whatever the range was back then — which
    *  is precisely wrong in a trim editor, where the whole point is that the
    *  window moves while the sound is playing. */
   const rangeRef = useRef({ startMs, endMs });
-  rangeRef.current = { startMs, endMs };
+  useEffect(() => { rangeRef.current = { startMs, endMs }; });
 
-  const onStatus = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if (status.error) setState('error');
-      return;
-    }
-    const at = status.positionMillis ?? 0;
+  const onStatus = useCallback((status: AudioStatus) => {
+    // expo-audio's status carries no error field for a playback failure that
+    // arrives after a successful load (only `AudioRecorder`'s status does) —
+    // `load`'s catch block is the only place a failure can still surface.
+    if (!status.isLoaded) return;
+    const at = Math.round(status.currentTime * 1000);
     setPosition(at);
     onPositionRef.current?.(at);
-    setDuration(status.durationMillis ?? null);
-    if (status.durationMillis) onDurationRef.current?.(status.durationMillis);
+    const durationMs = status.duration ? Math.round(status.duration * 1000) : null;
+    setDuration(durationMs);
+    if (durationMs) onDurationRef.current?.(durationMs);
 
-    // Wrap at the end of the *window*. expo-av's own looping only knows about
-    // the end of the file, so a trimmed track has to be turned around here —
-    // and `didJustFinish` covers the case where the window runs to the file's
-    // end, where there is no later position to observe.
+    // Wrap at the end of the *window*. The native player's own looping only
+    // knows about the end of the file, so a trimmed track has to be turned
+    // around here — and `didJustFinish` covers the case where the window runs
+    // to the file's end, where there is no later position to observe.
     //
     // Only while actually playing. Pausing on or past the loop point is a
     // legitimate place to be parked, and yanking the position back there would
     // both move the track under a stopped finger and mislabel it as playing.
     const { startMs: from, endMs: to } = rangeRef.current;
-    const past = to != null && at >= to && status.isPlaying;
+    const past = to != null && at >= to && status.playing;
     if ((past || status.didJustFinish) && soundRef.current) {
       // Fire and forget: the next status tick reports the new position, and
-      // awaiting here would block the callback expo-av is calling us from.
-      soundRef.current.setPositionAsync(from).catch(() => {});
+      // awaiting here would block the callback expo-audio is calling us from.
+      soundRef.current.seekTo(from / 1000).catch(() => {});
       setPosition(from);
       setState('playing');
       return;
     }
 
-    // `shouldPlay` without `isPlaying` is buffering, which is still the playing
-    // state as far as the button is concerned — it must stay a pause button.
-    setState(status.isPlaying || status.shouldPlay ? 'playing' : 'paused');
+    // Buffering without `playing` should still read as the playing state as
+    // far as the button is concerned — it must stay a pause button.
+    setState(status.playing || status.isBuffering ? 'playing' : 'paused');
   }, []);
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: React
+  // Compiler bails on this hook (emitted output is the source verbatim, no `_c`
+  // cache), so every `useCallback` here is the only caching there is.
   const load = useCallback(async (startAt = 0) => {
     setState('loading');
 
-    const create = (androidImplementation?: 'MediaPlayer') =>
-      Audio.Sound.createAsync(
-        { uri: url },
-        {
-          shouldPlay: true,
-          // Left off when a window is set: expo-av would wrap to zero at the
-          // end of the *file*, which for a trimmed track is the wrong place.
-          // `onStatus` turns it around at the end of the window instead.
-          isLooping: rangeRef.current.endMs == null,
-          positionMillis: startAt || rangeRef.current.startMs,
-          // Tighter than a progress bar needs, because this is also what
-          // decides how far past the loop point playback can drift before it
-          // wraps — at 350ms a short loop audibly overshoots.
-          progressUpdateIntervalMillis: 120,
-          ...(androidImplementation ? { androidImplementation } : {}),
-        },
-        onStatus,
-      );
-
     try {
-      await Audio.setAudioModeAsync({
+      await setAudioModeAsync({
         // Someone tapping play with the ringer switch off still means it.
-        playsInSilentModeIOS: true,
+        playsInSilentMode: true,
         // Deliberately foreground-only: the card owns the sound, so leaving
         // the app is one more way to stop it.
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
+        shouldPlayInBackground: false,
+        interruptionMode: 'duckOthers',
       });
 
-      let sound: Audio.Sound | null = null;
-      try {
-        sound = (await create()).sound;
-      } catch {
-        // Android only, and only as a second attempt. Apple's preview CDN
-        // serves these files as `audio/x-m4p` — a legacy label meaning
-        // *protected* AAC, which these are not. ExoPlayer normally sniffs the
-        // container and ignores the header, but where it doesn't, the SDK
-        // documents MediaPlayer as the fallback for media ExoPlayer refuses.
-        // Trying it costs one failed load; not trying it costs Android users
-        // the whole feature.
-        //
-        // A failure with no retry left leaves `sound` null and is handled just
-        // below, rather than rethrowing to the outer `catch`: React Compiler
-        // cannot lower a `throw` inside a `try/catch` and would give up on this
-        // hook entirely.
-        if (Platform.OS === 'android' && !goneRef.current) {
-          console.log('[Zone] ExoPlayer refused the track, retrying with MediaPlayer');
-          sound = (await create('MediaPlayer')).sound;
-        }
-      }
-
-      if (!sound) {
-        if (!goneRef.current) setState('error');
-        return;
-      }
+      // Synchronous: the native player is created immediately and reports its
+      // own load progress through the status listener rather than a promise —
+      // there's no `androidImplementation` fallback to retry with any more, so
+      // a source ExoPlayer can't decode now surfaces as a load that never
+      // reaches `isLoaded`, not a caught rejection here.
+      const sound = createAudioPlayer({ uri: url }, { updateInterval: 120 });
+      const sub = sound.addListener('playbackStatusUpdate', onStatus);
 
       if (goneRef.current) {
-        await sound.unloadAsync().catch(() => {});
+        sub.remove();
+        sound.remove();
         return;
       }
       soundRef.current = sound;
+      subRef.current = sub;
+
+      // Left off when a window is set: the native loop would wrap to zero at
+      // the end of the *file*, which for a trimmed track is the wrong place.
+      // `onStatus` turns it around at the end of the window instead.
+      sound.loop = rangeRef.current.endMs == null;
+
+      const from = startAt || rangeRef.current.startMs;
+      if (from) await sound.seekTo(from / 1000).catch(() => {});
+
       // A blur that landed while this was still loading applies to it too —
       // otherwise a slow load starts playing into a screen you already left.
-      if (!focusedRef.current) await pause();
+      if (focusedRef.current) sound.play();
+      else pause();
     } catch {
       if (!goneRef.current) setState('error');
     }
@@ -259,10 +247,10 @@ export function useZonePlayback({
       return;
     }
     if (state === 'playing') {
-      await pause();
+      pause();
     } else {
       setState('playing');
-      await sound.playAsync().catch(() => {});
+      sound.play();
     }
   }
 
@@ -278,8 +266,8 @@ export function useZonePlayback({
     const from = rangeRef.current.startMs;
     setPosition(from);
     setState('playing');
-    await sound.setPositionAsync(from).catch(() => {});
-    await sound.playAsync().catch(() => {});
+    await sound.seekTo(from / 1000).catch(() => {});
+    sound.play();
   }
 
   return { state, position, duration, toggle, restart };

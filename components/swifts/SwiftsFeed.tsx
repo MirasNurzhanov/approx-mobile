@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SwiftCard } from '@/components/swifts/SwiftCard';
-import { navArcClearance } from '@/components/Speedometer';
+import { navArcClearance } from '@/components/navArc';
 import { fonts } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -74,7 +74,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function SwiftsFeed() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { bottom: safeBottom } = useSafeAreaInsets();
 
@@ -88,6 +88,9 @@ export function SwiftsFeed() {
   const [muted, setMuted] = useState(true);
   const [height, setHeight] = useState(0);
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds its
+  // own `useEffect(load, [load])` below — an unstable identity would re-run
+  // the fetch every render instead of once on mount.
   const load = useCallback(() => {
     getSwifts()
       .then((data) => {
@@ -102,14 +105,16 @@ export function SwiftsFeed() {
   // Only the retry path has to put the feed back into 'loading' — the first
   // load already starts there, so doing it in the mount effect would just be a
   // second render to set the value it already had.
-  const retry = useCallback(() => {
+  const retry = () => {
     setState('loading');
     load();
-  }, [load]);
+  };
 
   // Stable identity: FlatList warns and misbehaves if this changes per render.
-  const handleViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+  // Held by `useState` rather than a ref, since reading a ref back during
+  // render is what stops React Compiler optimising this component.
+  const [handleViewableItemsChanged] = useState(() => {
+    return ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const first = viewableItems[0];
       if (first?.index != null) {
         setActiveIndex(first.index);
@@ -118,16 +123,16 @@ export function SwiftsFeed() {
         // the prop afterwards.
         setPausedId(null);
       }
-    },
-  ).current;
+    };
+  });
 
-  const handleLayout = useCallback((e: LayoutChangeEvent) => {
+  const handleLayout = (e: LayoutChangeEvent) => {
     setHeight(e.nativeEvent.layout.height);
-  }, []);
+  };
 
   // Optimistic: the count moves under the thumb, and only rolls back if the
   // write actually fails.
-  const handleToggleLike = useCallback((id: string, liked: boolean) => {
+  const handleToggleLike = (id: string, liked: boolean) => {
     setSwifts((prev) =>
       prev.map((s) =>
         s.id === id
@@ -144,11 +149,11 @@ export function SwiftsFeed() {
         ),
       );
     });
-  }, []);
+  };
 
   // TODO(swifts): comments sheet, share sheet, and a report/mute menu. Each is a
   // screen of its own; the feed only needs to know they were asked for.
-  const noop = useCallback(() => {}, []);
+  const noop = () => {};
 
   const navClearance = navArcClearance(RAIL_RIGHT, RAIL_WIDTH) + safeBottom;
 

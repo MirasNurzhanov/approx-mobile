@@ -97,16 +97,18 @@ export function SwiftCard({
   const progress = durationS > 0 ? currentTime / durationS : 0;
 
   // ── Gestures ────────────────────────────────────────────────────────────────
+  // Read only from the double-tap handler, which cannot fire before this
+  // effect has run for the commit that changed the value.
   const likedRef = useRef(swift.isLiked);
-  likedRef.current = swift.isLiked;
+  useEffect(() => { likedRef.current = swift.isLiked; });
 
   function burstHeart() {
     if (reduceMotion) return;
-    heartScale.value = withSequence(
+    heartScale.set(withSequence(
       withTiming(1, { duration: 180 }),
       withTiming(1, { duration: 260 }),
       withTiming(0, { duration: 180 }),
-    );
+    ));
   }
 
   const handleTap = useDoubleTap(
@@ -120,8 +122,8 @@ export function SwiftCard({
   );
 
   const heartStyle = useAnimatedStyle(() => ({
-    opacity: heartScale.value,
-    transform: [{ scale: 0.6 + heartScale.value * 0.6 }],
+    opacity: heartScale.get(),
+    transform: [{ scale: 0.6 + heartScale.get() * 0.6 }],
   }));
 
   const showPauseIcon = isActive && pausedByUser;

@@ -27,6 +27,9 @@ import { AppThemeProvider, useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
+import { refreshPrivacy } from '@/services/privacy';
+import { endStaleSharingSession } from '@/services/sharingSession';
+import { startNotificationRouting } from '@/services/notificationRouting';
 import '@/services/backgroundLocation';
 
 function AppStatusBar() {
@@ -36,6 +39,22 @@ function AppStatusBar() {
 
 function AppShell() {
   const { isLoading, isAuthenticated } = useAuth();
+
+  // Whatever this account's sharing mode was when the app last closed, it was
+  // chosen by a run that no longer exists. Ending it here is what makes going
+  // visible a per-launch decision rather than a setting that quietly persists.
+  // See services/sharingSession.ts for why it presents a token instead of
+  // simply pausing — startup races the user's own tap.
+  //
+  // Gated on being signed in, like the push effect below: there is nobody to
+  // pause otherwise. Runs once per process, and only in the foreground.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    // Re-read afterwards, not before: a screen that mounted first may already
+    // have pulled a sharing mode that this call has just ended, and the store
+    // would otherwise keep showing the user as visible when they are not.
+    endStaleSharingSession().then(() => { refreshPrivacy().catch(() => {}); });
+  }, [isAuthenticated]);
 
   useEffect(() => {
     console.log('[Push] isAuthenticated:', isAuthenticated);
@@ -52,6 +71,17 @@ function AppShell() {
     });
 
     return () => sub.remove();
+  }, [isAuthenticated]);
+
+  // Tapping a notification opens what it is about. Gated on being signed in
+  // for the same reason registration is: every destination is behind auth, and
+  // pushing /messages/12 at the login screen would land on a screen that
+  // immediately bounces. A tap that arrives while signed out is dropped rather
+  // than queued — by the time anyone signs in, it is no longer what they came
+  // to the app for.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    return startNotificationRouting();
   }, [isAuthenticated]);
 
   if (isLoading) {
@@ -81,10 +111,15 @@ function AppShell() {
       <Stack.Screen name="privacy"         options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="connections"     options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="permissions"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="notification-settings" options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="nearby"          options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding"      options={{ headerShown: false }} />
       <Stack.Screen name="register"        options={{ headerShown: false }} />
+      {/* Google/Apple sign-ups land here for the one thing neither provider
+          shares. `gestureEnabled: false` because it is the age gate — swiping
+          back out of it would land on a login screen the user is already past. */}
+      <Stack.Screen name="social-birthday" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="interests-setup"         options={{ headerShown: false }} />
       <Stack.Screen name="onboarding-profession"   options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="onboarding-nationality"  options={{ headerShown: false, animation: 'slide_from_right' }} />
@@ -98,12 +133,35 @@ function AppShell() {
   );
 }
 
-export default function RootLayout() {
-  ErrorUtils.setGlobalHandler((error, isFatal) => {
-    console.error('[FATAL]', error.message, error.stack);
-  });
+// Installed once, at module scope, and chained rather than replaced.
+//
+// This used to sit in RootLayout's render body, which meant re-registering it
+// on every render — and, far worse, it replaced React Native's own handler
+// without ever calling it. A genuinely fatal error was written to the console
+// and then swallowed: no red box in development, no crash report in production,
+// nothing for the next person to work from. A crash reported as "it just closes
+// with no message" is exactly what that looks like from the outside.
+//
+// `getGlobalHandler` is guarded because it is not part of the documented
+// surface; if it is ever missing, chaining is skipped rather than throwing here
+// and taking the launch down with it.
+const previousErrorHandler = ErrorUtils.getGlobalHandler?.();
+ErrorUtils.setGlobalHandler((error, isFatal) => {
+  console.error('[FATAL]', isFatal ? '(fatal)' : '(non-fatal)', error?.message, error?.stack);
+  previousErrorHandler?.(error, isFatal);
+});
 
-  const [fontsLoaded] = useFonts({
+export default function RootLayout() {
+  // `fontError` is read, not ignored. `useFonts` reports a failure by setting
+  // it and leaving `loaded` false forever — so a bare `if (!loaded) return null`
+  // renders a permanently blank screen when a font fails to load, with the
+  // splash already dismissed behind it. From the user's side that is
+  // indistinguishable from the app failing to start, and because a font load
+  // can fail intermittently it is the kind of fault that clears on the next try.
+  //
+  // A missing font is a cosmetic problem; a blank screen is not. Render either
+  // way and let the system fall back.
+  const [fontsLoaded, fontError] = useFonts({
     SpaceGrotesk: SpaceGrotesk_400Regular,
     'SpaceGrotesk-Medium': SpaceGrotesk_500Medium,
     'SpaceGrotesk-SemiBold': SpaceGrotesk_600SemiBold,
@@ -116,7 +174,11 @@ export default function RootLayout() {
 
   const colorScheme = useColorScheme();
 
-  if (!fontsLoaded) return null;
+  useEffect(() => {
+    if (fontError) console.warn('[Fonts] failed to load, falling back:', fontError.message);
+  }, [fontError]);
+
+  if (!fontsLoaded && !fontError) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

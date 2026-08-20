@@ -29,15 +29,6 @@ const makeRelationship = (colors: ColorPalette): Record<Relationship, Descriptor
   stranger:    { label: 'Nearby',      glyph: '○', color: colors.t2 },
 });
 
-export function relationshipLabel(rel: Relationship): string {
-  // Labels are theme-independent so we use static fallbacks here.
-  const labels: Record<Relationship, string> = {
-    friend: 'Friend', connected: 'Connected', hi_sent: 'Hi sent',
-    hi_received: 'Hi received', stranger: 'Nearby',
-  };
-  return labels[rel] ?? labels.stranger;
-}
-
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   badge: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -91,11 +91,17 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function usePermissionPrimer() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const [pending, setPending] = useState<Pending | null>(null);
+  // Mirrors `pending` for the two callbacks below. Both are driven by a tap on
+  // the sheet, so they cannot run before this effect has caught the ref up.
   const pendingRef = useRef<Pending | null>(null);
-  pendingRef.current = pending;
+  useEffect(() => { pendingRef.current = pending; });
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: `ensure`
+  // is this hook's whole public surface, consumed across six other files that
+  // rely on its identity staying stable — `settle`/`onContinue` memoized to
+  // match, since `onContinue` depends on `settle`.
   const settle = useCallback((granted: boolean) => {
     pendingRef.current?.resolve(granted);
     setPending(null);

@@ -40,12 +40,27 @@ interface AvatarProps {
    * would both misreport that and make hiding detectable.
    */
   presence?: Presence | null
+  /**
+   * Draws the accent ring that means "this person has a live story".
+   *
+   * A second ring outside the tier one rather than a different colour for it:
+   * the inner ring answers "who is this to me" and this answers "is there
+   * something to open", and collapsing them into one colour would make a
+   * friend with a story indistinguishable from a connection without one.
+   */
+  storyRing?: boolean
 }
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   ring: {
     borderWidth: 2,
     borderColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storyRing: {
+    borderWidth: 2,
+    borderColor: colors.teal,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -63,7 +78,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 })
 
-export function Avatar({ uri, name, size = 'md', active = false, ringColor, presence }: AvatarProps) {
+export function Avatar({
+  uri, name, size = 'md', active = false, ringColor, presence, storyRing = false,
+}: AvatarProps) {
   const { colors } = useTheme()
   const styles = makeStyles(colors)
   const dim = SIZE_MAP[size]
@@ -75,7 +92,7 @@ export function Avatar({ uri, name, size = 'md', active = false, ringColor, pres
 
   const borderColor = ringColor ?? (active ? colors.teal : 'transparent')
 
-  return (
+  const inner = (
     <View
       style={[
         styles.ring,
@@ -100,6 +117,21 @@ export function Avatar({ uri, name, size = 'md', active = false, ringColor, pres
           <PresenceDot presence={presence} size={dot} haloColor={colors.bg} />
         </View>
       )}
+    </View>
+  )
+
+  if (!storyRing) return inner
+
+  // Wrapped rather than restyled, so a story ring costs nothing anywhere it is
+  // not asked for and the avatar underneath keeps whatever ring it had.
+  return (
+    <View
+      style={[
+        styles.storyRing,
+        { width: dim + 12, height: dim + 12, borderRadius: (dim + 12) / 2 },
+      ]}
+    >
+      {inner}
     </View>
   )
 }

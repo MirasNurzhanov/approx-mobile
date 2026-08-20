@@ -26,7 +26,8 @@ export default function OnboardingNationalityScreen() {
     ? COUNTRIES.filter(c => c.name.toLowerCase().includes(query.trim().toLowerCase()))
     : COUNTRIES;
 
-  function goToMap() {
+  // Last screen of the sign-up chain.
+  function finish() {
     router.replace('/(tabs)/map');
   }
 
@@ -38,14 +39,14 @@ export default function OnboardingNationalityScreen() {
       }
     } catch {}
     setSaving(false);
-    router.replace('/(tabs)/map');
+    finish();
   }
 
   return (
     <View style={[s.root, { paddingTop: top }]}>
       <View style={s.topRow}>
         <Pressable
-          onPress={goToMap}
+          onPress={finish}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Skip"

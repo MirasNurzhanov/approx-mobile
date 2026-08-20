@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -19,9 +19,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { sectionise } from '@/services/interestCategories';
+import { registerProfileRefresh } from '@/services/profileRefresh';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
-import { useAuth } from '@/context/AuthContext';
 import { Speedometer } from '@/components/Speedometer';
 import { AuraMark } from '@/components/ui/AuraMark';
 import { Avatar } from '@/components/ui/Avatar';
@@ -33,13 +33,12 @@ import {
   IconGlobe,
   IconHeart,
   IconImage,
-  IconLogout,
   IconPencil,
   IconSound,
-  iconForInterest,
   type IconComponent,
   type IconProps,
 } from '@/components/ui/icons';
+import { iconForInterest } from '@/components/ui/interestIcons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -107,7 +106,6 @@ export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
-  const { confirmLogout, isSigningOut } = useAuth();
   const { top, bottom } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
 
@@ -157,6 +155,25 @@ export default function ProfileScreen() {
       fetchAll().finally(() => setLoading(false));
     }, [fetchAll])
   );
+
+  // Paints an edit made on /edit-profile the instant it saves, rather than
+  // waiting on the focus effect above to refetch — see services/profileRefresh
+  // for why the gap between those two otherwise shows the old value.
+  useEffect(() => {
+    registerProfileRefresh((fresh) => {
+      // Merged from the ref rather than a `setProfile` updater, so the write
+      // to it and to `_cache` happen exactly once instead of risking a repeat
+      // or a stale read if React ever re-invokes the updater.
+      const merged = { ...(profileRef.current ?? {}), ...fresh } as Profile;
+      profileRef.current = merged;
+      _cache = {
+        profile: merged,
+        friendCount: friendCountRef.current,
+        connectionCount: connectionCountRef.current,
+      };
+      setProfile(merged);
+    });
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -314,10 +331,10 @@ export default function ProfileScreen() {
                   </View>
                 )}
                 <View style={styles.chipWrap}>
-                  {group.items.map((tag, i) => {
+                  {group.items.map((tag) => {
                     const Icon = iconForInterest(tag.name);
                     return (
-                      <View key={i} style={styles.chip}>
+                      <View key={tag.name} style={styles.chip}>
                         <Icon size={14} color={colors.t2} />
                         <Text style={styles.chipText}>{tag.name}</Text>
                       </View>
@@ -352,15 +369,6 @@ export default function ProfileScreen() {
         {/* Buttons */}
         <View style={styles.btnGroup}>
           <Button label="Edit profile" icon={IconPencil} variant="ghost" size="lg" fullWidth onPress={() => router.push('/edit-profile')} />
-          <Button
-            label="Sign out"
-            icon={IconLogout}
-            variant="dangerTint"
-            size="lg"
-            fullWidth
-            loading={isSigningOut}
-            onPress={confirmLogout}
-          />
         </View>
       </ScrollView>
 

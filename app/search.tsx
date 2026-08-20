@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -146,7 +146,7 @@ function UserCard({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SearchScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
 

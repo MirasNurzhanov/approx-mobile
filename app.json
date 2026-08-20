@@ -14,6 +14,7 @@
         "googleMapsApiKey": "AIzaSyB6YKoTOr3yNCMLyzeHBZmqspts7p-2zHw"
       },
       "bundleIdentifier": "com.arcanix.aura",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
@@ -27,9 +28,10 @@
       }
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyB6YKoTOr3yNCMLyzeHBZmqspts7p-2zHw"
+          "apiKey": "AIzaSyBbVuIge8oi9_PWfoNKOmMUHB0LV2jFIig"
         }
       },
       "adaptiveIcon": {
@@ -42,10 +44,8 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
@@ -59,13 +59,22 @@
     "plugins": [
       "expo-router",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 28
+          }
+        }
+      ],
+      [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
-          "locationAlwaysPermission": "Aura keeps looking for nearby people and sound zones while the app is closed, so you are told about someone near you without having to open it. This is optional — everything works while the app is open without it.",
-          "locationWhenInUsePermission": "Aura shows you people within about 500m who share your interests, and places you on the map so they can find you. You choose whether your position is exact or rounded to a ~500m area, and you can pause sharing at any time in Settings.",
+          "locationAlwaysAndWhenInUsePermission": "Only while you are sharing your location, Aura keeps your position current in the background so people nearby see where you are and you are told when someone is close. It stops the moment you choose Paused or close Aura. This is optional — sharing works while the app is open without it.",
+          "locationAlwaysPermission": "Only while you are sharing your location, Aura keeps your position current in the background so people nearby see where you are and you are told when someone is close. It stops the moment you choose Paused or close Aura. This is optional — sharing works while the app is open without it.",
+          "locationWhenInUsePermission": "Aura uses your location to show you people nearby who share your interests. Sharing starts Paused every time you open Aura: while it is Paused your location answers only your own searches and is never saved or shown to anyone. You are shown to other people only after you choose Live or Approximate yourself, on a screen explaining what that means, and it ends when you choose Paused or close Aura.",
           "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
         }
       ],
       [
@@ -87,17 +96,25 @@
       ],
       "expo-font",
       "expo-video",
+      "expo-apple-authentication",
       [
-        "@mozzius/expo-dynamic-app-icon",
+        "expo-notifications",
         {
-          "light": {
-            "ios": "./assets/images/icon-light.png",
-            "android": "./assets/images/icon-android-light.png"
-          },
-          "dark": {
-            "ios": "./assets/images/icon-dark.png",
-            "android": "./assets/images/icon-android-dark.png"
-          }
+          "icon": "./assets/images/adaptive-icon-monochrome.png",
+          "color": "#E8714A"
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.480602152070-vj368te6l4bsng2v0mn4tih9036gshvg"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ]
     ],
@@ -110,7 +127,11 @@
       "eas": {
         "projectId": "a07cd98a-5015-4f63-a367-4526c5a6a222"
       },
-      "googleCloudProjectNumber": ""
+      "googleCloudProjectNumber": "",
+      "googleAuth": {
+        "webClientId": "480602152070-pin0qqfnkkj7bstcjr0f7ntoqt5p3kei.apps.googleusercontent.com",
+        "iosClientId": "480602152070-vj368te6l4bsng2v0mn4tih9036gshvg.apps.googleusercontent.com"
+      }
     },
     "owner": "arcaniz"
   }

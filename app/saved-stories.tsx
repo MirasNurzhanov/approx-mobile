@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -31,7 +31,7 @@ import {
   refreshSaved,
   unsaveStories,
   useStoryArchive,
-  type Story,
+  type FeedStory,
 } from '@/services/stories';
 
 // The story archive behind Profile → "My stories". "Mine" is every story the
@@ -52,7 +52,7 @@ function fmtDate(iso: string): string {
 
 // ─── Story card ───────────────────────────────────────────────────────────────
 function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPress }: {
-  story: Story;
+  story: FeedStory;
   showAuthor: boolean;
   selectMode: boolean;
   selected: boolean;
@@ -253,7 +253,7 @@ function SelectionBar({ activeTab, selectedCount, deleting, canClear, bottom, on
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SavedStoriesScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const archive = useStoryArchive();
 
@@ -263,7 +263,7 @@ export default function SavedStoriesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [viewerStory, setViewerStory] = useState<Story | null>(null);
+  const [viewerStory, setViewerStory] = useState<FeedStory | null>(null);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -309,7 +309,7 @@ export default function SavedStoriesScreen() {
     setSelected(allSelected ? new Set() : new Set(loaded.map((s) => s.id)));
   }
 
-  const onRefresh = useCallback(async () => {
+  async function onRefresh() {
     setRefreshing(true);
     try {
       await (activeTab === 'mine' ? refreshMine() : refreshSaved());
@@ -319,9 +319,9 @@ export default function SavedStoriesScreen() {
     // The `catch` swallows everything, so this always runs. Deliberately not a
     // `finally` — React Compiler bails on any component containing one.
     setRefreshing(false);
-  }, [activeTab]);
+  }
 
-  const onEndReached = useCallback(async () => {
+  async function onEndReached() {
     if (loadingMore || !list || total === null || list.length >= total) return;
     setLoadingMore(true);
     try {
@@ -329,7 +329,7 @@ export default function SavedStoriesScreen() {
     } catch {}
     // The `catch` swallows everything, so this always runs.
     setLoadingMore(false);
-  }, [activeTab, list, total, loadingMore]);
+  }
 
   async function runDelete(ids: number[]) {
     setDeleting(true);

@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuraMark } from '@/components/ui/AuraMark';
 import { fonts, radius } from '@/constants/theme';
@@ -67,8 +68,9 @@ const styles = StyleSheet.create({
 });
 
 export default function WelcomeScreen() {
+  const insets = useSafeAreaInsets();
   return (
-    <SafeAreaView style={styles.root}>
+    <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.hero}>
         <AuraMark size={80} color={LIGHT.teal} />
         <Text style={styles.wordmark}>AURA</Text>
@@ -92,6 +94,6 @@ export default function WelcomeScreen() {
           <Text style={styles.btnLabelGhost}>Create account</Text>
         </Pressable>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }

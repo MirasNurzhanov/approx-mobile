@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,15 +12,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { syncBackgroundLocationSharing } from '@/services/backgroundLocation';
+import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { Card } from '@/components/ui/Card';
+import { LocationSharingConsent } from '@/components/LocationSharingConsent';
+import {
+  LocationVisibilityCard,
+  type SharingPrecision,
+} from '@/components/LocationVisibilityCard';
 import {
   IconBack,
   IconBlocked,
   IconChevron,
-  IconEye,
-  IconEyeOff,
-  IconGhost,
   IconLock,
   IconPeople,
   type IconComponent,
@@ -43,24 +45,11 @@ import {
 // the API omits fields a viewer may not see, so these controls change what the
 // server sends, not what this app chooses to draw.
 
-const LOCATION_MODES: {
-  key: LocationSharing;
-  Icon: IconComponent;
-  label: string;
-  sub: string;
-}[] = [
-  { key: 'live',        Icon: IconEye,    label: 'Live',        sub: 'Exact position' },
-  { key: 'approximate', Icon: IconGhost,  label: 'Approximate', sub: 'Within ~500m' },
-  { key: 'paused',      Icon: IconEyeOff, label: 'Paused',      sub: 'Off the map' },
-];
-
-const LOCATION_EXPLAINER: Record<LocationSharing, string> = {
-  live: 'People nearby see where you actually are.',
-  approximate:
-    'Your position is rounded to a ~500m area before it leaves your phone, and your exact location is never stored. The rounded point stays put while you move around inside it.',
-  paused:
-    'You disappear from the map and nobody sees you nearby — and you won’t see them either. Your profile stays up and your account is untouched.',
-};
+// Location visibility is one card now — status, precision, and a single check
+// in / check out button — and it lives in components/LocationVisibilityCard so
+// this screen and the Settings tab cannot drift apart on the wording of
+// something this consequential. The mode list and its explainer copy moved
+// there with it.
 
 const AUDIENCE_FIELDS: {
   key: keyof PrivacySettings;
@@ -70,7 +59,10 @@ const AUDIENCE_FIELDS: {
   options?: Audience[];
 }[] = [
   { key: 'visibility_presence',    label: 'Online status',  hint: 'Who can see when you’re active, and when you were last online' },
-  { key: 'visibility_stories',     label: 'Stories',        hint: 'Who can see stories you post' },
+  // No "Everyone": a story is for the people you chose, whatever this says —
+  // "Friends" is the widest audience the server will hand one to, and it does
+  // not reach connections either. See users.visibility.can_view.
+  { key: 'visibility_stories',     label: 'Stories',        hint: 'Your friends only — never strangers or connections', options: ['friends', 'nobody'] },
   { key: 'visibility_interests',   label: 'Interests',      hint: 'Hiding these makes you harder to match with' },
   { key: 'visibility_stats',       label: 'Stats',          hint: 'Your connection and friend counts' },
   // No "Everyone": a music zone is never for strangers, whatever this says —
@@ -166,7 +158,7 @@ function ToggleRow({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function PrivacyScreen() {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
   const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);
@@ -178,6 +170,17 @@ export default function PrivacyScreen() {
     );
   }, []);
 
+  // The precision somebody has asked to check in as but not yet agreed to.
+  // Checking *in* publishes your position, so it goes through the consent sheet
+  // first; checking out and changing precision while already visible both apply
+  // at once — see LocationVisibilityCard for why the asymmetry is deliberate.
+  const [pendingMode, setPendingMode] = useState<SharingPrecision | null>(null);
+
+  async function confirmMode(mode: LocationSharing) {
+    await save({ location_sharing: mode });
+    setPendingMode(null);
+  }
+
   async function save(patch: Partial<PrivacySettings>) {
     setSaving(true);
     setError(null);
@@ -185,7 +188,7 @@ export default function PrivacyScreen() {
       await updatePrivacy(patch);
       if (patch.location_sharing) {
         // Pausing must stop OS tracking now, not at the next app launch.
-        await syncBackgroundLocationSharing();
+        await syncBackgroundLocation();
       }
     } catch {
       setError('That change didn’t save. Your previous setting is still in effect.');
@@ -294,31 +297,20 @@ export default function PrivacyScreen() {
 
         {/* ── Location ── */}
         <View style={styles.section}>
-          <SectionLabel>LOCATION</SectionLabel>
-          <View style={styles.modeRow}>
-            {LOCATION_MODES.map((mode) => {
-              const selected = settings.location_sharing === mode.key;
-              return (
-                <Pressable
-                  key={mode.key}
-                  disabled={saving}
-                  onPress={() => save({ location_sharing: mode.key })}
-                  style={({ pressed }) => [
-                    styles.modeCard,
-                    selected && styles.modeCardSelected,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <mode.Icon size={22} color={selected ? colors.teal : colors.t3} />
-                  <Text style={[styles.modeLabel, selected && styles.modeLabelSelected]}>
-                    {mode.label}
-                  </Text>
-                  <Text style={styles.modeSub}>{mode.sub}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.note}>{LOCATION_EXPLAINER[settings.location_sharing]}</Text>
+          <SectionLabel>LOCATION VISIBILITY</SectionLabel>
+          <LocationVisibilityCard
+            settings={settings}
+            saving={saving}
+            onCheckIn={setPendingMode}
+            onCheckOut={() => save({ location_sharing: 'paused' })}
+            onPrecision={(mode) => save({ location_sharing: mode })}
+          />
+          <LocationSharingConsent
+            mode={pendingMode}
+            busy={saving}
+            onCancel={() => setPendingMode(null)}
+            onConfirm={confirmMode}
+          />
         </View>
 
         {/* ── Per-field visibility ── */}
@@ -453,23 +445,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.t2,
   },
   segmentTextSelected: { color: colors.teal, fontWeight: '600' },
-
-  modeRow: { flexDirection: 'row', gap: 8 },
-  modeCard: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    borderRadius: radius.m,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  modeCardSelected: { backgroundColor: colors.tealTint, borderColor: colors.tealLine },
-  modeLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.t1 },
-  modeLabelSelected: { color: colors.teal },
-  modeSub: { fontFamily: fonts.body, fontSize: 10, color: colors.t3, textAlign: 'center' },
 
   errorText: { fontFamily: fonts.body, fontSize: 14, color: colors.t2, textAlign: 'center', paddingHorizontal: 40 },
   errorBanner: {

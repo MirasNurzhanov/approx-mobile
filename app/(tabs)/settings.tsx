@@ -293,15 +293,15 @@ function PreferencesSection({ notifAllowed, onToggleNotifications, darkMode, onT
           }
         />
         <SettingsRow
+          icon={IconMoon}
+          label="Dark mode"
+          right={<PrefSwitch value={darkMode} onValueChange={onToggleTheme} />}
+        />
+        <SettingsRow
           icon={IconList}
           label="What to notify me about"
           onPress={() => router.push('/notification-settings')}
           right={<IconChevron size={16} color={colors.t3} />}
-        />
-        <SettingsRow
-          icon={IconMoon}
-          label="Dark mode"
-          right={<PrefSwitch value={darkMode} onValueChange={onToggleTheme} />}
         />
         <SettingsRow
           icon={IconShield}

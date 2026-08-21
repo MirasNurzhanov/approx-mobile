@@ -10,6 +10,9 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
@@ -33,7 +36,8 @@ interface Interest {
 export default function EditInterestsScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
 
   const [interests, setInterests] = useState<Interest[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -146,19 +150,21 @@ export default function EditInterestsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
-          onPress={() => router.back()}
-          hitSlop={12}
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Edit interests</Text>
-          <Text style={styles.subtitle}>Choose what you care about</Text>
+      <ScreenHeader title="Edit interests">
+        <View style={styles.header}>
+          <Pressable
+            style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
+            onPress={() => router.back()}
+            hitSlop={12}
+          >
+            <IconBack size={22} color={colors.t1} />
+          </Pressable>
+          <View style={styles.headerText}>
+            <Text style={styles.title}>Edit interests</Text>
+            <Text style={styles.subtitle}>Choose what you care about</Text>
+          </View>
         </View>
-      </View>
+      </ScreenHeader>
 
       {loading ? (
         <View style={styles.center}>

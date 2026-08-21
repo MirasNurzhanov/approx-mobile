@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,8 +11,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { Card } from '@/components/ui/Card';
-import { IconBack, IconClose } from '@/components/ui/icons';
+import { IconClose } from '@/components/ui/icons';
 import { iconForPlatform, platformName } from '@/components/ui/platformMeta';
 import {
   addLink,
@@ -39,7 +40,8 @@ import { useTheme } from '@/context/ThemeContext';
 export default function EditLinksScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
 
   const [links, setLinks] = useState<ProfileLink[] | null>(null);
   const [value, setValue] = useState('');
@@ -121,23 +123,10 @@ export default function EditLinksScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={({ pressed }) => pressed && styles.pressed}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title} accessibilityRole="header">Links</Text>
-          <Text style={styles.subtitle}>
-            {links === null ? 'Loading…' : `${links.length} of ${MAX_LINKS}`}
-          </Text>
-        </View>
-      </View>
+      <ScreenHeader
+        title="Links"
+        subtitle={links === null ? 'Loading…' : `${links.length} of ${MAX_LINKS}`}
+      />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}

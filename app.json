@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon-light.png",
     "scheme": "auramobile",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "config": {
@@ -23,7 +22,8 @@
           "fetch",
           "remote-notification"
         ],
-        "NSCameraUsageDescription": "Aura uses the camera to take photos for your stories and chat messages. A photo is only sent when you choose to share it.",
+        "NSCameraUsageDescription": "Aura uses the camera to record Swift videos and take photos for your stories and chat messages. Nothing is captured until you press record or the shutter.",
+        "NSMicrophoneUsageDescription": "Aura uses the microphone to record sound with your Swift videos. Audio is only captured while you are recording, and only in the video you choose to publish.",
         "NSPhotoLibraryUsageDescription": "Aura lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Aura never reads your library."
       }
     },
@@ -39,16 +39,13 @@
         "backgroundColor": "#FAF9F5",
         "monochromeImage": "./assets/images/adaptive-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
         "android.permission.POST_NOTIFICATIONS"
-      ],
-      "blockedPermissions": [
-        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.arcanix.aura"
     },
@@ -80,9 +77,9 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Aura uses the camera to take photos for your stories and chat messages. A photo is only sent when you choose to share it.",
+          "cameraPermission": "Aura uses the camera to record Swift videos and take photos for your stories and chat messages. Nothing is captured until you press record or the shutter.",
           "photosPermission": "Aura lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Aura never reads your library.",
-          "microphonePermission": false
+          "microphonePermission": "Aura uses the microphone to record sound with your Swift videos. Audio is only captured while you are recording, and only in the video you choose to publish."
         }
       ],
       [
@@ -113,10 +110,20 @@
       [
         "expo-audio",
         {
-          "microphonePermission": false,
-          "recordAudioAndroid": false
+          "microphonePermission": "Aura uses the microphone to record sound with your Swift videos. Audio is only captured while you are recording, and only in the video you choose to publish.",
+          "recordAudioAndroid": true
         }
-      ]
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Aura uses the camera to record Swift videos and take photos for your stories and chat messages. Nothing is captured until you press record or the shutter.",
+          "microphonePermission": "Aura uses the microphone to record sound with your Swift videos. Audio is only captured while you are recording, and only in the video you choose to publish.",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-web-browser",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

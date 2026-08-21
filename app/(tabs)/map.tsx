@@ -28,8 +28,7 @@ import Animated, {
 import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { navArcClearance } from '@/components/navArc';
-import { Speedometer } from '@/components/Speedometer';
+import { AuraNav } from '@/components/AuraNav';
 import { REACTIONS } from '@/components/storyReactions';
 import { StoryViewer } from '@/components/StoryViewer';
 import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay';
@@ -71,6 +70,7 @@ import {
 import { fonts, radius, type, withAlpha, zoneRingColor } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { useNavAlignedRight, useNavClearance } from '@/hooks/useNavMetrics';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
@@ -308,7 +308,9 @@ const FOCUS_DELTA = 0.006;
 /** Long enough to read as travel between two places rather than a cut. */
 const RECENTER_MS = 450;
 const LOCATE_SIZE = 48;   // ≥ 44pt target
-const LOCATE_INSET = 20;  // matches the top bar's horizontal padding
+/** Edge inset, used on the wheel. On the tab bar the button tracks the last
+ *  tab instead — see `useNavAlignedRight`. Matches the top bar's padding. */
+const LOCATE_INSET = 20;
 /**
  * How old the last fix may be before recentering re-reads it rather than
  * trusting it. The watcher only fires every 10m, so a still user's fix is old
@@ -782,16 +784,25 @@ function SelfMarker({ coordinate, uri, username, hidden = false }: {
     return () => clearTimeout(timer);
   }, [uri, imageReady]);
 
+  // Pausing mutes the halo and the core, and react-native-maps caches this
+  // marker as a bitmap — so the change has to re-arm tracking or the old frame
+  // stays on screen and the halo never changes colour.
+  //
+  // This used to be done by flipping the `key` between 'self-hidden' and
+  // 'self-visible'. That does not re-rasterize anything; it unmounts the marker
+  // and mounts a new one, and per `PARKED_MARKERS` an unmounted marker is never
+  // removed from the native map. Checking in left the paused avatar sitting
+  // there next to the live one — two of you, one greyed out. Same fix as every
+  // other marker here: keep one Marker mounted and let `tracksViewChanges`
+  // redraw it.
+  const { settling } = useMarkerSettle(`${hidden}`);
+
   return (
-    // `hidden` joins `imageReady` in the re-raster key: react-native-maps caches
-    // this marker as a bitmap, so a style change that is not announced here
-    // leaves the old frame on screen and the halo never changes colour.
     <Marker
       coordinate={coordinate}
       anchor={{ x: 0.5, y: 0.5 }}
       zIndex={Z_SELF}
-      tracksViewChanges={!imageReady}
-      key={hidden ? 'self-hidden' : 'self-visible'}
+      tracksViewChanges={!imageReady || settling}
     >
       <View style={[styles.selfHalo, hidden && styles.selfHaloHidden]}>
         <View style={[styles.selfCore, hidden && styles.selfCoreHidden]}>
@@ -1052,10 +1063,14 @@ const LOCATE_HINT: Record<LocateState, string | undefined> = {
 function LocateButton({
   state,
   bottom,
+  right,
   onPress,
 }: {
   state: LocateState;
   bottom: number;
+  /** Set by the screen, because where it lands depends on which nav is on —
+   *  see `useNavAlignedRight`. */
+  right: number;
   onPress: () => void;
 }) {
   const { colors } = useTheme();
@@ -1075,7 +1090,7 @@ function LocateButton({
       style={({ pressed }) => [
         styles.locateBtn,
         following && styles.locateBtnActive,
-        { bottom },
+        { bottom, right },
         pressed && { opacity: 0.75 },
       ]}
       accessibilityRole="button"
@@ -1238,87 +1253,114 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
         <View style={[styles.createModalSheet, { paddingBottom: bottom + 20 }]}>
           <View style={styles.sheetHandle} />
           <View style={styles.createModalHeader}>
-            <Text style={styles.createModalTitle}>Drop a Story</Text>
+            <View style={styles.createModalTitleWrap}>
+              <Text style={styles.createModalTitle}>Drop a Story</Text>
+              {/* Both facts a poster wants before typing, and neither was on
+                  screen before: who sees it, and for how long. 24 hours is
+                  `stories.models.Story.save`, not a guess. */}
+              <Text style={styles.createModalSubtitle}>Friends only · gone in 24 hours</Text>
+            </View>
             <Pressable
               onPress={onClose}
               hitSlop={12}
-              style={({ pressed }) => pressed && { opacity: 0.2 }}
+              style={({ pressed }) => [styles.createModalClose, pressed && { opacity: 0.5 }]}
               accessibilityRole="button"
               accessibilityLabel="Close"
             >
-              <IconClose size={20} color={colors.t3} />
+              <IconClose size={16} color={colors.t2} />
             </Pressable>
           </View>
           {primer}
-          <TextInput
-            style={styles.storyInput}
-            placeholder="What's happening here?"
-            placeholderTextColor="#444"
-            value={text}
-            onChangeText={(t) => setText(t.slice(0, 280))}
-            multiline
-            maxLength={280}
-            autoFocus
-          />
-          <Text style={styles.charCount}>{text.length}/280</Text>
+
+          {/* The picture leads, the way it does in the story it becomes. The
+              two sources used to be unlabelled icon squares below the caption,
+              after the thing they filled in. */}
+          {photoUri ? (
+            <View style={styles.photoPreviewContainer}>
+              <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" />
+              <Pressable
+                style={({ pressed }) => [styles.removePhotoBtn, pressed && { opacity: 0.5 }]}
+                onPress={() => setPhotoUri(null)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Remove photo"
+              >
+                <IconClose size={14} color={colors.t1} />
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.mediaRow}>
+              <Pressable
+                style={({ pressed }) => [styles.mediaCard, pressed && styles.mediaCardPressed]}
+                onPress={takePhoto}
+                accessibilityRole="button"
+                accessibilityLabel="Take a photo"
+              >
+                <IconCamera size={20} color={colors.teal} />
+                <Text style={styles.mediaCardLabel}>Camera</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.mediaCard, pressed && styles.mediaCardPressed]}
+                onPress={pickPhoto}
+                accessibilityRole="button"
+                accessibilityLabel="Choose a photo from your library"
+              >
+                <IconImage size={20} color={colors.teal} />
+                <Text style={styles.mediaCardLabel}>Library</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Counter inside the field rather than floating under it, so the
+              caption reads as one object instead of a box with a stray number
+              beneath it. */}
+          <View style={styles.captionWrap}>
+            <TextInput
+              style={styles.storyInput}
+              placeholder="What's happening here?"
+              // Was a hardcoded '#444', which is nearly body-text dark on the
+              // light theme's surface — the placeholder read as typed text.
+              placeholderTextColor={colors.t3}
+              value={text}
+              onChangeText={(t) => setText(t.slice(0, 280))}
+              multiline
+              maxLength={280}
+              autoFocus
+            />
+            <Text style={[styles.charCount, text.length > 240 && styles.charCountNear]}>
+              {text.length}/280
+            </Text>
+          </View>
+
           {locationless ? (
             // Stated once, quietly, and only when it applies. Not a warning:
             // nothing is going wrong, and the story is about to reach exactly
             // the people it was always going to reach.
             <View style={styles.storyNoteRow}>
-              <IconEyeOff size={13} color={colors.t3} />
+              <IconEyeOff size={13} color={colors.t2} />
               <Text style={styles.storyNote}>
                 Location sharing is off — friends will see this story, the map won&apos;t.
               </Text>
             </View>
           ) : null}
-          {photoUri ? (
-            <View style={styles.photoPreviewContainer}>
-              <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" />
-              <Pressable
-                style={({ pressed }) => [styles.removePhotoBtn, pressed && { opacity: 0.2 }]}
-                onPress={() => setPhotoUri(null)}
-                hitSlop={8}
-              >
-                <IconClose size={14} color={colors.t1} />
-              </Pressable>
-            </View>
-          ) : null}
-          <View style={styles.createModalActions}>
-            <Pressable
-              style={({ pressed }) => [styles.photoPickBtn, pressed && { opacity: 0.75 }]}
-              onPress={takePhoto}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Take a photo"
-            >
-              <IconCamera size={20} color={colors.t2} />
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.photoPickBtn, pressed && { opacity: 0.75 }]}
-              onPress={pickPhoto}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Choose a photo from your library"
-            >
-              <IconImage size={20} color={colors.t2} />
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [
-                styles.postBtn,
-                (!text.trim() || posting) && { opacity: 0.5 },
-                pressed && { opacity: 0.8 },
-              ]}
-              onPress={handlePost}
-              disabled={!text.trim() || posting}
-            >
-              {posting ? (
-                <ActivityIndicator color={colors.bg} size="small" />
-              ) : (
-                <Text style={styles.postBtnText}>Post Story</Text>
-              )}
-            </Pressable>
-          </View>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.postBtn,
+              (!text.trim() || posting) && styles.postBtnDisabled,
+              pressed && { opacity: 0.85 },
+            ]}
+            onPress={handlePost}
+            disabled={!text.trim() || posting}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !text.trim() || posting }}
+          >
+            {posting ? (
+              <ActivityIndicator color={colors.bg} size="small" />
+            ) : (
+              <Text style={styles.postBtnText}>Post Story</Text>
+            )}
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -2696,9 +2738,17 @@ export default function MapScreen() {
    * full-screen "Locating you…" it is a spinner on top of a spinner. */
   const mapVisible = !(permState && permState !== 'granted') && !!displayCoords;
 
-  // The nav arc spans the full width, so there is no free bottom corner: the
-  // button clears whatever height the arc reaches across its own footprint.
-  const locateBottom = bottomInset + navArcClearance(LOCATE_INSET, LOCATE_SIZE) + 12;
+  // Parked directly over the Settings tab rather than in the corner, so it
+  // reads as one column of controls with the nav instead of a stray button.
+  // Derived before the clearance below, which measures from wherever it lands.
+  const locateRight = useNavAlignedRight(LOCATE_SIZE, LOCATE_INSET);
+
+  // Both navs span nearly the full width, so there is no free bottom corner:
+  // the button clears whatever height the nav reaches across its own footprint.
+  // The 8 is the gap above the nav — small, because sitting just clear of the
+  // Settings tab is what makes the two read as related.
+  const navClearance = useNavClearance(locateRight, LOCATE_SIZE);
+  const locateBottom = bottomInset + navClearance + 8;
 
   // Whether the map's own controls are reachable at all. A sheet or a
   // full-screen viewer covers them with a backdrop, so anything left drawn
@@ -3057,11 +3107,16 @@ export default function MapScreen() {
               were the two that could reach the native map unchecked. */}
           {Array.from(storiesByAuthor).reduce<ReactNode[]>((markers, [authorId, authorStories]) => {
             if (isDrawable(authorStories[0])) {
-              // Keyed by author *and* newest story, so a fresh story remounts
-              // the marker rather than reusing a stale frozen snapshot.
+              // Keyed by author alone. It used to include the newest story id
+              // as well, to force a remount so a fresh story could not reuse a
+              // stale frozen snapshot — but StoryMarker already re-arms
+              // `tracksViewChanges` off that same id, so the remount bought
+              // nothing and cost a ghost: an unmounted marker never leaves the
+              // native map (see `PARKED_MARKERS`), so posting a story left the
+              // previous bubble behind next to the new one.
               markers.push(
                 <StoryMarker
-                  key={`story-author-${authorId}-${authorStories[0].id}`}
+                  key={`story-author-${authorId}`}
                   stories={authorStories}
                   onPress={() => openStoryViewer(authorStories)}
                 />,
@@ -3200,22 +3255,27 @@ export default function MapScreen() {
 
       {primer}
 
-      <Speedometer />
+      <AuraNav />
 
       {/* Locate / follow control.
-          Rendered after the nav on purpose. The Speedometer's root is a
-          full-width absolutely-positioned View with default pointerEvents and
-          elevation 10, so it swallows every touch inside its ~200pt-tall
-          rectangle that doesn't land on one of its own tabs — anything drawn
-          behind it there is visible but dead. It has to absorb those touches
-          (otherwise drags on the opaque arc would pan the map underneath), so
-          the button sits above it instead.
+          Rendered after the nav on purpose. The wheel's root is a full-width
+          absolutely-positioned View with default pointerEvents and elevation
+          10, so it swallows every touch inside its ~200pt-tall rectangle that
+          doesn't land on one of its own tabs — anything drawn behind it there
+          is visible but dead. It has to absorb those touches (otherwise drags
+          on the opaque arc would pan the map underneath), so the button sits
+          above it instead.
 
           Hidden while a sheet or full-screen overlay owns the screen: the user
           sheet reaches 400pt up with a backdrop over everything below it, so a
           button left there is both covered and unreachable. */}
       {chromeVisible && (
-        <LocateButton state={locateState} bottom={locateBottom} onPress={handleLocatePress} />
+        <LocateButton
+          state={locateState}
+          bottom={locateBottom}
+          right={locateRight}
+          onPress={handleLocatePress}
+        />
       )}
 
       {mapVisible && showStoryTutorial && (
@@ -3590,7 +3650,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   // ── Locate control (tonal surface, teal tint while following) ──
   locateBtn: {
     position: 'absolute',
-    right: LOCATE_INSET,
+    // `right` is set inline — it tracks the nav's last tab, not the screen edge.
     width: LOCATE_SIZE,
     height: LOCATE_SIZE,
     borderRadius: radius.m,
@@ -3878,96 +3938,152 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   createModalHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // Top-aligned, not centred: the title block is two lines now and the close
+    // button belongs beside the first of them.
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 18,
-    marginTop: 6,
+    gap: 12,
+    marginBottom: 16,
+    marginTop: 2,
   },
+  createModalTitleWrap: { flex: 1, gap: 2 },
   createModalTitle: {
     fontFamily: fonts.display,
     fontWeight: '600',
-    fontSize: 17,
+    // 22, not 17. The sheet has one job and this is the only heading in it.
+    fontSize: 22,
     color: colors.t1,
+  },
+  createModalSubtitle: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.t3,
+  },
+  createModalClose: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Camera / Library, as two equal cards rather than two bare icon squares.
+  mediaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+  },
+  mediaCard: {
+    flex: 1,
+    height: 74,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    // Deliberately solid rather than dashed, which is the obvious choice for
+    // an empty slot: Android drops the dash pattern as soon as the border is
+    // rounded, so a dashed style here would be dashed on iOS only.
+    borderColor: colors.tealLine,
+    backgroundColor: colors.tealTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  mediaCardPressed: { opacity: 0.7 },
+  mediaCardLabel: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.t2,
+  },
+
+  captionWrap: {
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.m,
+    paddingBottom: 8,
+    marginBottom: 14,
   },
   storyInput: {
     fontFamily: fonts.body,
     color: colors.t1,
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 22,
-    minHeight: 100,
+    minHeight: 88,
     textAlignVertical: 'top',
-    marginBottom: 4,
-    padding: 12,
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.m,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
   charCount: {
     fontFamily: fonts.body,
     color: colors.t3,
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'right',
-    marginBottom: 12,
+    paddingHorizontal: 14,
   },
+  // Full-contrast rather than a warm accent: this is the one moment the count
+  // matters, and an 11pt coral on a coral-tinted surface is not a signal.
+  charCountNear: { color: colors.t1, fontWeight: '700' },
+
   storyNoteRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 12,
+    gap: 8,
+    marginBottom: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface2,
   },
   storyNote: {
     flex: 1,
     fontFamily: fonts.body,
-    color: colors.t3,
+    color: colors.t2,
     fontSize: 12,
     lineHeight: 16,
   },
   photoPreviewContainer: {
-    marginBottom: 12,
+    marginBottom: 14,
     position: 'relative',
   },
   photoPreview: {
     width: '100%',
-    height: 160,
+    height: 190,
     borderRadius: radius.m,
   },
   removePhotoBtn: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.surface2,
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    // `surface`, not `surface2`: this one sits on the photo rather than on the
+    // sheet, and needs to hold its own against whatever is behind it.
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  createModalActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  photoPickBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: radius.m,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   postBtn: {
-    flex: 1,
+    // Full width now that the two photo buttons have moved up out of this row.
     backgroundColor: colors.teal,
     borderRadius: radius.m,
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  postBtnText: { fontFamily: fonts.body, color: colors.bg, fontSize: 15, fontWeight: '600' },
+  postBtnDisabled: { opacity: 0.45 },
+  postBtnText: {
+    fontFamily: fonts.body,
+    color: colors.bg,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
 
   // ── Hi toast (design toast: surface2 pill, icon + label) ──
   hiToast: {

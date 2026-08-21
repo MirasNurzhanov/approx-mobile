@@ -1,3 +1,9 @@
+// Direct from `@react-navigation/native`, which is correct on SDK 54.
+//
+// SDK 56 is where expo-router started refusing these imports and throwing at
+// bundle time, and `expo-router/react-navigation` is the replacement there —
+// that path does not exist in expo-router 6, so it cannot be used here. If this
+// project moves forward again, this import is the first thing that breaks.
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -22,6 +28,7 @@ import {
 import { AuraLoader } from '@/components/AuraLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { AuthProvider } from '@/context/AuthContext';
+import { NavStyleProvider } from '@/context/NavStyleContext';
 import { ScrollNavProvider } from '@/context/ScrollNavContext';
 import { AppThemeProvider, useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
@@ -128,7 +135,6 @@ function AppShell() {
       <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="create-club"     options={{ headerShown: false, animation: 'slide_from_bottom' }} />
       <Stack.Screen name="market"          options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="modal"           options={{ presentation: 'modal', title: 'Modal' }} />
     </Stack>
   );
 }
@@ -185,12 +191,14 @@ export default function RootLayout() {
       <AppThemeProvider>
         <ErrorBoundary>
           <ScrollNavProvider>
-            <AuthProvider>
-              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-                <AppShell />
-                <AppStatusBar />
-              </ThemeProvider>
-            </AuthProvider>
+            <NavStyleProvider>
+              <AuthProvider>
+                <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                  <AppShell />
+                  <AppStatusBar />
+                </ThemeProvider>
+              </AuthProvider>
+            </NavStyleProvider>
           </ScrollNavProvider>
         </ErrorBoundary>
       </AppThemeProvider>

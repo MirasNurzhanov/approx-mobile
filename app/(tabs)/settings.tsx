@@ -45,7 +45,7 @@ import {
   usePrivacySettings,
   type LocationSharing,
 } from '@/services/privacy';
-import { Speedometer } from '@/components/Speedometer';
+import { AuraNav } from '@/components/AuraNav';
 import { ZoneTutorialOverlay } from '@/components/tutorial/ZoneTutorialOverlay';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -53,6 +53,7 @@ import {
   IconBell,
   IconBlocked,
   IconChevron,
+  IconGauge,
   IconInfo,
   IconList,
   IconLocate,
@@ -67,8 +68,10 @@ import {
   type IconComponent,
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
+import { useNavContentPadding } from '@/hooks/useNavMetrics';
 import { fonts } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
+import { useNavStyle } from '@/context/NavStyleContext';
 import { useTheme } from '@/context/ThemeContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -269,11 +272,20 @@ function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
   );
 }
 
-function PreferencesSection({ notifAllowed, onToggleNotifications, darkMode, onToggleTheme }: {
+function PreferencesSection({
+  notifAllowed,
+  onToggleNotifications,
+  darkMode,
+  onToggleTheme,
+  wheelNav,
+  onToggleWheelNav,
+}: {
   notifAllowed: boolean | null;
   onToggleNotifications: (v: boolean) => void;
   darkMode: boolean;
   onToggleTheme: () => void;
+  wheelNav: boolean;
+  onToggleWheelNav: (v: boolean) => void;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -296,6 +308,14 @@ function PreferencesSection({ notifAllowed, onToggleNotifications, darkMode, onT
           icon={IconMoon}
           label="Dark mode"
           right={<PrefSwitch value={darkMode} onValueChange={onToggleTheme} />}
+        />
+        {/* No explanatory note: the nav being switched is at the bottom of this
+            very screen, so flipping this shows the answer faster than any
+            wording could. */}
+        <SettingsRow
+          icon={IconGauge}
+          label="Wheel navigation bar"
+          right={<PrefSwitch value={wheelNav} onValueChange={onToggleWheelNav} />}
         />
         <SettingsRow
           icon={IconList}
@@ -512,10 +532,12 @@ function describeZone(zone: SelfZone): string {
 
 export default function SettingsScreen() {
   const { colors, themeMode, toggleTheme } = useTheme();
+  const { navStyle, setNavStyle } = useNavStyle();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { logout, confirmLogout, isSigningOut } = useAuth();
-  const { top, bottom } = useSafeAreaInsets();
+  const { top } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
+  const navPadding = useNavContentPadding();
 
   const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);
@@ -717,7 +739,7 @@ export default function SettingsScreen() {
   return (
     <View style={styles.root}>
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: bottom + 110 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: navPadding }]}
         showsVerticalScrollIndicator={false}
         {...scrollProps}
       >
@@ -759,6 +781,8 @@ export default function SettingsScreen() {
           onToggleNotifications={toggleNotifications}
           darkMode={themeMode === 'dark'}
           onToggleTheme={toggleTheme}
+          wheelNav={navStyle === 'wheel'}
+          onToggleWheelNav={(on) => setNavStyle(on ? 'wheel' : 'bar')}
         />
 
         <ConnectedAccountsSection
@@ -783,7 +807,7 @@ export default function SettingsScreen() {
         <ZoneTutorialOverlay onDismiss={dismissZoneTutorial} onTakeMeThere={takeMeToZone} />
       )}
 
-      <Speedometer highlightSection={showZoneTutorial ? 'settings' : undefined} />
+      <AuraNav highlightSection={showZoneTutorial ? 'settings' : undefined} />
     </View>
   );
 }

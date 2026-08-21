@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,11 +11,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { api } from '@/services/api';
 import { Avatar } from '@/components/ui/Avatar';
 import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
-import { IconBack } from '@/components/ui/icons';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -39,7 +39,8 @@ interface Person {
 export default function ConnectionsScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
   const [people, setPeople] = useState<Person[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [removing, setRemoving] = useState<number | null>(null);
@@ -104,19 +105,10 @@ export default function ConnectionsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          style={({ pressed }) => pressed && styles.pressed}
-          onPress={() => router.back()}
-          hitSlop={12}
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Your connections</Text>
-          <Text style={styles.subtitle}>Everyone with approved access to your profile</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        title="Your connections"
+        subtitle="Everyone with approved access to your profile"
+      />
 
       {people === null ? (
         <View style={styles.loadingWrap}>

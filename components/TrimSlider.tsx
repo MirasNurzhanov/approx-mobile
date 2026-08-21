@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -27,6 +27,16 @@ import { useTheme } from '@/context/ThemeContext';
 
 const THUMB = 26;
 const TRACK_H = 40;
+
+/** Milliseconds → pixels along the usable track.
+ *
+ *  A module-level function rather than a closure over the component's own
+ *  `safeDuration`/`travel`, so the layout effect that syncs the handles can
+ *  depend on those two numbers instead of on a callback identity that changes
+ *  on every render. */
+function msToX(ms: number, duration: number, travel: number): number {
+  return (Math.max(0, Math.min(duration, ms)) / duration) * travel;
+}
 
 interface Props {
   /** The whole track, in milliseconds. */
@@ -105,17 +115,30 @@ export function TrimSlider({
   const travel = Math.max(width - THUMB, 1);
   const safeDuration = Math.max(duration, 1);
 
-  /** Milliseconds → pixels along the usable track. */
-  const toX = (ms: number) =>
-    (Math.max(0, Math.min(safeDuration, ms)) / safeDuration) * travel;
+  const toX = (ms: number) => msToX(ms, safeDuration, travel);
 
   // Where each handle is being dragged to, in pixels. Shared values so the
   // drag is drawn on the UI thread; the millisecond values follow on the JS
   // side one render later, which is fine for text but not for a thumb.
   const startX = useSharedValue(0);
   const endX = useSharedValue(0);
-  startX.set(toX(startMs));
-  endX.set(toX(endMs));
+
+  // Pulling the handles back in line with the props — after a nudge, after the
+  // first `onLayout` gives `travel` a real width, and on the return leg of a
+  // drag.
+  //
+  // `useLayoutEffect`, not the render body. These two writes used to sit bare
+  // in the render, which Reanimated's strict mode reports as "Writing to
+  // `value` during component render": a render can be thrown away or replayed,
+  // and a shared value written from one escapes React entirely. A plain
+  // `useEffect` would fix the warning and cost a frame — the handles would
+  // paint at the old positions and jump on the next tick. A layout effect runs
+  // synchronously after the commit and before the paint, so the position lands
+  // in the same frame the render did.
+  useLayoutEffect(() => {
+    startX.set(msToX(startMs, safeDuration, travel));
+    endX.set(msToX(endMs, safeDuration, travel));
+  }, [startMs, endMs, safeDuration, travel, startX, endX]);
 
   const emit = (xStart: number, xEnd: number, commit: boolean) => {
     const start = Math.round((xStart / travel) * safeDuration);

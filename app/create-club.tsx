@@ -15,7 +15,9 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -255,7 +257,7 @@ export default function CreateClubScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
-  const { top } = useSafeAreaInsets();
+  const top = useScreenTopInset();
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -407,13 +409,15 @@ export default function CreateClubScreen() {
   return (
     <View style={[styles.root, { paddingTop: top }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Create Club</Text>
-        <View style={styles.backBtn} />
-      </View>
+      <ScreenHeader title="Create Club">
+        <View style={styles.header}>
+          <Pressable style={styles.backBtn} onPress={() => router.back()} hitSlop={12}>
+            <Ionicons name="chevron-back" size={24} color={colors.t1} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Create Club</Text>
+          <View style={styles.backBtn} />
+        </View>
+      </ScreenHeader>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView

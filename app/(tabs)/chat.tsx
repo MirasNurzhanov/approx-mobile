@@ -17,7 +17,7 @@ import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Speedometer } from '@/components/Speedometer';
+import { AuraNav } from '@/components/AuraNav';
 import { DraggableTabs, type DraggableTabKey } from '@/components/DraggableTabs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
@@ -45,6 +45,7 @@ import {
   groupStoriesByAuthor,
   type FeedStory,
 } from '@/services/stories';
+import { useNavContentPadding } from '@/hooks/useNavMetrics';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import {
   clubsApi,
@@ -411,6 +412,7 @@ function SearchResultsList({ rows, trimmed, scrollProps, onMessage, onOpenClub }
   onOpenClub: (clubId: number) => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <FlatList
@@ -429,7 +431,7 @@ function SearchResultsList({ rows, trimmed, scrollProps, onMessage, onOpenClub }
         }
         return <ClubCard club={item.club} onPress={() => onOpenClub(item.club.id)} />;
       }}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingBottom: navPadding }]}
       ListEmptyComponent={
         <EmptyState
           message={`Nothing matches “${trimmed}”\nThis searches your friends, connections and clubs`}
@@ -455,6 +457,7 @@ function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, markingRe
   onMarkAllRead: () => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <FlatList
@@ -498,7 +501,7 @@ function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, markingRe
           </View>
         ) : null
       }
-      contentContainerStyle={styles.alertsList}
+      contentContainerStyle={[styles.alertsList, { paddingBottom: navPadding }]}
       ListEmptyComponent={
         <EmptyState message={"You're all caught up\nRequests and story activity land here"} />
       }
@@ -521,6 +524,7 @@ function ChatsList({ users, sentRequestIds, storiesByAuthor, refreshControl, scr
   onOpenStory: (stories: FeedStory[]) => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <FlatList
@@ -540,7 +544,7 @@ function ChatsList({ users, sentRequestIds, storiesByAuthor, refreshControl, scr
           onOpenStory={onOpenStory}
         />
       )}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingBottom: navPadding }]}
       ListEmptyComponent={<EmptyState message={'No chats yet\nAccept incoming Hi requests'} />}
       refreshControl={refreshControl}
       showsVerticalScrollIndicator={false}
@@ -563,11 +567,12 @@ function ClubsTab({ myClubs, discoverClubs, clubPlace, loadingClubs, refreshingP
   onRetryLocation: () => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <ScrollView
       style={{ flex: 1 }}
-      contentContainerStyle={styles.clubsScroll}
+      contentContainerStyle={[styles.clubsScroll, { paddingBottom: navPadding }]}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl refreshing={loadingClubs} onRefresh={onRefreshClubs} tintColor={colors.teal} colors={[colors.teal]} />
@@ -1192,7 +1197,7 @@ export default function ChatScreen() {
         />
       )}
 
-      <Speedometer />
+      <AuraNav />
     </View>
   );
 }
@@ -1252,11 +1257,13 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // List
-  list: { padding: 16, paddingBottom: 230, gap: 10 },
+  // paddingBottom comes from useNavContentPadding at each use site — it
+  // depends on which bottom nav is switched on.
+  list: { padding: 16, gap: 10 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   // Alerts list — rows carry their own dividers, so no gap between them
-  alertsList: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 230 },
+  alertsList: { paddingHorizontal: 20, paddingTop: 4 },
   alertsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1369,7 +1376,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // Clubs tab
-  clubsScroll: { padding: 16, paddingBottom: 230 },
+  clubsScroll: { padding: 16 },
 
   createClubBtn: {
     flexDirection: 'row',

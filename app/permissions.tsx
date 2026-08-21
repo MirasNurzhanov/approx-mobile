@@ -3,9 +3,11 @@ import { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Card } from '@/components/ui/Card';
-import { IconBack, IconChevron } from '@/components/ui/icons';
+import { IconChevron } from '@/components/ui/icons';
 import { fonts, radius, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -116,7 +118,8 @@ function PermissionRow({
 export default function PermissionsScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
   const store = usePermissionStore();
   const { settings } = usePrivacySettings();
   const { ensure, primer } = usePermissionPrimer();
@@ -150,21 +153,7 @@ export default function PermissionsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={({ pressed }) => pressed && styles.pressed}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title} accessibilityRole="header">Permissions</Text>
-          <Text style={styles.subtitle}>What Aura can access, and why</Text>
-        </View>
-      </View>
+      <ScreenHeader title="Permissions" subtitle="What Aura can access, and why" />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}

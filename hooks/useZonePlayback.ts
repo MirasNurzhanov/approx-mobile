@@ -1,3 +1,4 @@
+// See app/_layout.tsx — SDK 56 routes react-navigation through expo-router.
 import { useIsFocused } from '@react-navigation/native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';

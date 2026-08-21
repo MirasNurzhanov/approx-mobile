@@ -41,6 +41,14 @@ jest.mock('../swifts', () => ({
   formatCount: (n: number) => String(n),
 }));
 
+// Fire-and-forget analytics. Stubbed so these suites keep measuring
+// playback and privacy rather than the reporting queue, which has its
+// own tests.
+jest.mock('../swiftSignals', () => ({
+  reportSwiftSignal: jest.fn(),
+  flushSwiftSignals: jest.fn(() => Promise.resolve()),
+}));
+
 jest.mock('expo-router', () => {
   const React = require('react');
   return {
@@ -183,8 +191,10 @@ beforeEach(() => {
   mockApi.setSwiftLiked.mockResolvedValue(11);
   mockApi.setSwiftReposted.mockResolvedValue(2);
   mockApi.fetchSwiftFeed.mockResolvedValue({
-    count: 30,
-    results: Array.from({ length: FEED_PAGE_SIZE }, (_, i) => makeSwift(i + 1)),
+      cursor: null,
+      hasMore: false,
+      sources: {},
+      results: Array.from({ length: FEED_PAGE_SIZE }, (_, i) => makeSwift(i + 1)),
   });
 });
 
@@ -326,7 +336,9 @@ describe('likes are optimistic and roll back exactly', () => {
 
   it('never lets a count go negative', async () => {
     mockApi.fetchSwiftFeed.mockResolvedValue({
-      count: 1,
+      cursor: null,
+      hasMore: false,
+      sources: {},
       results: [makeSwift(1, { like_count: 0, viewer_liked: true })],
     });
     mockApi.setSwiftLiked.mockResolvedValue(0);
@@ -373,7 +385,10 @@ describe('reposts', () => {
 
   it('hides the control on your own Swift', async () => {
     mockApi.fetchSwiftFeed.mockResolvedValue({
-      count: 1, results: [makeSwift(1, { is_mine: true })],
+      cursor: null,
+      hasMore: false,
+      sources: {},
+      results: [makeSwift(1, { is_mine: true })],
     });
     const tree = await renderFeed();
     expect(rail(tree).props.allowReposts).toBe(false);
@@ -381,9 +396,75 @@ describe('reposts', () => {
 
   it('hides the control when the creator turned reposts off', async () => {
     mockApi.fetchSwiftFeed.mockResolvedValue({
-      count: 1, results: [makeSwift(1, { allow_reposts: false })],
+      cursor: null,
+      hasMore: false,
+      sources: {},
+      results: [makeSwift(1, { allow_reposts: false })],
     });
     const tree = await renderFeed();
     expect(rail(tree).props.allowReposts).toBe(false);
+  });
+});
+
+describe('memoisation actually bails', () => {
+  // `memo` is only worth its comparison if every prop is stable, and stability
+  // is a property of the *caller*. A handler written inline in `renderItem` is
+  // a new function on every render: the shallow compare fails every time, and
+  // each mounted card rebuilds its video view and its whole SVG rail on every
+  // scroll tick and every optimistic count change — while still looking
+  // memoised from the outside, which is why it went unnoticed.
+  //
+  // What is asserted is React.memo's own bail condition, not a render count:
+  // that the props of a card nothing happened to are shallow-equal across a
+  // change to a different card.
+  function shallowDiff(a: Record<string, unknown>, b: Record<string, unknown>) {
+    return Array.from(new Set([...Object.keys(a), ...Object.keys(b)]))
+      .filter((k) => !Object.is(a[k], b[k]));
+  }
+
+  it('leaves the card shallow-equal when the feed re-renders for something else', async () => {
+    // Opening the comments sheet is feed state, and no part of it reaches a
+    // card. Under the old inline handlers this still failed on five props.
+    const tree = await renderFeed();
+    const before = { ...cards(tree)[0].props };
+
+    await act(async () => { rails(tree)[0].props.onComment(); });
+
+    expect(shallowDiff(before, cards(tree)[0].props)).toEqual([]);
+  });
+
+  it('leaves the rail shallow-equal when the card re-renders for a pause', async () => {
+    // The second memo in the chain, tested where it matters: `pausedByUser`
+    // changes so the card *must* re-render, and nothing on the rail depends on
+    // it, so the rail must not.
+    const tree = await renderFeed();
+    const before = { ...rails(tree)[0].props };
+
+    await act(async () => { cards(tree)[0].props.onTogglePause(1); });
+
+    expect(cards(tree)[0].props.pausedByUser).toBe(true);
+    expect(shallowDiff(before, rails(tree)[0].props)).toEqual([]);
+  });
+
+  it('hands every card one and the same pause callback', async () => {
+    // The specific regression: this used to close over the row, so it was a
+    // distinct function per card per render.
+    const tree = await renderFeed();
+    const handlers = cards(tree).map((c) => c.props.onTogglePause);
+    expect(new Set(handlers).size).toBe(1);
+
+    await act(async () => { rails(tree)[0].props.onLike(); });
+    expect(cards(tree)[0].props.onTogglePause).toBe(handlers[0]);
+  });
+
+  it('still lets the card that changed through', async () => {
+    // The other half — a memo that never re-renders anything is just a bug in
+    // the opposite direction.
+    const tree = await renderFeed();
+    const before = { ...cards(tree)[0].props };
+
+    await act(async () => { rails(tree)[0].props.onLike(); });
+
+    expect(shallowDiff(before, cards(tree)[0].props)).toContain('swift');
   });
 });

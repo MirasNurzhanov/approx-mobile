@@ -5,13 +5,17 @@ import { api } from './api';
 import { toLatitude, toLongitude, withNumericCoordsList, type Placed } from './coords';
 
 // Shared story types + the story-archive store. The archive ("Mine" = every
-// story the user posted, "Saved" = bookmarks of other people's stories) is
-// cached on device so the saved-stories screen opens instantly and offline;
-// the backend stays the source of truth via refresh/loadMore. The map and the
+// story the user posted, "Starred" = the ones they've favorited among those)
+// is cached on device so the archive screen opens instantly and offline; the
+// backend stays the source of truth via refresh/loadMore. The map and the
 // story viewer mutate through this module too, so every surface stays in sync
 // without manual refreshes.
+//
+// Starring is the author's own act, not a bookmark of someone else's post —
+// `Story.is_starred` lives on the row itself, so "Starred" can only ever be a
+// subset of "Mine". There is no way to save another user's story.
 
-export type ReactionType = 'like' | 'funny' | 'helpful' | 'interesting';
+export type ReactionType = 'like';
 
 export interface StoryAuthor {
   id: number;
@@ -39,11 +43,10 @@ export interface FeedStory {
   longitude?: number | null;
   created_at: string;
   expires_at: string;
-  reactions: { like: number; funny: number; helpful: number; interesting: number };
+  reactions: { like: number };
   user_reaction?: ReactionType | null;
-  is_saved?: boolean;
-  /** Present on items from the saved list: when the bookmark was created. */
-  saved_at?: string;
+  /** Only ever true for the viewer's own stories — see the module docs. */
+  is_starred?: boolean;
 }
 
 /** A story the map can actually draw: the same thing, with a real position. */
@@ -124,28 +127,31 @@ export function groupStoriesByAuthor(stories: FeedStory[]): Map<number, FeedStor
 
 export const ARCHIVE_PAGE_SIZE = 30;
 const MINE_KEY = 'aura:stories:mine';
-const SAVED_KEY = 'aura:stories:saved';
+const STARRED_KEY = 'aura:stories:starred';
+/** The bookmark feature's old cache — dropped alongside it so a stale copy of
+ *  someone else's saved stories cannot resurface from disk. */
+const LEGACY_SAVED_KEY = 'aura:stories:saved';
 const CACHE_LIMIT = 60; // items persisted per list for instant/offline open
 
 export interface StoryArchive {
   /** null = not hydrated yet (neither cache nor network has filled it). */
   mine: FeedStory[] | null;
-  saved: FeedStory[] | null;
+  starred: FeedStory[] | null;
   /** Server-side totals; null until the first successful fetch. */
   mineTotal: number | null;
-  savedTotal: number | null;
-  /** Ids of stories the user has bookmarked (drives the viewer's toggle). */
-  savedIds: Set<number>;
+  starredTotal: number | null;
+  /** Ids of the user's own stories they've starred (drives the viewer's toggle). */
+  starredIds: Set<number>;
   /** Own stories deleted this session — the map filters its markers by this. */
   deletedIds: Set<number>;
 }
 
 let state: StoryArchive = {
   mine: null,
-  saved: null,
+  starred: null,
   mineTotal: null,
-  savedTotal: null,
-  savedIds: new Set(),
+  starredTotal: null,
+  starredIds: new Set(),
   deletedIds: new Set(),
 };
 
@@ -166,19 +172,19 @@ function subscribe(listener: () => void): () => void {
  *
  * The persisted caches exist so the archive screen opens instantly and works
  * offline, which also means they would show the previous account's own and
- * saved stories to whoever signs in next.
+ * starred stories to whoever signs in next.
  */
 export async function resetArchive(): Promise<void> {
   setState({
     mine: null,
-    saved: null,
+    starred: null,
     mineTotal: null,
-    savedTotal: null,
-    savedIds: new Set(),
+    starredTotal: null,
+    starredIds: new Set(),
     deletedIds: new Set(),
   });
   try {
-    await AsyncStorage.multiRemove([MINE_KEY, SAVED_KEY]);
+    await AsyncStorage.multiRemove([MINE_KEY, STARRED_KEY, LEGACY_SAVED_KEY]);
   } catch {}
 }
 
@@ -191,8 +197,8 @@ export function getStoryArchive(): StoryArchive {
   return state;
 }
 
-function savedIdsOf(saved: FeedStory[] | null): Set<number> {
-  return new Set((saved ?? []).map((s) => s.id));
+function starredIdsOf(starred: FeedStory[] | null): Set<number> {
+  return new Set((starred ?? []).map((s) => s.id));
 }
 
 async function persist(key: string, list: FeedStory[] | null) {
@@ -215,12 +221,12 @@ async function loadCache(key: string): Promise<FeedStory[] | null> {
 
 /** Fill the store from the on-device cache (no-op for lists already loaded). */
 export async function hydrateArchive(): Promise<void> {
-  const [mine, saved] = await Promise.all([loadCache(MINE_KEY), loadCache(SAVED_KEY)]);
+  const [mine, starred] = await Promise.all([loadCache(MINE_KEY), loadCache(STARRED_KEY)]);
   const patch: Partial<StoryArchive> = {};
   if (state.mine === null && mine) patch.mine = mine;
-  if (state.saved === null && saved) {
-    patch.saved = saved;
-    patch.savedIds = savedIdsOf(saved);
+  if (state.starred === null && starred) {
+    patch.starred = starred;
+    patch.starredIds = starredIdsOf(starred);
   }
   if (Object.keys(patch).length > 0) setState(patch);
 }
@@ -239,20 +245,20 @@ export async function refreshMine(): Promise<void> {
   persist(MINE_KEY, mine);
 }
 
-export async function refreshSaved(): Promise<void> {
-  const { data } = await api.get<ArchivePage>('/api/stories/saved/', {
+export async function refreshStarred(): Promise<void> {
+  const { data } = await api.get<ArchivePage>('/api/stories/starred/', {
     params: { limit: ARCHIVE_PAGE_SIZE, offset: 0 },
   });
-  const saved = normalizeStories(data.results);
-  setState({ saved, savedTotal: data.count, savedIds: savedIdsOf(saved) });
-  persist(SAVED_KEY, saved);
+  const starred = normalizeStories(data.results);
+  setState({ starred, starredTotal: data.count, starredIds: starredIdsOf(starred) });
+  persist(STARRED_KEY, starred);
 }
 
-async function loadMore(kind: 'mine' | 'saved'): Promise<void> {
+async function loadMore(kind: 'mine' | 'starred'): Promise<void> {
   const list = state[kind];
-  const total = kind === 'mine' ? state.mineTotal : state.savedTotal;
+  const total = kind === 'mine' ? state.mineTotal : state.starredTotal;
   if (!list || total === null || list.length >= total) return;
-  const url = kind === 'mine' ? '/api/stories/mine/' : '/api/stories/saved/';
+  const url = kind === 'mine' ? '/api/stories/mine/' : '/api/stories/starred/';
   const { data } = await api.get<ArchivePage>(url, {
     params: { limit: ARCHIVE_PAGE_SIZE, offset: list.length },
   });
@@ -261,12 +267,12 @@ async function loadMore(kind: 'mine' | 'saved'): Promise<void> {
   if (kind === 'mine') {
     setState({ mine: merged.filter((s) => !state.deletedIds.has(s.id)), mineTotal: data.count });
   } else {
-    setState({ saved: merged, savedTotal: data.count, savedIds: savedIdsOf(merged) });
+    setState({ starred: merged, starredTotal: data.count, starredIds: starredIdsOf(merged) });
   }
 }
 
 export const loadMoreMine = () => loadMore('mine');
-export const loadMoreSaved = () => loadMore('saved');
+export const loadMoreStarred = () => loadMore('starred');
 
 /** Called by the map right after a successful post — the archive picks the
  * story up immediately instead of waiting for the next fetch. */
@@ -278,59 +284,77 @@ export function recordOwnStory(story: FeedStory): void {
   persist(MINE_KEY, mine);
 }
 
-/** Bookmark someone else's story (optimistic; throws on failure after rollback). */
-export async function saveStory(story: FeedStory): Promise<void> {
-  if (state.savedIds.has(story.id)) return;
+/** Star one of your own stories (optimistic; throws on failure after
+ *  rollback). Starring is the author's own act — there is no bookmarking of
+ *  anyone else's story, so this only ever touches rows already in "Mine". */
+export async function starStory(story: FeedStory): Promise<void> {
+  if (state.starredIds.has(story.id)) return;
   const prev = state;
-  const entry: FeedStory = { ...story, is_saved: true, saved_at: new Date().toISOString() };
-  const saved = [entry, ...(state.saved ?? [])];
-  setState({
-    saved,
-    savedIds: savedIdsOf(saved),
-    savedTotal: state.savedTotal === null ? null : state.savedTotal + 1,
-  });
+  const entry: FeedStory = { ...story, is_starred: true };
+  const starred = [entry, ...(state.starred ?? [])];
+  const patch: Partial<StoryArchive> = {
+    starred,
+    starredIds: starredIdsOf(starred),
+    starredTotal: state.starredTotal === null ? null : state.starredTotal + 1,
+  };
+  if (state.mine) {
+    patch.mine = state.mine.map((s) => (s.id === story.id ? { ...s, is_starred: true } : s));
+  }
+  setState(patch);
   try {
-    await api.post(`/api/stories/${story.id}/save/`);
+    await api.post(`/api/stories/${story.id}/star/`);
   } catch (e) {
     setState(prev);
     throw e;
   }
-  persist(SAVED_KEY, saved);
+  persist(STARRED_KEY, starred);
 }
 
-/** Remove bookmarks only — never touches the original stories. */
-export async function unsaveStories(ids: number[]): Promise<void> {
+/** Unstar stories — the stories themselves are never touched. */
+export async function unstarStories(ids: number[]): Promise<void> {
   if (ids.length === 0) return;
   const prev = state;
   const drop = new Set(ids);
-  const saved = (state.saved ?? []).filter((s) => !drop.has(s.id));
-  setState({
-    saved,
-    savedIds: savedIdsOf(saved),
-    savedTotal: state.savedTotal === null ? null : Math.max(0, state.savedTotal - ids.length),
-  });
+  const starred = (state.starred ?? []).filter((s) => !drop.has(s.id));
+  const patch: Partial<StoryArchive> = {
+    starred,
+    starredIds: starredIdsOf(starred),
+    starredTotal: state.starredTotal === null ? null : Math.max(0, state.starredTotal - ids.length),
+  };
+  if (state.mine) {
+    patch.mine = state.mine.map((s) => (drop.has(s.id) ? { ...s, is_starred: false } : s));
+  }
+  setState(patch);
   try {
-    await Promise.all(ids.map((id) => api.delete(`/api/stories/${id}/save/`)));
+    await Promise.all(ids.map((id) => api.delete(`/api/stories/${id}/star/`)));
   } catch (e) {
     setState(prev);
     throw e;
   }
-  persist(SAVED_KEY, saved);
+  persist(STARRED_KEY, starred);
 }
 
 /** Permanently delete the user's own stories — everywhere, including the map
- * and everyone's saved lists (optimistic; throws on failure after rollback). */
+ * (optimistic; throws on failure after rollback). A deleted story drops out of
+ * "Starred" too: there is no row left underneath that flag. */
 export async function deleteOwnStories(ids: number[]): Promise<void> {
   if (ids.length === 0) return;
   const prev = state;
   const drop = new Set(ids);
   const mine = (state.mine ?? []).filter((s) => !drop.has(s.id));
+  const removedStarredCount = (state.starred ?? []).filter((s) => drop.has(s.id)).length;
+  const starred = (state.starred ?? []).filter((s) => !drop.has(s.id));
   const deletedIds = new Set(state.deletedIds);
   ids.forEach((id) => deletedIds.add(id));
   setState({
     mine,
+    starred,
+    starredIds: starredIdsOf(starred),
     deletedIds,
     mineTotal: state.mineTotal === null ? null : Math.max(0, state.mineTotal - ids.length),
+    starredTotal: state.starredTotal === null
+      ? null
+      : Math.max(0, state.starredTotal - removedStarredCount),
   });
   try {
     await Promise.all(
@@ -347,23 +371,31 @@ export async function deleteOwnStories(ids: number[]): Promise<void> {
     throw e;
   }
   persist(MINE_KEY, mine);
+  persist(STARRED_KEY, starred);
 }
 
-/** Wipe one tab entirely. 'mine' permanently deletes every posted story. */
-export async function clearArchive(kind: 'mine' | 'saved'): Promise<void> {
+/** Wipe one tab entirely. 'mine' permanently deletes every posted story (and
+ *  everything starred, since nothing would be left to hold the flag). 'starred'
+ *  only unstars — the stories stay in "Mine". */
+export async function clearArchive(kind: 'mine' | 'starred'): Promise<void> {
   const prev = state;
   if (kind === 'mine') {
     const deletedIds = new Set(state.deletedIds);
     (state.mine ?? []).forEach((s) => deletedIds.add(s.id));
-    setState({ mine: [], mineTotal: 0, deletedIds });
+    setState({
+      mine: [], mineTotal: 0, starred: [], starredTotal: 0, starredIds: new Set(), deletedIds,
+    });
   } else {
-    setState({ saved: [], savedTotal: 0, savedIds: new Set() });
+    const patch: Partial<StoryArchive> = { starred: [], starredTotal: 0, starredIds: new Set() };
+    if (state.mine) patch.mine = state.mine.map((s) => ({ ...s, is_starred: false }));
+    setState(patch);
   }
   try {
-    await api.delete(kind === 'mine' ? '/api/stories/mine/' : '/api/stories/saved/');
+    await api.delete(kind === 'mine' ? '/api/stories/mine/' : '/api/stories/starred/');
   } catch (e) {
     setState(prev);
     throw e;
   }
-  persist(kind === 'mine' ? MINE_KEY : SAVED_KEY, []);
+  persist(MINE_KEY, kind === 'mine' ? [] : (state.mine ?? []));
+  persist(STARRED_KEY, []);
 }

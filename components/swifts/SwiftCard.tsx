@@ -1,5 +1,5 @@
-import { memo, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   useAnimatedStyle,
@@ -50,6 +50,13 @@ import type { Swift } from '@/services/swifts';
  * `memo`, because the feed re-renders on every scroll tick and every
  * optimistic count change. Without it, each of those rebuilds the video view,
  * the scrims and five SVG icons for cards nobody is looking at.
+ *
+ * `memo` only earns that, though, if every prop is stable — which is a
+ * property of the *caller*, and one that is silently easy to lose. Every
+ * handler this card hands to `SwiftActions` is a `useCallback` for exactly
+ * that reason: written inline they would be new functions on every render, the
+ * shallow compare would fail every time, and the rail would rebuild its whole
+ * SVG tree on every scroll tick while still looking memoised.
  */
 
 /** How often the player reports position. 4×/sec is enough for a 2pt bar and
@@ -73,7 +80,10 @@ export interface SwiftCardProps {
   navClearance: number;
   revealState: RevealState;
   onRevealLocation: (swift: Swift) => void;
-  onTogglePause: () => void;
+  /** Takes the id rather than closing over it, so the feed can hand down one
+   *  callback for every card instead of a fresh closure per row — see the note
+   *  on `memo` above. */
+  onTogglePause: (id: number) => void;
   onToggleMute: () => void;
   onToggleLike: (id: number, liked: boolean) => void;
   onToggleRepost: (id: number, reposted: boolean) => void;
@@ -137,6 +147,14 @@ function SwiftCardImpl({
     if (status === 'error' || error) setFailed(true);
   });
 
+  // The buffering state, separately and as a *value* rather than an event —
+  // what is drawn depends on what the status currently is, not on the moment
+  // it changed. The poster underneath already covers the gap before the first
+  // frame; this is for the case the poster cannot express, which is a video
+  // that is taking long enough that the still looks like a stuck feed.
+  const { status } = useEvent(player, 'statusChange', { status: player.status });
+  const buffering = isActive && !failed && source !== null && status === 'loading';
+
   const { currentTime } = useEvent(player, 'timeUpdate', {
     currentTime: player.currentTime,
     bufferedPosition: 0,
@@ -165,7 +183,7 @@ function SwiftCardImpl({
   }
 
   const handleTap = useDoubleTap(
-    onTogglePause,
+    () => onTogglePause(swift.id),
     () => {
       // Double tap only ever likes — it never toggles back off, matching the
       // gesture everywhere else it exists.
@@ -192,6 +210,23 @@ function SwiftCardImpl({
     setFailed(false);
     setAttempt((n) => n + 1);
   }
+
+  // ── Rail handlers ───────────────────────────────────────────────────────────
+  // Every one of these is a `useCallback` to keep `memo(SwiftActions)` honest.
+  // The ones that depend on `swift.viewer_liked` / `viewer_reposted` do change
+  // identity when those flip — which is right, because that is precisely when
+  // the rail has to redraw anyway.
+  const handleReveal = useCallback(() => onRevealLocation(swift), [onRevealLocation, swift]);
+  const handleLike = useCallback(
+    () => onToggleLike(swift.id, !swift.viewer_liked),
+    [onToggleLike, swift.id, swift.viewer_liked],
+  );
+  const handleRepost = useCallback(
+    () => onToggleRepost(swift.id, !swift.viewer_reposted),
+    [onToggleRepost, swift.id, swift.viewer_reposted],
+  );
+  const handleComment = useCallback(() => onComment(swift), [onComment, swift]);
+  const handleMore = useCallback(() => onMore(swift), [onMore, swift]);
 
   return (
     <View style={[styles.card, { height }]}>
@@ -230,6 +265,14 @@ function SwiftCardImpl({
           <SwiftBurstIcon size={96} color="#FFFFFF" />
         </Animated.View>
       </View>
+
+      {/* Still fetching the first frame. Only on the card being watched — a
+          neighbour buffering in the preload window is doing its job quietly. */}
+      {buffering && (
+        <View style={styles.centreOverlay} pointerEvents="none">
+          <ActivityIndicator size="large" color="rgba(255,255,255,0.9)" />
+        </View>
+      )}
 
       {/* Tap-to-pause feedback */}
       {showPauseIcon && (
@@ -277,7 +320,7 @@ function SwiftCardImpl({
       <SwiftActions
         locationAvailable={swift.location_available}
         revealState={revealState}
-        onRevealLocation={() => onRevealLocation(swift)}
+        onRevealLocation={handleReveal}
         isLiked={swift.viewer_liked}
         likeCount={swift.like_count}
         commentCount={swift.comment_count}
@@ -286,10 +329,10 @@ function SwiftCardImpl({
         allowReposts={swift.allow_reposts && !swift.is_mine}
         allowComments={swift.allow_comments}
         muted={muted}
-        onLike={() => onToggleLike(swift.id, !swift.viewer_liked)}
-        onComment={() => onComment(swift)}
-        onRepost={() => onToggleRepost(swift.id, !swift.viewer_reposted)}
-        onMore={() => onMore(swift)}
+        onLike={handleLike}
+        onComment={handleComment}
+        onRepost={handleRepost}
+        onMore={handleMore}
         onToggleMute={onToggleMute}
         bottom={navClearance + 18}
       />

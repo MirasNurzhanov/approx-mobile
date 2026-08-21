@@ -112,9 +112,55 @@ export interface SwiftLocation {
 // ── Feed ─────────────────────────────────────────────────────────────────────
 export const FEED_PAGE_SIZE = 10;
 
-export async function fetchSwiftFeed(offset = 0): Promise<SwiftPage> {
+/**
+ * One page of the ranked feed.
+ *
+ * `cursor` replaces the offset the feed used to page by, and the difference is
+ * not cosmetic. The server ranks once per session and pages are slices of that
+ * one ranking; an offset into a list that is re-ranked per request would show
+ * the same Swift twice and skip others silently. The cursor names the session,
+ * so the sequence is stable for as long as the viewer keeps scrolling.
+ *
+ * `sources` says which candidate source won each slot. It is carried back on
+ * the signals this client reports, which is what lets the server tell "people
+ * watch what their friends post" from "people watch whatever is at the top".
+ */
+export interface SwiftFeedPage {
+  results: Swift[];
+  cursor: string | null;
+  hasMore: boolean;
+  sources: Record<string, string>;
+}
+
+export async function fetchSwiftFeed(cursor?: string | null): Promise<SwiftFeedPage> {
+  const { data } = await api.get<{
+    results?: Swift[];
+    next_cursor?: string | null;
+    has_more?: boolean;
+    sources?: Record<string, string>;
+  }>('/api/swifts/feed/', {
+    params: { limit: FEED_PAGE_SIZE, ...(cursor ? { cursor } : {}) },
+  });
+  return {
+    results: data?.results ?? [],
+    cursor: data?.next_cursor ?? null,
+    // Falls back to "there is more if we got a full page", so a server that
+    // has not been deployed yet still pages instead of stopping after one.
+    hasMore: data?.has_more ?? (data?.results?.length ?? 0) >= FEED_PAGE_SIZE,
+    sources: data?.sources ?? {},
+  };
+}
+
+/**
+ * The unranked feed, newest first.
+ *
+ * Kept reachable because "is the recommender doing this" is a question worth
+ * being able to answer from the app, and because a ranked feed that fails
+ * should be able to fall back to one that cannot.
+ */
+export async function fetchSwiftFeedChronological(offset = 0): Promise<SwiftPage> {
   const { data } = await api.get<SwiftPage>('/api/swifts/feed/', {
-    params: { limit: FEED_PAGE_SIZE, offset },
+    params: { limit: FEED_PAGE_SIZE, offset, chrono: 1 },
   });
   return { count: data?.count ?? 0, results: data?.results ?? [] };
 }

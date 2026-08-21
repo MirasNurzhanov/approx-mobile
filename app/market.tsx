@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { AuraMark } from '@/components/ui/AuraMark';
-import { AuraNav } from '@/components/AuraNav';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -136,11 +135,6 @@ export default function MarketScreen() {
           Spend your Aura Points on frames, banners and zone upgrades
         </Text>
       </View>
-
-      {/* `standalone` because this screen is pushed by the root stack, above
-          the tab navigator rather than inside it — there is no trigger map
-          here for the nav's buttons to reference. */}
-      <AuraNav standalone />
     </View>
   );
 }

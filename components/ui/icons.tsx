@@ -137,19 +137,6 @@ export function IconLike({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
-export function IconFunny({ size = 24, color = colors.t2 }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <G stroke={color} {...stroke}>
-        <Circle cx={12} cy={12} r={8.25} />
-        <Path d="M8.3 13.5a4.2 4.2 0 007.4 0" />
-      </G>
-      <Circle cx={9} cy={9.5} r={1.2} fill={color} />
-      <Circle cx={15} cy={9.5} r={1.2} fill={color} />
-    </Svg>
-  )
-}
-
 export function IconInsight({ size = 24, color = colors.t2 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">

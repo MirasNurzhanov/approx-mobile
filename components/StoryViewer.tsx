@@ -39,15 +39,15 @@ import { useTheme } from '@/context/ThemeContext';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import {
-  saveStory,
-  unsaveStories,
+  starStory,
+  unstarStories,
   useStoryArchive,
   type ReactionType,
   type FeedStory,
 } from '@/services/stories';
 import { encodeStoryReply } from '@/services/storyReply';
 
-// Full-screen story viewer, shared by the map and the saved-stories archive.
+// Full-screen story viewer, shared by the map and the starred-stories archive.
 //
 // The chrome sits on two gradient scrims rather than in translucent panels.
 // Panels were the original approach and they read as three grey slabs pasted
@@ -105,7 +105,8 @@ export interface StoryViewerProps {
   onReact?: (storyId: number, reaction: ReactionType) => void;
   /** When set (author is a friend), shows the reply bar that DMs the comment. */
   replyTo?: { id: number; username: string } | null;
-  /** Enables the bookmark toggle on stories not authored by this user. */
+  /** Enables the star toggle — only ever shown on the viewer's own story,
+   *  since starring is not a bookmark of anyone else's post. */
   currentUserId?: number | null;
 }
 
@@ -120,8 +121,8 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   const [replyFocused, setReplyFocused] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
   const [replySent, setReplySent] = useState(false);
-  const [togglingSave, setTogglingSave] = useState(false);
-  const { savedIds } = useStoryArchive();
+  const [togglingStar, setTogglingStar] = useState(false);
+  const { starredIds } = useStoryArchive();
 
   function goTo(i: number) {
     if (i >= stories.length) { onClose(); return; }
@@ -176,21 +177,23 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   const hasPhoto = !!story.image;
   const hasText  = !!(story.text || story.content);
 
-  const canSave = currentUserId != null && story.author.id !== currentUserId;
-  const isSaved = savedIds.has(story.id);
+  // Only ever your own story: starring is the author's own act, not a
+  // bookmark of someone else's post.
+  const canStar = currentUserId != null && story.author.id === currentUserId;
+  const isStarred = starredIds.has(story.id);
 
-  async function toggleSave() {
-    if (togglingSave) return;
-    setTogglingSave(true);
+  async function toggleStar() {
+    if (togglingStar) return;
+    setTogglingStar(true);
     try {
-      if (isSaved) await unsaveStories([story.id]);
-      else await saveStory(story);
+      if (isStarred) await unstarStories([story.id]);
+      else await starStory(story);
     } catch {
       Alert.alert('Could not update', 'Please try again.');
     }
     // Reached on both paths: the `catch` alerts and stops there. Not a
     // `finally` — React Compiler bails on any component containing one.
-    setTogglingSave(false);
+    setTogglingStar(false);
   }
 
   async function sendReply() {
@@ -276,20 +279,20 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
               {timeAgo(story.created_at)} · {timeLeft(story.expires_at)}
             </Text>
           </View>
-          {canSave && (
+          {canStar && (
             <Pressable
-              onPress={toggleSave}
+              onPress={toggleStar}
               hitSlop={12}
               style={({ pressed }) => [
                 styles.svGlassBtn,
-                isSaved && styles.svGlassBtnActive,
+                isStarred && styles.svGlassBtnActive,
                 pressed && { opacity: 0.7 },
               ]}
               accessibilityRole="button"
-              accessibilityLabel={isSaved ? 'Remove from saved' : 'Save story'}
-              accessibilityState={{ selected: isSaved, disabled: togglingSave }}
+              accessibilityLabel={isStarred ? 'Unstar this story' : 'Star this story'}
+              accessibilityState={{ selected: isStarred, disabled: togglingStar }}
             >
-              <IconBookmark size={16} color={isSaved ? colors.teal : colors.t1} filled={isSaved} />
+              <IconBookmark size={16} color={isStarred ? colors.teal : colors.t1} filled={isStarred} />
             </Pressable>
           )}
           <Pressable
@@ -357,9 +360,9 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
           </View>
         )}
 
-        {/* Reactions. Compact pills that size to their content, rather than
-            four stretched boxes filling the width — they were the heaviest
-            thing on screen and the story was competing with its own chrome. */}
+        {/* Reaction. A compact pill that sizes to its content, rather than a
+            stretched box filling the width — that read as the heaviest thing
+            on screen, competing with the story itself. */}
         <View style={[styles.svReactions, { bottom: bottom + 18 }]}>
           {REACTIONS.map(({ type, Icon }) => {
             const count = story.reactions?.[type] ?? 0;

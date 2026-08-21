@@ -363,7 +363,7 @@ export default function ProfileScreen() {
             <ActionRow icon={IconMarket} label="Market"         onPress={() => router.push('/market')} />
             <ActionRow icon={IconSound}  label="My zone"        onPress={() => router.push('/zone')} />
             <ActionRow icon={IconHeart}  label="Edit interests" onPress={() => router.push('/interests')} />
-            <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/saved-stories')} />
+            <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/starred-stories')} />
             <ActionRow icon={IconGlobe}  label="Links"          onPress={() => router.push('/edit-links')} />
           </View>
         </View>

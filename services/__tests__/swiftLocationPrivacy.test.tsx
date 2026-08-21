@@ -43,6 +43,14 @@ jest.mock('../swifts', () => ({
 }));
 
 // ── Native surfaces the feed pulls in ────────────────────────────────────────
+// Fire-and-forget analytics. Stubbed so these suites keep measuring
+// playback and privacy rather than the reporting queue, which has its
+// own tests.
+jest.mock('../swiftSignals', () => ({
+  reportSwiftSignal: jest.fn(),
+  flushSwiftSignals: jest.fn(() => Promise.resolve()),
+}));
+
 jest.mock('expo-router', () => {
   const React = require('react');
   return {
@@ -180,8 +188,10 @@ beforeEach(() => {
   mockApi.setSwiftLiked.mockResolvedValue(0);
   mockApi.revealSwiftLocation.mockResolvedValue(LOCATION);
   mockApi.fetchSwiftFeed.mockResolvedValue({
-    count: 3,
-    results: [makeSwift(1), makeSwift(2), makeSwift(3)],
+      cursor: null,
+      hasMore: false,
+      sources: {},
+      results: [makeSwift(1), makeSwift(2), makeSwift(3)],
   });
 });
 
@@ -221,13 +231,21 @@ describe('the feed never fetches a location on its own', () => {
     // reached the end and `loadMore` correctly declines to ask again, which
     // would make this pass without ever exercising the pager.
     const fullPage = Array.from({ length: FEED_PAGE_SIZE }, (_, i) => makeSwift(i + 1));
-    mockApi.fetchSwiftFeed.mockResolvedValue({ count: 30, results: fullPage });
+    mockApi.fetchSwiftFeed.mockResolvedValue({
+      // A cursor and `hasMore`, so the feed will page. The first page has to
+      // advertise more or `loadMore` correctly declines to ask.
+      cursor: 'session-token.10',
+      hasMore: true,
+      sources: {},
+      results: fullPage });
 
     const tree = await renderFeed();
     expect(mockApi.fetchSwiftFeed).toHaveBeenCalledTimes(1);
 
     mockApi.fetchSwiftFeed.mockResolvedValue({
-      count: 30,
+      cursor: null,
+      hasMore: false,
+      sources: {},
       results: Array.from({ length: FEED_PAGE_SIZE }, (_, i) => makeSwift(i + 11)),
     });
     await act(async () => {
@@ -235,7 +253,9 @@ describe('the feed never fetches a location on its own', () => {
     });
 
     expect(mockApi.fetchSwiftFeed).toHaveBeenCalledTimes(2);
-    expect(mockApi.fetchSwiftFeed).toHaveBeenLastCalledWith(FEED_PAGE_SIZE);
+    // The cursor from the first page, not an offset — and, the point of the
+    // test, still nothing that could carry a coordinate.
+    expect(mockApi.fetchSwiftFeed).toHaveBeenLastCalledWith('session-token.10');
     expect(mockApi.revealSwiftLocation).not.toHaveBeenCalled();
   });
 
@@ -297,7 +317,10 @@ describe('the reveal happens on a press and only then', () => {
 
   it('draws no reveal button when the viewer could not reveal it', async () => {
     mockApi.fetchSwiftFeed.mockResolvedValue({
-      count: 1, results: [makeSwift(1, { location_available: false })],
+      cursor: null,
+      hasMore: false,
+      sources: {},
+      results: [makeSwift(1, { location_available: false })],
     });
     const tree = await renderFeed();
 

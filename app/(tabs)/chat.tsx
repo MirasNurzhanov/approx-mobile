@@ -27,6 +27,7 @@ import { blockUser, refreshBlocked, useBlockedUsers } from '@/services/blocked';
 import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
 import { storyReplyPreview } from '@/services/storyReply';
 import {
+  clearAllAlerts,
   deriveAlerts,
   EMPTY_ALERTS,
   isClubAlert,
@@ -443,18 +444,21 @@ function SearchResultsList({ rows, trimmed, scrollProps, onMessage, onOpenClub }
   );
 }
 
-function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, markingRead, refreshControl, scrollProps, onRequest, onOpenActivity, onOpenProfile, onMarkAllRead }: {
+function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, hasActivity, markingRead, clearingAlerts, refreshControl, scrollProps, onRequest, onOpenActivity, onOpenProfile, onMarkAllRead, onClearAll }: {
   rows: AlertRow[];
   actioning: Record<string, 'accept' | 'decline'>;
   unreadCount: number;
   hasUnreadActivity: boolean;
+  hasActivity: boolean;
   markingRead: boolean;
+  clearingAlerts: boolean;
   refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
   scrollProps: ScrollProps;
   onRequest: (request: AlertRequest, action: 'accept' | 'decline') => void;
   onOpenActivity: (notif: Notification) => void;
   onOpenProfile: (userId: number) => void;
   onMarkAllRead: () => void;
+  onClearAll: () => void;
 }) {
   const { colors } = useTheme();
   const navPadding = useNavContentPadding();
@@ -484,20 +488,35 @@ function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, markingRe
         return <NotifRow notif={item.notif} onPress={() => onOpenActivity(item.notif)} />;
       }}
       ListHeaderComponent={
-        unreadCount > 0 ? (
+        unreadCount > 0 || hasActivity ? (
           <View style={styles.alertsHeader}>
-            <View style={styles.unreadPill}>
-              <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
+            <View>
+              {unreadCount > 0 && (
+                <View style={styles.unreadPill}>
+                  <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
+                </View>
+              )}
             </View>
-            {hasUnreadActivity && (
-              <Pressable onPress={onMarkAllRead} disabled={markingRead} hitSlop={10}>
-                {markingRead ? (
-                  <ActivityIndicator color={colors.teal} size="small" />
-                ) : (
-                  <Text style={styles.markReadBtn}>Mark all read</Text>
-                )}
-              </Pressable>
-            )}
+            <View style={styles.alertsHeaderActions}>
+              {hasUnreadActivity && (
+                <Pressable onPress={onMarkAllRead} disabled={markingRead} hitSlop={10}>
+                  {markingRead ? (
+                    <ActivityIndicator color={colors.teal} size="small" />
+                  ) : (
+                    <Text style={styles.markReadBtn}>Mark all read</Text>
+                  )}
+                </Pressable>
+              )}
+              {hasActivity && (
+                <Pressable onPress={onClearAll} disabled={clearingAlerts} hitSlop={10}>
+                  {clearingAlerts ? (
+                    <ActivityIndicator color={colors.red} size="small" />
+                  ) : (
+                    <Text style={styles.clearAllBtn}>Clear all</Text>
+                  )}
+                </Pressable>
+              )}
+            </View>
           </View>
         ) : null
       }
@@ -904,6 +923,7 @@ export default function ChatScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
   const [markingRead, setMarkingRead] = useState(false);
+  const [clearingAlerts, setClearingAlerts] = useState(false);
   const [actioning, setActioning] = useState<Record<string, 'accept' | 'decline'>>({});
   // Live stories from friends, keyed by author. Not derived from anything on
   // the map: a friend who has paused location sharing is off the map and still
@@ -1044,6 +1064,29 @@ export default function ChatScreen() {
     setMarkingRead(false);
   }
 
+  function confirmClearAll() {
+    Alert.alert(
+      'Clear all alerts?',
+      "This removes all activity from your alerts. Pending requests aren't affected.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear all', style: 'destructive', onPress: clearAll },
+      ],
+    );
+  }
+
+  async function clearAll() {
+    setClearingAlerts(true);
+    // Optimistic: the feed empties now, the server catches up.
+    setAlerts((prev) => ({ ...prev, notifications: [] }));
+    try {
+      await clearAllAlerts();
+    } catch {}
+    // Refresh either way — a failed clear still wants the true state back.
+    await fetchAll();
+    setClearingAlerts(false);
+  }
+
   /** Follow an alert to whatever it is about. A reply lives in the chat it was
    *  sent to; a reaction has no thread, so it goes to who reacted. */
   function openActivity(n: Notification) {
@@ -1155,13 +1198,16 @@ export default function ChatScreen() {
           actioning={actioning}
           unreadCount={unreadCount}
           hasUnreadActivity={hasUnreadActivity}
+          hasActivity={activity.length > 0}
           markingRead={markingRead}
+          clearingAlerts={clearingAlerts}
           refreshControl={refreshControl}
           scrollProps={scrollProps}
           onRequest={handleRequest}
           onOpenActivity={openActivity}
           onOpenProfile={(userId) => router.push({ pathname: '/profile/[id]', params: { id: userId } } as any)}
           onMarkAllRead={markAllRead}
+          onClearAll={confirmClearAll}
         />
       ) : activeTab === 'chats' ? (
         <ChatsList
@@ -1280,6 +1326,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
+  alertsHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   unreadPill: {
     backgroundColor: colors.surface2,
     borderRadius: 999,
@@ -1299,6 +1346,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: colors.teal,
+  },
+  clearAllBtn: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.red,
   },
 
   // Card internals

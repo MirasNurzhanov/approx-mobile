@@ -113,7 +113,7 @@ function AppShell() {
       <Stack.Screen name="profile/[id]"    options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="edit-profile"    options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="search"          options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="saved-stories"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack.Screen name="starred-stories" options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="blocked-users"   options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="privacy"         options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="connections"     options={{ headerShown: false, animation: 'slide_from_right' }} />

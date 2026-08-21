@@ -14,7 +14,6 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { StoryViewer } from '@/components/StoryViewer';
-import { Avatar } from '@/components/ui/Avatar';
 import { IconBack, IconCheck, IconPin, IconTrash } from '@/components/ui/icons';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -26,20 +25,22 @@ import {
   deleteOwnStories,
   hydrateArchive,
   loadMoreMine,
-  loadMoreSaved,
+  loadMoreStarred,
   refreshMine,
-  refreshSaved,
-  unsaveStories,
+  refreshStarred,
+  unstarStories,
   useStoryArchive,
   type FeedStory,
 } from '@/services/stories';
 
 // The story archive behind Profile → "My stories". "Mine" is every story the
-// user has posted (kept past the 24h map expiry); "Saved" is bookmarks of
-// other people's stories. Content comes from the store, which serves the
-// on-device cache instantly and refreshes from the backend.
+// user has posted (kept past the 24h map expiry); "Starred" is the ones
+// they've favorited among those — a shortlist, not a bookmark of anyone
+// else's post, so both tabs are always the viewer's own stories. Content
+// comes from the store, which serves the on-device cache instantly and
+// refreshes from the backend.
 
-type Tab = 'mine' | 'saved';
+type Tab = 'mine' | 'starred';
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -51,9 +52,8 @@ function fmtDate(iso: string): string {
 }
 
 // ─── Story card ───────────────────────────────────────────────────────────────
-function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPress }: {
+function StoryCard({ story, selectMode, selected, onPress, onLongPress }: {
   story: FeedStory;
-  showAuthor: boolean;
   selectMode: boolean;
   selected: boolean;
   onPress: () => void;
@@ -73,13 +73,6 @@ function StoryCard({ story, showAuthor, selectMode, selected, onPress, onLongPre
       ) : (
         <View style={styles.cardTextOnly}>
           <Text style={styles.cardTextContent} numberOfLines={6}>{caption}</Text>
-        </View>
-      )}
-
-      {showAuthor && (
-        <View style={styles.cardAuthor}>
-          <Avatar uri={story.author.profile_picture} name={story.author.username} size="xs" />
-          <Text style={styles.cardAuthorName} numberOfLines={1}>{story.author.username}</Text>
         </View>
       )}
 
@@ -240,7 +233,7 @@ function SelectionBar({ activeTab, selectedCount, deleting, canClear, bottom, on
           <>
             <IconTrash size={16} color={selectedCount === 0 ? colors.t3 : colors.t1} />
             <Text style={[styles.deleteBtnText, selectedCount === 0 && styles.deleteBtnTextDisabled]}>
-              {activeTab === 'mine' ? 'Delete' : 'Remove'}
+              {activeTab === 'mine' ? 'Delete' : 'Unstar'}
               {selectedCount > 0 ? ` (${selectedCount})` : ''}
             </Text>
           </>
@@ -251,7 +244,7 @@ function SelectionBar({ activeTab, selectedCount, deleting, canClear, bottom, on
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
-export default function SavedStoriesScreen() {
+export default function StarredStoriesScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { top, bottom } = useSafeAreaInsets();
@@ -269,14 +262,14 @@ export default function SavedStoriesScreen() {
   useEffect(() => {
     // Cache first for instant/offline open, then the backend as source of truth.
     hydrateArchive();
-    Promise.allSettled([refreshMine(), refreshSaved()]);
+    Promise.allSettled([refreshMine(), refreshStarred()]);
     api.get<{ id: number }>('/api/users/profile/')
       .then((r) => setCurrentUserId(Number(r.data.id)))
       .catch(() => {});
   }, []);
 
-  const list = activeTab === 'mine' ? archive.mine : archive.saved;
-  const total = activeTab === 'mine' ? archive.mineTotal : archive.savedTotal;
+  const list = activeTab === 'mine' ? archive.mine : archive.starred;
+  const total = activeTab === 'mine' ? archive.mineTotal : archive.starredTotal;
   const loaded = list ?? [];
 
   function switchTab(tab: Tab) {
@@ -312,7 +305,7 @@ export default function SavedStoriesScreen() {
   async function onRefresh() {
     setRefreshing(true);
     try {
-      await (activeTab === 'mine' ? refreshMine() : refreshSaved());
+      await (activeTab === 'mine' ? refreshMine() : refreshStarred());
     } catch {
       // Offline or server error — the cached list stays on screen.
     }
@@ -325,7 +318,7 @@ export default function SavedStoriesScreen() {
     if (loadingMore || !list || total === null || list.length >= total) return;
     setLoadingMore(true);
     try {
-      await (activeTab === 'mine' ? loadMoreMine() : loadMoreSaved());
+      await (activeTab === 'mine' ? loadMoreMine() : loadMoreStarred());
     } catch {}
     // The `catch` swallows everything, so this always runs.
     setLoadingMore(false);
@@ -336,11 +329,11 @@ export default function SavedStoriesScreen() {
     await runBusy(async () => {
       // Optimistic in the store: items vanish now, roll back if the API fails.
       if (activeTab === 'mine') await deleteOwnStories(ids);
-      else await unsaveStories(ids);
+      else await unstarStories(ids);
       exitSelectMode();
     }, () => setDeleting(false)).catch(() =>
       Alert.alert(
-        activeTab === 'mine' ? 'Could not delete' : 'Could not remove',
+        activeTab === 'mine' ? 'Could not delete' : 'Could not unstar',
         'Something went wrong and nothing was removed. Please try again.',
       ),
     );
@@ -352,7 +345,7 @@ export default function SavedStoriesScreen() {
     if (activeTab === 'mine') {
       Alert.alert(
         n === 1 ? 'Delete this story?' : `Delete ${n} stories?`,
-        `${n === 1 ? 'This story' : `These ${n} stories`} will be permanently deleted for everyone — removed from the map and from anyone who saved ${n === 1 ? 'it' : 'them'}. This can't be undone.`,
+        `${n === 1 ? 'This story' : `These ${n} stories`} will be permanently deleted — removed from the map and from your archive. This can't be undone.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Delete', style: 'destructive', onPress: () => runDelete([...selected]) },
@@ -360,11 +353,11 @@ export default function SavedStoriesScreen() {
       );
     } else {
       Alert.alert(
-        n === 1 ? 'Remove saved story?' : `Remove ${n} saved stories?`,
-        `This only removes ${n === 1 ? 'it' : 'them'} from your Saved list — the original ${n === 1 ? 'story is' : 'stories are'} not deleted. You can't undo this here, but you can save ${n === 1 ? 'it' : 'them'} again from the map while ${n === 1 ? 'it is' : 'they are'} live.`,
+        n === 1 ? 'Unstar this story?' : `Unstar ${n} stories?`,
+        `This only removes ${n === 1 ? 'it' : 'them'} from Starred — ${n === 1 ? 'the story stays' : 'the stories stay'} in Mine, and you can star ${n === 1 ? 'it' : 'them'} again anytime.`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: () => runDelete([...selected]) },
+          { text: 'Unstar', style: 'destructive', onPress: () => runDelete([...selected]) },
         ],
       );
     }
@@ -385,7 +378,7 @@ export default function SavedStoriesScreen() {
     if (activeTab === 'mine') {
       Alert.alert(
         'Delete all your stories?',
-        `All ${n} of your stories will be permanently deleted for everyone — removed from the map and from anyone who saved them. This can't be undone.`,
+        `All ${n} of your stories will be permanently deleted — removed from the map and from your archive. This can't be undone.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Delete all', style: 'destructive', onPress: clear },
@@ -393,19 +386,19 @@ export default function SavedStoriesScreen() {
       );
     } else {
       Alert.alert(
-        'Remove all saved stories?',
-        `All ${n} bookmarks will be removed from your Saved list. The original stories are not deleted. This can't be undone.`,
+        'Unstar all your stories?',
+        `All ${n} stars will be cleared. The stories themselves stay in Mine, and you can star any of them again anytime.`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove all', style: 'destructive', onPress: clear },
+          { text: 'Unstar all', style: 'destructive', onPress: clear },
         ],
       );
     }
   }
 
   const TABS: { key: Tab; label: string; count: number | null }[] = [
-    { key: 'mine',  label: 'Mine',  count: archive.mineTotal },
-    { key: 'saved', label: 'Saved', count: archive.savedTotal },
+    { key: 'mine',    label: 'Mine',    count: archive.mineTotal },
+    { key: 'starred', label: 'Starred', count: archive.starredTotal },
   ];
 
   const firstLoad = list === null;
@@ -442,7 +435,6 @@ export default function SavedStoriesScreen() {
           renderItem={({ item }) => (
             <StoryCard
               story={item}
-              showAuthor={activeTab === 'saved'}
               selectMode={selectMode}
               selected={selected.has(item.id)}
               onPress={() => (selectMode ? toggleSelected(item.id) : setViewerStory(item))}
@@ -460,8 +452,8 @@ export default function SavedStoriesScreen() {
               />
             ) : (
               <EmptyState
-                title="Nothing saved yet"
-                message={'When you view someone’s story on the map, tap the bookmark to keep it here.'}
+                title="Nothing starred yet"
+                message={'Open one of your own stories and tap the star to shortlist it here.'}
               />
             )
           }
@@ -596,28 +588,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontWeight: '500',
     color: colors.t1,
     lineHeight: 20,
-  },
-  cardAuthor: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    right: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 100,
-    paddingRight: 10,
-    paddingLeft: 3,
-    paddingVertical: 3,
-    alignSelf: 'flex-start',
-  },
-  cardAuthorName: {
-    fontFamily: fonts.body,
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.t1,
-    flexShrink: 1,
   },
   cardFooter: {
     position: 'absolute',

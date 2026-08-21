@@ -76,6 +76,25 @@ function cloudinaryReason(responseText: string): string {
   }
 }
 
+/**
+ * What to put in front of the creator.
+ *
+ * The split that matters is whose problem it is. A 401 or 403 from Cloudinary
+ * is the account — wrong credentials, or a cloud whose uploads are switched
+ * off — and "this video was rejected" is then both wrong and unactionable:
+ * the video is fine and there is nothing the person holding the phone can do
+ * about it. Cloudinary's wording for that case names the cloud, which is a
+ * deployment detail and not something to show a stranger, so it stays in the
+ * log and on `UploadError.detail` where whoever is debugging will find it.
+ */
+function uploadFailureMessage(status: number, reason: string): string {
+  if (status >= 500 || status === 0) return 'The upload failed. Check your connection.';
+  if (status === 401 || status === 403) return 'Video uploads are unavailable right now.';
+  return reason
+    ? `This video was rejected: ${reason}`
+    : `This video was rejected (HTTP ${status}).`;
+}
+
 export interface CloudinaryVideo {
   public_id: string;
   secure_url: string;
@@ -262,11 +281,7 @@ function transfer({ uri, signature, onProgress, signal }: TransferOptions): Prom
         `[Swifts] upload rejected — HTTP ${xhr.status}${reason ? `: ${reason}` : ''}`,
       );
       finish(() => reject(new UploadError(
-        retryable
-          ? 'The upload failed. Check your connection.'
-          : reason
-            ? `This video was rejected: ${reason}`
-            : `This video was rejected (HTTP ${xhr.status}).`,
+        uploadFailureMessage(xhr.status, reason),
         retryable,
         { status: xhr.status, detail: reason },
       )));

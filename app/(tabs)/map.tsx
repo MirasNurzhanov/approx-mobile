@@ -29,7 +29,6 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuraNav } from '@/components/AuraNav';
-import { REACTIONS } from '@/components/storyReactions';
 import { StoryViewer } from '@/components/StoryViewer';
 import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay';
 import { Avatar } from '@/components/ui/Avatar';
@@ -41,6 +40,7 @@ import {
     IconEyeOff,
     IconHi,
     IconImage,
+    IconLike,
     IconList,
     IconLocate,
     IconLocateFixed,
@@ -50,7 +50,6 @@ import {
     IconPeople,
     IconPin,
     IconSearch,
-    type IconComponent,
 } from '@/components/ui/icons';
 import { iconForInterest } from '@/components/ui/interestIcons';
 import { ZonePlayer } from '@/components/ZonePlayer';
@@ -960,14 +959,7 @@ function StoryBubble({ story, count, onAvatarLoad }: { story: Story; count: numb
   const styles = makeStyles(colors);
   const avatarBg = avatarBgColor(story.author.username);
 
-  const reactions = story.reactions ?? {};
-  const topReaction = REACTIONS.reduce<{ type: ReactionType; Icon: IconComponent; count: number } | null>(
-    (best, { type, Icon }) => {
-      const count = reactions[type] ?? 0;
-      return count > 0 && (!best || count > best.count) ? { type, Icon, count } : best;
-    },
-    null,
-  );
+  const likeCount = story.reactions?.like ?? 0;
 
   return (
     <View style={{ alignItems: 'center' }}>
@@ -997,10 +989,10 @@ function StoryBubble({ story, count, onAvatarLoad }: { story: Story; count: numb
         </View>
       </View>
       <View style={styles.storyCardTail} />
-      {topReaction && (
+      {likeCount > 0 && (
         <View style={styles.storyReactionPill}>
-          <topReaction.Icon size={11} color={colors.t2} />
-          <Text style={styles.storyReactionText}>{topReaction.count}</Text>
+          <IconLike size={11} color={colors.t2} />
+          <Text style={styles.storyReactionText}>{likeCount}</Text>
         </View>
       )}
     </View>

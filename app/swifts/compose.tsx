@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -75,6 +75,16 @@ export default function SwiftComposerScreen() {
   // deliberately discarded, so a creator who records six takes is not left
   // with six full-size videos in the app's cache.
   const tempUriRef = useRef<string | null>(null);
+
+  // An upload that outlives its screen is the user's mobile data being spent
+  // on a Swift nobody is waiting for any more. Discard and Cancel already
+  // abort; this covers every other way the composer can go — a deep link
+  // elsewhere, a router replace, a parent unmounting it — none of which run
+  // either of those handlers.
+  //
+  // Empty deps on purpose: this must fire on unmount and never in between,
+  // and the ref it reads is current by construction.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const patch = (next: Partial<SwiftDraft>) =>
     setDraft((prev) => ({ ...prev, ...next }));

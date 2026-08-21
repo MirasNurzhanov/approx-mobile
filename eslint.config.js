@@ -5,7 +5,10 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // `.expo/` is generated and gitignored; its `static-tmp/_error.js` imports
+    // a path that only resolves inside Expo's own bundler, so a bare
+    // `npx eslint .` reported an error `npm run lint` never saw.
+    ignores: ['dist/*', '.expo/*'],
   },
   {
     // Build-time scripts run in Node, not on a device. Without this the Expo

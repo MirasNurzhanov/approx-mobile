@@ -24,7 +24,6 @@ import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { useNavClearance } from '@/hooks/useNavMetrics';
 import {
-  FEED_PAGE_SIZE,
   fetchSwiftFeed,
   recordSwiftView,
   revealSwiftLocation,
@@ -34,6 +33,7 @@ import {
   type Swift,
   type SwiftLocation,
 } from '@/services/swifts';
+import { flushSwiftSignals, reportSwiftSignal } from '@/services/swiftSignals';
 
 /**
  * The Swifts feed.
@@ -96,6 +96,12 @@ export function SwiftsFeed() {
   const [height, setHeight] = useState(0);
   const [paging, setPaging] = useState(false);
   const [exhausted, setExhausted] = useState(false);
+  /** The server's ranking session. Held in a ref rather than state because
+   *  nothing renders from it and changing it must not re-render the list. */
+  const cursor = useRef<string | null>(null);
+  /** Which candidate source served each Swift, carried back on its signals so
+   *  the server can tell taste from position. */
+  const servedBy = useRef<Record<number, string>>({});
 
   // ── What silences the feed ─────────────────────────────────────────────────
   const [screenFocused, setScreenFocused] = useState(true);
@@ -136,10 +142,16 @@ export function SwiftsFeed() {
   const reportedViews = useRef<Set<number>>(new Set());
 
   const load = useCallback(() => {
-    fetchSwiftFeed(0)
+    cursor.current = null;
+    servedBy.current = {};
+    fetchSwiftFeed()
       .then((page) => {
         setSwifts(page.results);
-        setExhausted(page.results.length < FEED_PAGE_SIZE);
+        cursor.current = page.cursor;
+        for (const [id, source] of Object.entries(page.sources)) {
+          servedBy.current[Number(id)] = source;
+        }
+        setExhausted(!page.hasMore);
         setState('ready');
       })
       .catch(() => setState('error'));
@@ -155,17 +167,60 @@ export function SwiftsFeed() {
   const loadMore = useCallback(() => {
     if (paging || exhausted || state !== 'ready') return;
     setPaging(true);
-    fetchSwiftFeed(swifts.length)
+    // The cursor, not an offset. The server ranks once per session and pages
+    // are slices of that ranking; an offset into a list that re-ranks per
+    // request would repeat Swifts and skip others with nothing to show for it.
+    fetchSwiftFeed(cursor.current)
       .then((page) => {
         // Feed rows carry no location fields, so paging ahead cannot bring a
         // coordinate with it — there is nothing to strip because there is
         // nothing to strip on the wire.
-        setSwifts((prev) => [...prev, ...page.results]);
-        if (page.results.length < FEED_PAGE_SIZE) setExhausted(true);
+        setSwifts((prev) => {
+          // The server excludes what it has already served, but a retried
+          // request or an expired session can still produce an overlap, and a
+          // duplicate key in a FlatList is a rendering bug rather than a
+          // cosmetic one.
+          const known = new Set(prev.map((s) => s.id));
+          return [...prev, ...page.results.filter((s) => !known.has(s.id))];
+        });
+        cursor.current = page.cursor;
+        for (const [id, source] of Object.entries(page.sources)) {
+          servedBy.current[Number(id)] = source;
+        }
+        if (!page.hasMore) setExhausted(true);
       })
       .catch(() => setExhausted(true))
       .finally(() => setPaging(false));
-  }, [paging, exhausted, state, swifts.length]);
+  }, [paging, exhausted, state]);
+
+  /** The card currently on screen, and when it arrived. Refs rather than
+   *  state: the only reader is the viewability handler, which runs after the
+   *  commit that would have set them. */
+  const watching = useRef<{ id: number; index: number; since: number } | null>(null);
+
+  /** Report the card being left as a watch, with how much of it was seen.
+   *
+   *  Duration comes from wall-clock time on screen rather than from the
+   *  player: a paused or buffering card is time the viewer spent not watching,
+   *  and treating it as watching is how a stalled video reads as a hit. It is
+   *  an over-estimate either way, which the server's own thresholds absorb. */
+  const closeWatch = useCallback((swift: Swift | undefined) => {
+    const previous = watching.current;
+    if (!previous) return;
+    const elapsedMs = Date.now() - previous.since;
+    const durationMs = swift?.duration_ms ?? 0;
+    const completion = durationMs > 0
+      ? Math.min(100, Math.round((elapsedMs / durationMs) * 100))
+      : 0;
+    reportSwiftSignal({
+      kind: 'watch',
+      swift_id: previous.id,
+      watch_ms: elapsedMs,
+      completion_pct: completion,
+      served_by: servedBy.current[previous.id],
+      position: previous.index,
+    });
+  }, []);
 
   // Stable identity: FlatList warns and misbehaves if this changes per render.
   const [handleViewableItemsChanged] = useState(() => {
@@ -178,6 +233,16 @@ export function SwiftsFeed() {
       setPausedId(null);
 
       const swift = first.item as Swift | undefined;
+      // The card being left is reported before the new one is opened, so a
+      // fast scroll produces one watch per card rather than one long one.
+      if (watching.current && watching.current.id !== swift?.id) {
+        closeWatchRef.current(lastSwiftRef.current);
+      }
+      if (swift && watching.current?.id !== swift.id) {
+        watching.current = { id: swift.id, index: first.index, since: Date.now() };
+        lastSwiftRef.current = swift;
+      }
+
       if (swift && !reportedViews.current.has(swift.id)) {
         reportedViews.current.add(swift.id);
         // Fire and forget. A failed view report costs the viewer the ability
@@ -190,6 +255,22 @@ export function SwiftsFeed() {
     };
   });
 
+  // The viewability handler is created once and must not close over a stale
+  // `closeWatch`; these two refs are how it reaches the current one.
+  const closeWatchRef = useRef(closeWatch);
+  const lastSwiftRef = useRef<Swift | undefined>(undefined);
+  useEffect(() => { closeWatchRef.current = closeWatch; });
+
+  // A session's signals are most at risk of never being sent when the viewer
+  // leaves, which is exactly when the timer has not fired yet.
+  useEffect(() => {
+    if (!playbackAllowed) {
+      closeWatchRef.current(lastSwiftRef.current);
+      watching.current = null;
+      void flushSwiftSignals();
+    }
+  }, [playbackAllowed]);
+
   const handleLayout = (e: LayoutChangeEvent) => setHeight(e.nativeEvent.layout.height);
 
   // ── Engagement ─────────────────────────────────────────────────────────────
@@ -201,6 +282,12 @@ export function SwiftsFeed() {
   // Optimistic: the count moves under the thumb, and only rolls back if the
   // write actually fails.
   const handleToggleLike = useCallback((id: number, liked: boolean) => {
+    // Only the positive direction. An unlike is not a negative signal — it is
+    // usually a mis-tap being undone, and scoring it as dislike would punish
+    // the creator for the viewer's thumb.
+    if (liked) {
+      reportSwiftSignal({ kind: 'like', swift_id: id, served_by: servedBy.current[id] });
+    }
     setSwifts((prev) => prev.map((s) => (
       s.id === id
         ? { ...s, viewer_liked: liked, like_count: Math.max(0, s.like_count + (liked ? 1 : -1)) }
@@ -224,6 +311,9 @@ export function SwiftsFeed() {
   }, [patchSwift]);
 
   const handleToggleRepost = useCallback((id: number, reposted: boolean) => {
+    if (reposted) {
+      reportSwiftSignal({ kind: 'repost', swift_id: id, served_by: servedBy.current[id] });
+    }
     setSwifts((prev) => prev.map((s) => (
       s.id === id
         ? {
@@ -264,6 +354,11 @@ export function SwiftsFeed() {
    * the pager.
    */
   const handleReveal = useCallback(async (swift: Swift) => {
+    // The interaction, not the place. `reportSwiftSignal` has no location
+    // field to put one in, and the server's serializer declares none either.
+    reportSwiftSignal({
+      kind: 'location_reveal', swift_id: swift.id, served_by: servedBy.current[swift.id],
+    });
     setRevealingId(swift.id);
     setActiveReveal({
       swiftId: swift.id,
@@ -299,9 +394,22 @@ export function SwiftsFeed() {
     return revealedIds.has(swift.id) ? 'revealed' : 'idle';
   }
 
-  const handleComment = useCallback((swift: Swift) => setCommentsFor(swift), []);
+  const handleComment = useCallback((swift: Swift) => {
+    reportSwiftSignal({
+      kind: 'comment', swift_id: swift.id, served_by: servedBy.current[swift.id],
+    });
+    setCommentsFor(swift);
+  }, []);
   const handleMore = useCallback(() => {}, []);
   const handleToggleMute = useCallback(() => setMuted((m) => !m), []);
+  // Takes the id instead of closing over the row. Written inline in `renderItem`
+  // this was a new function per card per render, which defeated `memo(SwiftCard)`
+  // outright — every mounted card rebuilt its video view and its whole SVG rail
+  // on every scroll tick and every optimistic count change, while still looking
+  // memoised from the outside.
+  const handleTogglePause = useCallback((id: number) => {
+    setPausedId((p) => (p === id ? null : id));
+  }, []);
 
   const navClearance = useNavClearance(RAIL_RIGHT, RAIL_WIDTH) + safeBottom;
 
@@ -360,7 +468,7 @@ export function SwiftsFeed() {
               navClearance={navClearance}
               revealState={revealStateFor(item)}
               onRevealLocation={handleReveal}
-              onTogglePause={() => setPausedId((p) => (p === item.id ? null : item.id))}
+              onTogglePause={handleTogglePause}
               onToggleMute={handleToggleMute}
               onToggleLike={handleToggleLike}
               onToggleRepost={handleToggleRepost}

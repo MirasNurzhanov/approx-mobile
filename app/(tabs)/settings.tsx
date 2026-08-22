@@ -82,7 +82,7 @@ interface SelfZone {
   zone_region_detail?: { name: string } | null;
 }
 
-const FEEDBACK_EMAIL = 'support@aura-app.com';
+const FEEDBACK_EMAIL = 'nurdauletaskar551@gmail.com';
 
 // ─── Location visibility ──────────────────────────────────────────────────────
 // The status readout, the precision choice and the check in / check out button

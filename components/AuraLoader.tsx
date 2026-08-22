@@ -1,5 +1,15 @@
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { fonts, withAlpha } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -11,6 +21,101 @@ const CORE_R      = 12;
 const PARTICLE_R  = 5;
 const RING_BASE   = 56;
 
+function Core({ styles }: { styles: ReturnType<typeof makeStyles> }) {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.set(
+      withRepeat(
+        withSequence(
+          withTiming(1.18, { duration: 900, easing: Easing.inOut(Easing.sin) }),
+          withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }),
+        ),
+        -1,
+      ),
+    );
+  }, [scale]);
+
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
+
+  return <Animated.View style={[styles.core, style]} />;
+}
+
+function Particle({ styles, index, color }: {
+  styles: ReturnType<typeof makeStyles>; index: number; color: string;
+}) {
+  const anim = useSharedValue(0);
+  const angle = (2 * Math.PI * index) / N_PARTICLES;
+  const dx = DISTANCE * Math.cos(angle);
+  const dy = DISTANCE * Math.sin(angle);
+
+  useEffect(() => {
+    anim.set(
+      withDelay(
+        (index / N_PARTICLES) * 1300,
+        withRepeat(
+          withSequence(
+            withTiming(1, { duration: 900, easing: Easing.out(Easing.quad) }),
+            withTiming(0, { duration: 650, easing: Easing.in(Easing.quad) }),
+          ),
+          -1,
+        ),
+      ),
+    );
+  }, [anim, index]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: interpolate(anim.get(), [0, 1], [0, dx]) },
+      { translateY: interpolate(anim.get(), [0, 1], [0, dy]) },
+    ],
+  }));
+
+  return <Animated.View style={[styles.particle, { backgroundColor: color }, style]} />;
+}
+
+function Ring({ styles, index, color }: {
+  styles: ReturnType<typeof makeStyles>; index: number; color: string;
+}) {
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(0.55);
+
+  useEffect(() => {
+    const delay = (index / 3) * 1700;
+    scale.set(
+      withDelay(
+        delay,
+        withRepeat(
+          withSequence(
+            withTiming(3.4, { duration: 1700, easing: Easing.out(Easing.quad) }),
+            withTiming(1, { duration: 0 }),
+          ),
+          -1,
+        ),
+      ),
+    );
+    opacity.set(
+      withDelay(
+        delay,
+        withRepeat(
+          withSequence(
+            withTiming(0, { duration: 1700, easing: Easing.out(Easing.quad) }),
+            withTiming(0.55, { duration: 0 }),
+          ),
+          -1,
+        ),
+      ),
+    );
+  }, [scale, opacity, index]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: opacity.get(),
+    transform: [{ scale: scale.get() }],
+  }));
+
+  return <Animated.View style={[styles.ring, { borderColor: color }, style]} />;
+}
+
 export function AuraLoader() {
   const { colors } = useTheme();
   // Kept despite react-doctor/react-compiler-no-manual-memoization: dropping it
@@ -19,165 +124,26 @@ export function AuraLoader() {
   // `makeStyles(colors)` and, with it, every `styles.*` read downstream.
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  // Created once and never replaced. `useState` with an initialiser rather than
-  // a ref, because a ref would have to be read back during render to reach the
-  // values, which is what React Compiler refuses to optimise around.
-  const [coreScale] = useState(() => new Animated.Value(1));
-
-  // Each carries the id it is keyed by. Assigned once, in the initialiser, so
-  // it is fixed for the life of the component rather than re-derived from a
-  // loop position on every render.
-  const [particleAnims] = useState(() =>
-    Array.from({ length: N_PARTICLES }, (_, i) => ({
-      id:    `particle-${i}`,
-      value: new Animated.Value(0),
-    })),
-  );
-
-  const [ringAnims] = useState(() =>
-    Array.from({ length: 3 }, (_, i) => ({
-      id:      `ring-${i}`,
-      scale:   new Animated.Value(1),
-      opacity: new Animated.Value(0.55),
-    })),
-  );
-
-  useEffect(() => {
-    // Every loop below is a single Animated composite — stagger included, via
-    // `Animated.delay` as its first step — so there is no raw JS timer for
-    // this effect to leak. `.stop()` on each composite is the only cleanup
-    // that was ever needed, whether the running step is the delay or the
-    // loop it leads into.
-    const runs: Animated.CompositeAnimation[] = [];
-
-    // ── Core pulse ────────────────────────────────────────────────────────────
-    const coreLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(coreScale, {
-          toValue:         1.18,
-          duration:        900,
-          easing:          Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(coreScale, {
-          toValue:         1,
-          duration:        900,
-          easing:          Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    coreLoop.start();
-    runs.push(coreLoop);
-
-    // ── Particles ─────────────────────────────────────────────────────────────
-    particleAnims.forEach(({ value: anim }, i) => {
-      const run = Animated.sequence([
-        Animated.delay((i / N_PARTICLES) * 1300),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(anim, {
-              toValue:         1,
-              duration:        900,
-              easing:          Easing.out(Easing.quad),
-              useNativeDriver: true,
-            }),
-            Animated.timing(anim, {
-              toValue:         0,
-              duration:        650,
-              easing:          Easing.in(Easing.quad),
-              useNativeDriver: true,
-            }),
-          ]),
-        ),
-      ]);
-      run.start();
-      runs.push(run);
-    });
-
-    // ── Wave rings ────────────────────────────────────────────────────────────
-    ringAnims.forEach(({ scale, opacity }, i) => {
-      const run = Animated.sequence([
-        Animated.delay((i / 3) * 1700),
-        Animated.loop(
-          Animated.sequence([
-            Animated.parallel([
-              Animated.timing(scale, {
-                toValue:         3.4,
-                duration:        1700,
-                easing:          Easing.out(Easing.quad),
-                useNativeDriver: true,
-              }),
-              Animated.timing(opacity, {
-                toValue:         0,
-                duration:        1700,
-                easing:          Easing.out(Easing.quad),
-                useNativeDriver: true,
-              }),
-            ]),
-            Animated.parallel([
-              Animated.timing(scale,   { toValue: 1,    duration: 0, useNativeDriver: true }),
-              Animated.timing(opacity, { toValue: 0.55, duration: 0, useNativeDriver: true }),
-            ]),
-          ]),
-        ),
-      ]);
-      run.start();
-      runs.push(run);
-    });
-
-    return () => {
-      runs.forEach((run) => run.stop());
-      coreScale.stopAnimation();
-      particleAnims.forEach(({ value }) => value.stopAnimation());
-      ringAnims.forEach(({ scale, opacity }) => {
-        scale.stopAnimation();
-        opacity.stopAnimation();
-      });
-    };
-    // All three arrays are built once in their initialisers, so listing them
-    // documents the capture without ever re-running this effect.
-  }, [coreScale, particleAnims, ringAnims]);
-
   return (
     <View style={styles.root}>
       <View style={styles.stage}>
         {/* Wave rings */}
-        {ringAnims.map(({ id, scale, opacity }, i) => (
-          <Animated.View
-            key={id}
-            style={[
-              styles.ring,
-              {
-                opacity,
-                borderColor: i === 1 ? colors.purple : colors.teal,
-                transform: [{ scale }],
-              },
-            ]}
-          />
+        {Array.from({ length: 3 }, (_, i) => (
+          <Ring key={i} styles={styles} index={i} color={i === 1 ? colors.purple : colors.teal} />
         ))}
 
         {/* Particles */}
-        {particleAnims.map(({ id, value: anim }, i) => {
-          const angle = (2 * Math.PI * i) / N_PARTICLES;
-          const tx = anim.interpolate({ inputRange: [0, 1], outputRange: [0, DISTANCE * Math.cos(angle)] });
-          const ty = anim.interpolate({ inputRange: [0, 1], outputRange: [0, DISTANCE * Math.sin(angle)] });
-          return (
-            <Animated.View
-              key={id}
-              style={[
-                styles.particle,
-                {
-                  backgroundColor: i % 2 === 0 ? colors.teal : colors.purple,
-                  transform: [{ translateX: tx }, { translateY: ty }],
-                },
-              ]}
-            />
-          );
-        })}
+        {Array.from({ length: N_PARTICLES }, (_, i) => (
+          <Particle
+            key={i}
+            styles={styles}
+            index={i}
+            color={i % 2 === 0 ? colors.teal : colors.purple}
+          />
+        ))}
 
         {/* Core */}
-        <Animated.View style={[styles.core, { transform: [{ scale: coreScale }] }]} />
+        <Core styles={styles} />
       </View>
 
       <Text style={styles.wordmark}>AURA</Text>

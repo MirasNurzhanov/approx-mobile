@@ -12,13 +12,19 @@
  */
 import { useRef, useState } from 'react';
 import {
-  FlatList,
   Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
+  type FlatList,
 } from 'react-native';
+import Animated, {
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import { fonts, lightColors as L, radius } from '@/constants/theme';
 
@@ -41,26 +47,46 @@ interface WheelProps {
   onSelect: (idx: number) => void;
 }
 
+/** One row's highlight, driven straight off the shared scroll position on the
+ *  UI thread — the wheel crosses an item boundary many times a second during
+ *  a fling, and re-rendering the row from React state on every one of those
+ *  crossings is exactly the jank this is avoiding. */
+function WheelRow({ index, count, text, scrollY }: {
+  index: number; count: number; text: string; scrollY: SharedValue<number>;
+}) {
+  const style = useAnimatedStyle(() => {
+    const raw = Math.round(scrollY.get() / ITEM_H);
+    const active = Math.max(0, Math.min(raw, count - 1));
+    return index === active ? { color: L.t1, fontWeight: '600' as const, fontSize: 16 } : {};
+  });
+  return (
+    <View style={wh.item}>
+      <Animated.Text style={[wh.label, style]}>{text}</Animated.Text>
+    </View>
+  );
+}
+
 function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
   const padded = ['', '', ...items, '', ''];
-  const [activeIdx, setActiveIdx] = useState(selectedIdx);
   const ref = useRef<FlatList<string>>(null);
+  // Matches `getItemLayout`'s offset for padded-index `selectedIdx`, which is
+  // also where `initialScrollIndex` lands the list before the first frame.
+  const scrollY = useSharedValue(selectedIdx * ITEM_H);
+
+  const scrollHandler = useAnimatedScrollHandler((e) => {
+    scrollY.set(e.contentOffset.y);
+  });
 
   return (
     <View style={wh.wrap}>
-      <FlatList
+      <Animated.FlatList
         ref={ref}
         data={padded}
         keyExtractor={(_, i) => String(i)}
         renderItem={({ index }) => {
           const ai = index - 2;
-          const isSel = ai === activeIdx;
           const text = ai >= 0 && ai < items.length ? (labels ? labels[ai] : items[ai]) : '';
-          return (
-            <View style={wh.item}>
-              <Text style={[wh.label, isSel && wh.labelSel]}>{text}</Text>
-            </View>
-          );
+          return <WheelRow index={ai} count={items.length} text={text} scrollY={scrollY} />;
         }}
         snapToInterval={ITEM_H}
         decelerationRate="fast"
@@ -68,15 +94,10 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
         getItemLayout={(_, i) => ({ length: ITEM_H, offset: ITEM_H * i, index: i })}
         initialScrollIndex={selectedIdx}
         scrollEventThrottle={16}
-        onScroll={(e) => {
-          const i = Math.round(e.nativeEvent.contentOffset.y / ITEM_H);
-          const c = Math.max(0, Math.min(i, items.length - 1));
-          if (c !== activeIdx) setActiveIdx(c);
-        }}
+        onScroll={scrollHandler}
         onMomentumScrollEnd={(e) => {
           const i = Math.round(e.nativeEvent.contentOffset.y / ITEM_H);
           const c = Math.max(0, Math.min(i, items.length - 1));
-          setActiveIdx(c);
           onSelect(c);
         }}
       />
@@ -88,7 +109,6 @@ const wh = StyleSheet.create({
   wrap: { flex: 1, height: ITEM_H * 5, overflow: 'hidden' },
   item: { height: ITEM_H, justifyContent: 'center', alignItems: 'center' },
   label:    { fontFamily: fonts.body, color: L.t3, fontSize: 15 },
-  labelSel: { fontFamily: fonts.body, color: L.t1, fontWeight: '600', fontSize: 16 },
 });
 
 // ─── DatePickerField ──────────────────────────────────────────────────────────

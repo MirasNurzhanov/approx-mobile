@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 /** Longest gap that still counts as a double tap. Also how long a single tap is
  *  held back while we wait to find out whether a second one is coming. */
@@ -31,7 +31,7 @@ export function useDoubleTap(onSingle: () => void, onDouble: () => void): () => 
 
   useEffect(() => () => { if (pending.current) clearTimeout(pending.current); }, []);
 
-  return useCallback(() => {
+  return () => {
     const now = Date.now();
     if (now - lastTapAt.current < DOUBLE_TAP_MS) {
       lastTapAt.current = 0;
@@ -47,5 +47,5 @@ export function useDoubleTap(onSingle: () => void, onDouble: () => void): () => 
       pending.current = null;
       onSingleRef.current();
     }, DOUBLE_TAP_MS);
-  }, []);
+  };
 }

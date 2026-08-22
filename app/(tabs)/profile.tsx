@@ -161,16 +161,17 @@ export default function ProfileScreen() {
   // for why the gap between those two otherwise shows the old value.
   useEffect(() => {
     registerProfileRefresh((fresh) => {
-      setProfile((p) => {
-        const merged = { ...(p ?? {}), ...fresh } as Profile;
-        profileRef.current = merged;
-        _cache = {
-          profile: merged,
-          friendCount: friendCountRef.current,
-          connectionCount: connectionCountRef.current,
-        };
-        return merged;
-      });
+      // Merged from the ref rather than a `setProfile` updater, so the write
+      // to it and to `_cache` happen exactly once instead of risking a repeat
+      // or a stale read if React ever re-invokes the updater.
+      const merged = { ...(profileRef.current ?? {}), ...fresh } as Profile;
+      profileRef.current = merged;
+      _cache = {
+        profile: merged,
+        friendCount: friendCountRef.current,
+        connectionCount: connectionCountRef.current,
+      };
+      setProfile(merged);
     });
   }, []);
 

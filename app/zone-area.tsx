@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -633,6 +633,58 @@ function useRegionSearch(query: string) {
   };
 }
 
+// ─── Region search/lookup UI ───────────────────────────────────────────────────
+// The typed query, the traced candidates, and the error under them: these four
+// change as one unit at the two moments that matter — adopting a region clears
+// all of it, and starting a fresh trace clears everything but the query —
+// while staying independent of the persisted `region`/`mode` setting itself,
+// which has its own revert-on-failure path this state never touches.
+interface SearchState {
+  query: string;
+  lookupError: string | null;
+  /** Ranked alternatives, when the server would not choose for us. Kept
+   *  separate from `useRegionSearch`'s typed-search results even though they
+   *  render alike: these are places that provably contain you and were
+   *  declined only for lack of confidence, so they carry reasons and never
+   *  need the "not where you are" check that a typed search does. */
+  choices: RegionCandidate[];
+  choicesFor: 'city' | 'district' | null;
+}
+
+const initialSearch: SearchState = {
+  query: '',
+  lookupError: null,
+  choices: [],
+  choicesFor: null,
+};
+
+type SearchAction =
+  | { type: 'queryChanged'; query: string }
+  /** A trace just started: drop whatever the last one found, but leave the
+   *  typed query — tracing and typing are different ways to look, not a reset
+   *  of each other. */
+  | { type: 'lookupStarted' }
+  | { type: 'lookupError'; message: string }
+  | { type: 'candidatesFound'; choices: RegionCandidate[]; choicesFor: 'city' | 'district'; message: string }
+  /** A region was adopted, whether traced or searched for — the lookup UI has
+   *  nothing left to show. */
+  | { type: 'regionAdopted' };
+
+function searchReducer(state: SearchState, action: SearchAction): SearchState {
+  switch (action.type) {
+    case 'queryChanged':
+      return { ...state, query: action.query };
+    case 'lookupStarted':
+      return { ...state, lookupError: null, choices: [], choicesFor: null };
+    case 'lookupError':
+      return { ...state, lookupError: action.message };
+    case 'candidatesFound':
+      return { ...state, choices: action.choices, choicesFor: action.choicesFor, lookupError: action.message };
+    case 'regionAdopted':
+      return initialSearch;
+  }
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function ZoneAreaScreen() {
   const { colors, themeMode } = useTheme();
@@ -649,24 +701,14 @@ export default function ZoneAreaScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [lookupError, setLookupError] = useState<string | null>(null);
   /** Which of the two lookup buttons is in flight, so only that one spins. */
   const [locating, setLocating] = useState<'city' | 'district' | null>(null);
-
-  /** Ranked alternatives, when the server would not choose for us.
-   *
-   * Kept separate from search results even though they render alike: these are
-   * places that provably contain you and were declined only for lack of
-   * confidence, so they carry reasons and never need the "not where you are"
-   * check that a typed search does. */
-  const [choices, setChoices] = useState<RegionCandidate[]>([]);
-  const [choicesFor, setChoicesFor] = useState<'city' | 'district' | null>(null);
 
   // Search — the way out when tracing finds nothing. `results === null` is the
   // idle state, an empty array is a search that genuinely found nothing, and
   // the two need to look different on screen.
-  const [query, setQuery] = useState('');
-  const { results, searchError, searching } = useRegionSearch(query);
+  const [search, dispatchSearch] = useReducer(searchReducer, initialSearch);
+  const { results, searchError, searching } = useRegionSearch(search.query);
 
   const mapRef = useRef<MapView | null>(null);
 
@@ -761,12 +803,10 @@ export default function ZoneAreaScreen() {
     const previous = region;
     setRegion(next);
     setMode('region');
-    setLookupError(null);
-    // Clearing the box is enough to empty the results — they are derived from
-    // it — so there is nothing else to reset here.
-    setQuery('');
-    setChoices([]);
-    setChoicesFor(null);
+    // Clearing the query box is enough to empty the search results — they are
+    // derived from it — so the reducer resetting the rest of the lookup UI
+    // alongside it is all that's needed here.
+    dispatchSearch({ type: 'regionAdopted' });
     save({ zone_type: zoneTypeForRegion(next), zone_region: next.id }, () => {
       setRegion(previous);
       if (!previous) setMode('radius');
@@ -797,9 +837,7 @@ export default function ZoneAreaScreen() {
    * larger one on someone's behalf is not a rounding error. */
   async function traceMyPlace(level: 'city' | 'district') {
     setLocating(level);
-    setLookupError(null);
-    setChoices([]);
-    setChoicesFor(null);
+    dispatchSearch({ type: 'lookupStarted' });
     // The lookup runs in its own function so that its several early exits all
     // land on the `setLocating(null)` below. That used to be a `finally`, which
     // React Compiler cannot compile — it gives up on this whole screen, and the
@@ -812,7 +850,7 @@ export default function ZoneAreaScreen() {
     try {
       const position = coords ?? (await currentCoords());
       if (!position) {
-        setLookupError('Location is off, so there is nothing to trace. Find your place by name below instead.');
+        dispatchSearch({ type: 'lookupError', message: 'Location is off, so there is nothing to trace. Find your place by name below instead.' });
         return;
       }
       setCoords(position);
@@ -827,33 +865,38 @@ export default function ZoneAreaScreen() {
       // rather than guessing — a wrong region here is not wrong once, it gets
       // stored and answers for everyone who stands here afterwards.
       if (lookup.candidates.length) {
-        setChoices(lookup.candidates);
-        setChoicesFor(level);
-        setLookupError(
-          lookup.outcome === 'ambiguous'
-            ? `More than one ${level} fits where you are. Pick the one you mean.`
-            : `Nothing here is clearly your ${level}. These are the closest — pick one, or find it by name below.`,
-        );
+        dispatchSearch({
+          type: 'candidatesFound',
+          choices: lookup.candidates,
+          choicesFor: level,
+          message:
+            lookup.outcome === 'ambiguous'
+              ? `More than one ${level} fits where you are. Pick the one you mean.`
+              : `Nothing here is clearly your ${level}. These are the closest — pick one, or find it by name below.`,
+        });
         return;
       }
 
       if (level === 'district' && lookup.cityName) {
-        setLookupError(
-          `No district is mapped inside ${lookup.cityName}. Tap “Use my city” to cover all of it, or find it by name below.`,
-        );
+        dispatchSearch({
+          type: 'lookupError',
+          message: `No district is mapped inside ${lookup.cityName}. Tap “Use my city” to cover all of it, or find it by name below.`,
+        });
       } else {
-        setLookupError(
-          level === 'district'
+        dispatchSearch({
+          type: 'lookupError',
+          message: level === 'district'
             ? 'No district is mapped where you are. Try your city, or find it by name below.'
             : 'Nothing mapped covers where you are. Try finding it by name below.',
-        );
+        });
       }
     } catch (e: any) {
-      setLookupError(
-        e?.response?.status === 503
+      dispatchSearch({
+        type: 'lookupError',
+        message: e?.response?.status === 503
           ? 'Place lookups are busy right now. Try again in a moment.'
           : 'Could not find your area right now.',
-      );
+      });
     }
   }
 
@@ -915,10 +958,10 @@ export default function ZoneAreaScreen() {
             region={region}
             locating={locating}
             saving={saving}
-            lookupError={lookupError}
-            choices={choices}
-            choicesFor={choicesFor}
-            query={query}
+            lookupError={search.lookupError}
+            choices={search.choices}
+            choicesFor={search.choicesFor}
+            query={search.query}
             results={results}
             searching={searching}
             searchError={searchError}
@@ -926,7 +969,7 @@ export default function ZoneAreaScreen() {
             onClearRegion={clearRegion}
             onTrace={traceMyPlace}
             onPickRegion={commitRegion}
-            onQueryChange={setQuery}
+            onQueryChange={(query) => dispatchSearch({ type: 'queryChanged', query })}
           />
         )}
 

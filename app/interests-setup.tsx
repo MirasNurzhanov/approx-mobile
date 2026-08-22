@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -74,7 +74,7 @@ export default function InterestsSetupScreen() {
     load();
   }
 
-  const groups = useMemo(() => groupAll(interests), [interests]);
+  const groups = groupAll(interests);
 
   function toggle(id: number) {
     setSelected(prev => {

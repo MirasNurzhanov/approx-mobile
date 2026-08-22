@@ -98,6 +98,10 @@ export function usePermissionPrimer() {
   const pendingRef = useRef<Pending | null>(null);
   useEffect(() => { pendingRef.current = pending; });
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: `ensure`
+  // is this hook's whole public surface, consumed across six other files that
+  // rely on its identity staying stable — `settle`/`onContinue` memoized to
+  // match, since `onContinue` depends on `settle`.
   const settle = useCallback((granted: boolean) => {
     pendingRef.current?.resolve(granted);
     setPending(null);

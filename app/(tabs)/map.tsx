@@ -1,17 +1,17 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ActivityIndicator,
     Alert,
     AppState,
+    FlatList,
     KeyboardAvoidingView,
     Linking,
     Modal,
     Platform,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -499,7 +499,7 @@ function DotMarker({
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const styles = makeStyles(colors);
   // Re-arm tracking briefly when the color changes (friend data arrives after
   // the first nearby fetch), then freeze the rasterized marker again.
   // Presence is in the same bucket: it changes the rasterized bitmap, so it has
@@ -553,7 +553,7 @@ function DotMarker({
           <View style={[styles.dotBloom, { width: haloH, height: haloH, borderRadius: haloH / 2, backgroundColor: color }]} />
           {InterestIcon ? (
             <View style={[styles.dotIconCore, { borderColor: color, boxShadow: `0 0 5px ${withAlpha(color, 0.9)}` }]}>
-              <InterestIcon size={13} color={color} />
+              {InterestIcon({ size: 13, color })}
             </View>
           ) : (
             <>
@@ -1634,17 +1634,18 @@ function UserSheet({
             <Text style={styles.sectionLabel}>
               {identified ? 'Shared interests' : 'You both like'}
             </Text>
-            <ScrollView
+            <FlatList
               horizontal
+              data={user.shared_interests}
+              keyExtractor={(tag) => tag}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.chipRow}
-            >
-              {user.shared_interests.map((tag) => (
-                <View key={tag} style={styles.chip}>
+              renderItem={({ item: tag }) => (
+                <View style={styles.chip}>
                   <Text style={styles.chipText}>{tag}</Text>
                 </View>
-              ))}
-            </ScrollView>
+              )}
+            />
           </View>
         )}
 
@@ -2121,17 +2122,17 @@ export default function MapScreen() {
 
   /** Leader lines: the dashes from a moved marker back to where its owner
    *  really is, and from a nudged badge back to the pile it counts. */
-  const leaderLines = useMemo(
-    () => [
-      ...Array.from(markerLayout.placed.values()),
-      ...markerLayout.clusters,
-    ]
-      // Both ends validated: a single bad coordinate in a Polyline is enough to
-      // bring the native map down.
-      .filter((item) => item.anchor && isDrawable(item.anchor) && isDrawable(item.position))
-      .map((item) => [item.anchor!, item.position]),
-    [markerLayout],
-  );
+  const leaderLines = useMemo(() => {
+    const lines: [GeoPoint, GeoPoint][] = [];
+    // Both ends validated: a single bad coordinate in a Polyline is enough to
+    // bring the native map down.
+    for (const item of [...Array.from(markerLayout.placed.values()), ...markerLayout.clusters]) {
+      if (item.anchor && isDrawable(item.anchor) && isDrawable(item.position)) {
+        lines.push([item.anchor, item.position]);
+      }
+    }
+    return lines;
+  }, [markerLayout]);
   if (leaderLines.length > leaderSlots) setLeaderSlots(leaderLines.length);
   const leaders = useMemo(
     () => Array.from({ length: leaderSlots }, (_, i) => leaderLines[i] ?? null),
@@ -2900,18 +2901,21 @@ export default function MapScreen() {
 
           {/* Approximate sharers get a haze instead of a precise-looking pin —
               the marker would otherwise imply accuracy the data doesn't have. */}
-          {visibleNearby
-            .filter((u) => u.location_precision === 'approximate' && u.latitude != null && u.longitude != null)
-            .map((u) => (
-              <Circle
-                key={`approx-${u.id}`}
-                center={{ latitude: u.latitude, longitude: u.longitude }}
-                radius={APPROX_RADIUS_M}
-                fillColor="rgba(244,244,246,0.06)"
-                strokeColor="rgba(244,244,246,0.18)"
-                strokeWidth={1}
-              />
-            ))}
+          {visibleNearby.reduce<ReactNode[]>((circles, u) => {
+            if (u.location_precision === 'approximate' && u.latitude != null && u.longitude != null) {
+              circles.push(
+                <Circle
+                  key={`approx-${u.id}`}
+                  center={{ latitude: u.latitude, longitude: u.longitude }}
+                  radius={APPROX_RADIUS_M}
+                  fillColor="rgba(244,244,246,0.06)"
+                  strokeColor="rgba(244,244,246,0.18)"
+                  strokeWidth={1}
+                />,
+              );
+            }
+            return circles;
+          }, [])}
 
           {/* Speed trails, drawn before the markers so they sit underneath and
               read as something the avatar is leaving behind. Only ever built
@@ -3051,26 +3055,34 @@ export default function MapScreen() {
               can actually place, which stops above ±85°. People's markers have
               always been filtered this way — stories and meetups were not, and
               were the two that could reach the native map unchecked. */}
-          {Array.from(storiesByAuthor.entries())
-            .filter(([, authorStories]) => isDrawable(authorStories[0]))
-            .map(([authorId, authorStories]) => (
+          {Array.from(storiesByAuthor).reduce<ReactNode[]>((markers, [authorId, authorStories]) => {
+            if (isDrawable(authorStories[0])) {
               // Keyed by author *and* newest story, so a fresh story remounts
               // the marker rather than reusing a stale frozen snapshot.
-              <StoryMarker
-                key={`story-author-${authorId}-${authorStories[0].id}`}
-                stories={authorStories}
-                onPress={() => openStoryViewer(authorStories)}
-              />
-            ))}
+              markers.push(
+                <StoryMarker
+                  key={`story-author-${authorId}-${authorStories[0].id}`}
+                  stories={authorStories}
+                  onPress={() => openStoryViewer(authorStories)}
+                />,
+              );
+            }
+            return markers;
+          }, [])}
 
           {/* Approved club meetup pins — one per event, above story bubbles. */}
-          {clubMeetups.filter(isDrawable).map((meetup) => (
-            <MeetupMarker
-              key={`meetup-${meetup.id}`}
-              meetup={meetup}
-              onPress={() => openMeetupSheet(meetup)}
-            />
-          ))}
+          {clubMeetups.reduce<ReactNode[]>((markers, meetup) => {
+            if (isDrawable(meetup)) {
+              markers.push(
+                <MeetupMarker
+                  key={`meetup-${meetup.id}`}
+                  meetup={meetup}
+                  onPress={() => openMeetupSheet(meetup)}
+                />,
+              );
+            }
+            return markers;
+          }, [])}
         </MapView>
       )}
 

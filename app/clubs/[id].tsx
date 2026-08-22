@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Modal,
   Pressable,
   RefreshControl,
@@ -230,9 +231,14 @@ function InviteModal({ visible, query, results, searching, invitingIds, bottom, 
         {searching ? (
           <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
         ) : results.length > 0 ? (
-          <ScrollView style={styles.inviteList} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {results.map((user) => (
-              <View key={user.id} style={styles.inviteRow}>
+          <FlatList
+            style={styles.inviteList}
+            data={results}
+            keyExtractor={(user) => String(user.id)}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item: user }) => (
+              <View style={styles.inviteRow}>
                 <Avatar uri={user.profile_picture} name={user.username} size="sm" />
                 <Text style={styles.inviteUsername} numberOfLines={1}>@{user.username}</Text>
                 <Pressable
@@ -247,8 +253,8 @@ function InviteModal({ visible, query, results, searching, invitingIds, bottom, 
                   )}
                 </Pressable>
               </View>
-            ))}
-          </ScrollView>
+            )}
+          />
         ) : query.length > 0 ? (
           <Text style={styles.inviteEmpty}>No users found.</Text>
         ) : null}

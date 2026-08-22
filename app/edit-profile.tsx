@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ActivityIndicator,
@@ -36,6 +36,60 @@ interface Profile {
   profile_picture?: string;
   profession?: string | null;
   nationality?: string | null;
+}
+
+// ─── Editable fields ──────────────────────────────────────────────────────────
+// Everything the form itself edits, as one unit: these five are the only state
+// this screen sets in bulk — once from the initial fetch, once from a
+// successful save — while each also changes on its own as the user types or
+// picks. One reducer for both stories beats a matching pair of setters at
+// every call site.
+interface EditableFields {
+  username: string;
+  bio: string;
+  profession: string | null;
+  nationality: string | null;
+  /** The server's nationality as of the last load/save — drives the lock,
+   *  separately from the value itself. */
+  origNationality: string | null;
+}
+
+const initialFields: EditableFields = {
+  username: '',
+  bio: '',
+  profession: null,
+  nationality: null,
+  origNationality: null,
+};
+
+type FieldsAction =
+  /** Bulk-loads all five from a server `Profile`, on initial fetch and again
+   *  after a successful save — the only two moments they change as a unit. */
+  | { type: 'synced'; data: Profile }
+  | { type: 'username'; value: string }
+  | { type: 'bio'; value: string }
+  | { type: 'profession'; value: string | null }
+  | { type: 'nationality'; value: string | null };
+
+function fieldsReducer(state: EditableFields, action: FieldsAction): EditableFields {
+  switch (action.type) {
+    case 'synced':
+      return {
+        username: action.data.username,
+        bio: action.data.bio ?? '',
+        profession: action.data.profession ?? null,
+        nationality: action.data.nationality ?? null,
+        origNationality: action.data.nationality ?? null,
+      };
+    case 'username':
+      return { ...state, username: action.value };
+    case 'bio':
+      return { ...state, bio: action.value };
+    case 'profession':
+      return { ...state, profession: action.value };
+    case 'nationality':
+      return { ...state, nationality: action.value };
+  }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -268,10 +322,7 @@ export default function EditProfileScreen() {
   const { top, bottom } = useSafeAreaInsets();
 
   const [profile,   setProfile]   = useState<Profile | null>(null);
-  const [username,  setUsername]  = useState('');
-  const [bio,       setBio]       = useState('');
-  const [profession,  setProfession]  = useState<string | null>(null);
-  const [nationality, setNationality] = useState<string | null>(null);
+  const [fields, dispatch] = useReducer(fieldsReducer, initialFields);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -283,24 +334,17 @@ export default function EditProfileScreen() {
   const [draftNat,  setDraftNat]  = useState<string | null>(null);
   const [natQuery,  setNatQuery]  = useState('');
 
-  // Track server-loaded values to decide what to PATCH and whether nationality
-  // is locked. Profession stays a ref — only `save` ever reads it. Nationality
-  // is state, because the lock it drives is read while rendering the field.
-  const origProfession  = useRef<string | null>(null);
-  const [origNationality, setOrigNationality] = useState<string | null>(null);
+  // Track the server-loaded profession to decide what to PATCH. Stays a ref
+  // — only `save` ever reads it — while `fields.origNationality` is state,
+  // because the lock it drives is read while rendering the field.
+  const origProfession = useRef<string | null>(null);
 
   useEffect(() => {
     api.get<Profile>('/api/users/profile/')
       .then((r) => {
         setProfile(r.data);
-        setUsername(r.data.username);
-        setBio(r.data.bio ?? '');
-        const prof = r.data.profession ?? null;
-        const nat  = r.data.nationality ?? null;
-        setProfession(prof);
-        setNationality(nat);
-        origProfession.current  = prof;
-        setOrigNationality(nat);
+        dispatch({ type: 'synced', data: r.data });
+        origProfession.current = r.data.profession ?? null;
       })
       .catch((e) => console.log('[EditProfile] fetch error:', e?.response?.status))
       .finally(() => setLoading(false));
@@ -337,29 +381,23 @@ export default function EditProfileScreen() {
   }
 
   async function save() {
-    if (!username.trim() || saving) return;
+    if (!fields.username.trim() || saving) return;
     setSaving(true);
     await runBusy(async () => {
       const payload: Record<string, any> = {
-        username: username.trim(),
-        bio: bio.trim(),
+        username: fields.username.trim(),
+        bio: fields.bio.trim(),
       };
-      if (profession !== origProfession.current) {
-        payload.profession = profession;
+      if (fields.profession !== origProfession.current) {
+        payload.profession = fields.profession;
       }
       // Nationality can only be set once: only include when original was null and user chose one
-      if (origNationality === null && nationality !== null) {
-        payload.nationality = nationality;
+      if (fields.origNationality === null && fields.nationality !== null) {
+        payload.nationality = fields.nationality;
       }
       const { data } = await api.patch<Profile>('/api/users/profile/', payload);
-      const savedProf = data.profession ?? null;
-      const savedNat  = data.nationality ?? null;
-      setUsername(data.username);
-      setBio(data.bio ?? '');
-      setProfession(savedProf);
-      setNationality(savedNat);
-      origProfession.current  = savedProf;
-      setOrigNationality(savedNat);
+      dispatch({ type: 'synced', data });
+      origProfession.current = data.profession ?? null;
       pushProfileUpdate(data);
       router.back();
     }, () => setSaving(false)).catch((e: any) => {
@@ -369,15 +407,15 @@ export default function EditProfileScreen() {
   }
 
   // ── Derived display values ─────────────────────────────────────────────────
-  const professionLabel    = profession ? PROFESSIONS.find(p => p.key === profession)?.label ?? profession : null;
-  const nationalityCountry = nationality ? COUNTRIES.find(c => c.code === nationality) : null;
-  const nationalityLocked  = origNationality !== null;
+  const professionLabel    = fields.profession ? PROFESSIONS.find(p => p.key === fields.profession)?.label ?? fields.profession : null;
+  const nationalityCountry = fields.nationality ? COUNTRIES.find(c => c.code === fields.nationality) : null;
+  const nationalityLocked  = fields.origNationality !== null;
   const filteredCountries  = natQuery.trim()
     ? COUNTRIES.filter(c => c.name.toLowerCase().includes(natQuery.trim().toLowerCase()))
     : COUNTRIES;
 
-  const initial = (username || profile?.username || '?').charAt(0).toUpperCase();
-  const bgColor = avatarColor(username || profile?.username || '?');
+  const initial = (fields.username || profile?.username || '?').charAt(0).toUpperCase();
+  const bgColor = avatarColor(fields.username || profile?.username || '?');
 
   return (
     <View style={styles.root}>
@@ -394,13 +432,13 @@ export default function EditProfileScreen() {
         <Text style={styles.headerTitle}>Edit Profile</Text>
         <Pressable
           onPress={save}
-          disabled={saving || !username.trim()}
+          disabled={saving || !fields.username.trim()}
           hitSlop={12}
           style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.2 }]}
         >
           {saving
             ? <ActivityIndicator color={colors.teal} size="small" />
-            : <Text style={[styles.saveText, !username.trim() && { opacity: 0.4 }]}>Save</Text>
+            : <Text style={[styles.saveText, !fields.username.trim() && { opacity: 0.4 }]}>Save</Text>
           }
         </Pressable>
       </View>
@@ -428,8 +466,8 @@ export default function EditProfileScreen() {
             <Text style={styles.fieldLabel}>Username</Text>
             <TextInput
               style={styles.fieldInput}
-              value={username}
-              onChangeText={setUsername}
+              value={fields.username}
+              onChangeText={(value) => dispatch({ type: 'username', value })}
               placeholder="Username"
               placeholderTextColor={colors.t3}
               selectionColor={colors.teal}
@@ -442,8 +480,8 @@ export default function EditProfileScreen() {
             <Text style={styles.fieldLabel}>Bio</Text>
             <TextInput
               style={[styles.fieldInput, styles.fieldTextarea]}
-              value={bio}
-              onChangeText={setBio}
+              value={fields.bio}
+              onChangeText={(value) => dispatch({ type: 'bio', value })}
               placeholder="Tell people about yourself…"
               placeholderTextColor={colors.t3}
               selectionColor={colors.teal}
@@ -451,17 +489,17 @@ export default function EditProfileScreen() {
               maxLength={200}
               textAlignVertical="top"
             />
-            <Text style={styles.charCount}>{bio.length} / 200</Text>
+            <Text style={styles.charCount}>{fields.bio.length} / 200</Text>
 
             {/* ── Profession ── */}
             <Text style={styles.fieldLabel}>Profession</Text>
             <Pressable
               style={({ pressed }) => [styles.fieldInput, styles.fieldRow, pressed && { opacity: 0.7 }]}
-              onPress={() => { setDraftProf(profession); setShowProfPicker(true); }}
+              onPress={() => { setDraftProf(fields.profession); setShowProfPicker(true); }}
               accessibilityRole="button"
               accessibilityLabel={professionLabel ?? 'Not set — tap to choose'}
             >
-              <Text style={[styles.fieldRowValue, !profession && styles.fieldRowPlaceholder]}>
+              <Text style={[styles.fieldRowValue, !fields.profession && styles.fieldRowPlaceholder]}>
                 {professionLabel ?? 'Not set'}
               </Text>
               <Ionicons name="chevron-forward" size={18} color={colors.t3} />
@@ -474,7 +512,7 @@ export default function EditProfileScreen() {
                 <Text style={styles.fieldRowValue}>
                   {nationalityCountry
                     ? `${flagEmoji(nationalityCountry.code)}  ${nationalityCountry.name}`
-                    : nationality}
+                    : fields.nationality}
                 </Text>
                 <View style={styles.lockedGroup}>
                   <Ionicons name="lock-closed-outline" size={13} color={colors.t3} />
@@ -484,11 +522,11 @@ export default function EditProfileScreen() {
             ) : (
               <Pressable
                 style={({ pressed }) => [styles.fieldInput, styles.fieldRow, pressed && { opacity: 0.7 }]}
-                onPress={() => { setDraftNat(nationality); setNatQuery(''); setShowNatPicker(true); }}
+                onPress={() => { setDraftNat(fields.nationality); setNatQuery(''); setShowNatPicker(true); }}
                 accessibilityRole="button"
                 accessibilityLabel={nationalityCountry ? nationalityCountry.name : 'Not set — tap to choose'}
               >
-                <Text style={[styles.fieldRowValue, !nationality && styles.fieldRowPlaceholder]}>
+                <Text style={[styles.fieldRowValue, !fields.nationality && styles.fieldRowPlaceholder]}>
                   {nationalityCountry
                     ? `${flagEmoji(nationalityCountry.code)}  ${nationalityCountry.name}`
                     : 'Not set'}
@@ -505,7 +543,7 @@ export default function EditProfileScreen() {
         draft={draftProf}
         onDraftChange={setDraftProf}
         onCancel={() => setShowProfPicker(false)}
-        onDone={() => { setProfession(draftProf); setShowProfPicker(false); }}
+        onDone={() => { dispatch({ type: 'profession', value: draftProf }); setShowProfPicker(false); }}
       />
 
       <NationalityPickerModal
@@ -516,7 +554,7 @@ export default function EditProfileScreen() {
         onDraftChange={setDraftNat}
         onQueryChange={setNatQuery}
         onCancel={() => { setShowNatPicker(false); setNatQuery(''); }}
-        onDone={() => { setNationality(draftNat); setShowNatPicker(false); setNatQuery(''); }}
+        onDone={() => { dispatch({ type: 'nationality', value: draftNat }); setShowNatPicker(false); setNatQuery(''); }}
       />
 
     </View>

@@ -913,6 +913,9 @@ export default function ChatScreen() {
     router,
   });
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds the
+  // `useFocusEffect` dependency array below, alongside `fetchAll` — a hedge
+  // against re-subscribing every render if this hook ever bails compilation.
   const fetchUnreadBreakdown = useCallback(async () => {
     try {
       const res = await api.get<unknown>('/api/friends/messages/unread/breakdown/');
@@ -941,6 +944,9 @@ export default function ChatScreen() {
     } catch {}
   }, []);
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds the
+  // mount effect's and the `useFocusEffect` below's dependency arrays — a
+  // hedge against re-subscribing every render if this hook ever bails.
   const fetchAll = useCallback(async () => {
     const [listRes, alertsRes, storiesRes] = await Promise.allSettled([
       api.get<FriendList>('/api/friends/list/'),
@@ -977,6 +983,9 @@ export default function ChatScreen() {
   }, [fetchAll]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
+  // against `useFocusEffect` re-subscribing (and re-arming the poll interval)
+  // every render if this hook ever bails compilation.
   useFocusEffect(useCallback(() => {
     fetchAll();
     fetchUnreadBreakdown();

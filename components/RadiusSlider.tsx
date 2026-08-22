@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AccessibilityInfo, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -119,7 +119,7 @@ export function RadiusSlider({
     position.set(withSpring(valueToPosition(value, min, max), SPRING));
   }, [value, min, max, position, dragging]);
 
-  const emit = useCallback((t: number, commit: boolean) => {
+  const emit = (t: number, commit: boolean) => {
     const next = snap(positionToValue(t, min, max));
     if (commit) {
       onCommit(next);
@@ -129,7 +129,7 @@ export function RadiusSlider({
     } else {
       onChange(next);
     }
-  }, [min, max, onChange, onCommit, format]);
+  };
 
   const travel = Math.max(width - THUMB, 1);
 

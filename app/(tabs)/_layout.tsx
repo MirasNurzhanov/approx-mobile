@@ -3,10 +3,12 @@ import { TabList, TabSlot, TabTrigger, Tabs } from 'expo-router/ui';
 import {
   Badge, Icon, Label, NativeTabs, VectorIcon,
 } from 'expo-router/unstable-native-tabs';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { StyleSheet } from 'react-native';
 
 import { NAV_SECTIONS } from '@/components/navSections';
+import { BAR_STYLE_IS_NATIVE } from '@/constants/platform';
 import { useNavStyle } from '@/context/NavStyleContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useNavBadges } from '@/hooks/useNavBadges';
@@ -54,15 +56,34 @@ export const unstable_settings = { anchor: 'map' };
 const TAB_ICONS = {
   map: { sf: 'map.fill', md: 'map' },
   profile: { sf: 'person.fill', md: 'person' },
-  chat: { sf: 'bubble.left.and.bubble.right.fill', md: 'chat' },
+  // Chat is the app's own Ionicons `chatbubbles` on both platforms rather than
+  // an SF Symbol, which is what it looked like before this bar was native and
+  // what the wheel and AuraTabBar still draw (see navSections). The nearest
+  // symbol, `bubble.left.and.bubble.right.fill`, is two bubbles set side by
+  // side facing apart; Ionicons' is two stacked and overlapping, and the pair
+  // read as different icons rather than as the same one in two styles.
+  //
+  // `src` takes a `VectorIcon` element on every platform — `Icon` checks it
+  // before `sf`, and rasterises the glyph to the same white-on-transparent
+  // template image the `androidSrc` bridge produces, so the system still tints
+  // it with the tab bar's own icon colour.
+  chat: { src: <VectorIcon family={Ionicons} name="chatbubbles" /> },
   swifts: { src: require('@/assets/images/tab-swift.png') },
   settings: { sf: 'gearshape.fill', md: 'settings' },
 } as const;
 
 /**
- * The real thing: `UITabBarController` on iOS — Liquid Glass and the system
- * minimize-on-scroll behaviour on iOS 26 — and Material 3 bottom navigation on
- * Android. Nothing here draws a tab bar; it describes one and UIKit builds it.
+ * The real thing — `UITabBarController`, with Liquid Glass and the system
+ * minimize-on-scroll behaviour on iOS 26. Nothing here draws a tab bar; it
+ * describes one and UIKit builds it. iOS only now: this used to also cover
+ * Material 3 bottom navigation on Android, but `react-native-screens`
+ * exposes just a colour for that bar's press ripple and a colour for its
+ * selected-tab indicator — no way to turn the ripple off, no way to resize
+ * or reshape the indicator — so Android gets nothing further from the native
+ * component. Android's bar style renders through `HeadlessTabsLayout` below
+ * instead, the same navigator the wheel uses, with `components/nav/AuraTabBar`
+ * drawing a bar this app fully controls. See `constants/platform`'s
+ * `BAR_STYLE_IS_NATIVE`, which is what decides between the two.
  *
  * On SDK 54 the trigger's parts are *standalone* exports (`Label`, `Icon`,
  * `Badge`) rather than the compound `NativeTabs.Trigger.*` form SDK 56
@@ -129,16 +150,19 @@ function NativeTabsLayout() {
 }
 
 /**
- * The wheel's navigator.
+ * The navigator behind both the wheel and Android's bar style.
  *
- * A native tab bar cannot be a speedometer arc, so the wheel keeps the headless
- * `expo-router/ui` navigator it has always had: the `TabList` below declares the
- * tabs and draws nothing, and the arc's wedges are `TabTrigger`s referring back
- * to these by name — the "multiple tab bars" pattern from the custom-tabs
- * guide. Screens render `components/AuraNav`, which draws the arc over their
- * own content so it can float above the map.
+ * A native tab bar cannot be a speedometer arc, and — see `NativeTabsLayout`'s
+ * doc comment — Android's Material 3 bar cannot have its ripple turned off or
+ * its indicator resized, so neither wants `NativeTabs` as its navigator.
+ * Both keep the headless `expo-router/ui` navigator instead: the `TabList`
+ * below declares the tabs and draws nothing, and the visible bar — the arc's
+ * wedges, or `AuraTabBar`'s items — is `TabTrigger`s referring back to these
+ * by name, the "multiple tab bars" pattern from the custom-tabs guide.
+ * Screens render `components/AuraNav`, which draws whichever one floats over
+ * their own content.
  */
-function WheelLayout() {
+function HeadlessTabsLayout() {
   return (
     <Tabs>
       <TabSlot />
@@ -163,7 +187,13 @@ export default function TabsLayout() {
   // and swapping a frame later. The launch loader is still up for this stretch.
   if (!ready) return null;
 
-  return navStyle === 'wheel' ? <WheelLayout /> : <NativeTabsLayout />;
+  // Bar style is the real native tab bar only where that component has
+  // anything to offer — iOS. Everywhere else (Android's bar style, and the
+  // wheel on every platform) routes through the same headless navigator and
+  // lets the screen draw its own bar; see HeadlessTabsLayout and AuraNav.
+  return navStyle === 'bar' && BAR_STYLE_IS_NATIVE
+    ? <NativeTabsLayout />
+    : <HeadlessTabsLayout />;
 }
 
 const styles = StyleSheet.create({

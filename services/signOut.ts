@@ -5,6 +5,7 @@ import { beginSessionEnd, BASE_URL } from './api';
 import { stopBackgroundLocationUpdates } from './backgroundLocation';
 import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
+import { getInstallId } from './device';
 import { resetOwnMotion } from './ownMotion';
 import { resetNotificationPrefs } from './notificationPrefs';
 import { resetPrivacy } from './privacy';
@@ -83,12 +84,20 @@ async function pauseLocationSharing(accessToken: string | null): Promise<void> {
 /** True when the session is settled and nothing needs retrying later. */
 async function revokeRefreshToken(refresh: string, accessToken: string | null): Promise<boolean> {
   try {
+    // Which device is leaving. Without it the server can only clear the
+    // account-wide push column, which on an account signed in elsewhere would
+    // read as "silence this account" — signing out of a phone would stop the
+    // tablet's notifications too. Best-effort: an id that cannot be read still
+    // signs out, it just leaves this device's row to be corrected on its next
+    // registration.
+    const installId = await getInstallId().catch(() => '');
+
     // Bare axios, not the `api` instance: its response interceptor treats a 401
     // as "refresh and retry", which during sign-out would resurrect the very
     // session we are tearing down.
     await axios.post(
       `${BASE_URL}/api/users/logout/`,
-      { refresh },
+      { refresh, install_id: installId },
       {
         timeout: REVOKE_TIMEOUT_MS,
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,

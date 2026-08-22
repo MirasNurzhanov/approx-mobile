@@ -100,7 +100,32 @@ function AppShell() {
       <Stack.Screen name="index"           options={{ headerShown: false }} />
       <Stack.Screen name="welcome"         options={{ headerShown: false }} />
       <Stack.Screen name="login"           options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)"          options={{ headerShown: false }} />
+      {/* `gestureEnabled: false` for the same reason `social-birthday` below
+          sets it: `welcome` pushes `/login`, and signing in *replaces* only
+          the login screen, so `welcome` is still underneath the tab group.
+          The iOS back-swipe was therefore popping a signed-in user out of the
+          app and onto the sign-up screen they are already past. Swiping right
+          from the tabs opens the composer instead — see `compose` below and
+          the edge strip in `(tabs)/map`. */}
+      <Stack.Screen name="(tabs)"          options={{ headerShown: false, gestureEnabled: false }} />
+      {/* Slides in from the left because that is the direction the swipe that
+          opens it travels — the sheet follows the finger rather than arriving
+          from the opposite edge.
+          The back gesture is off, and its absence is deliberate. Coming from
+          the left, the gesture that should dismiss this travels *left*, and
+          react-native-screens on SDK 54 only offers `gestureDirection`
+          'horizontal' | 'vertical' — no inverted variant — so the one it would
+          give us drags the screen further the way it came. A gesture that
+          works backwards is worse than none; the close button is the
+          affordance, and it sits under the thumb at the top of the screen. */}
+      <Stack.Screen
+        name="compose"
+        options={{
+          headerShown: false,
+          animation: 'slide_from_left',
+          gestureEnabled: false,
+        }}
+      />
       <Stack.Screen name="messages/[id]"   options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="notifications"   options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="swifts/compose"  options={{ headerShown: false, animation: 'slide_from_bottom' }} />

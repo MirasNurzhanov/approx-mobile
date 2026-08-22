@@ -11,8 +11,6 @@
  */
 import { Dimensions, Platform } from 'react-native';
 
-import { isIOS26OrNewer } from '@/constants/platform';
-
 const { width: W } = Dimensions.get('window');
 
 // ─── Wheel (components/Speedometer) ───────────────────────────────────────────
@@ -49,9 +47,12 @@ export function navArcClearance(fromRight: number, width: number): number {
 
 // ─── Bar (components/nav/AuraTabBar) ──────────────────────────────────────────
 //
-// Only `/market` draws this bar now. Inside the tab group the bar style is a
-// native tab bar owned by the navigator, which needs no measurements from here
-// — UIKit and Android report their own height through the safe-area inset.
+// iOS draws this only on `/market`, the one screen outside the tab group —
+// inside it, iOS's bar style is the real native tab bar, which reports its
+// own height through the safe-area inset and needs no measurements from here.
+// Android has no native bar for its own bar style to inherit (see
+// constants/platform's `BAR_STYLE_IS_NATIVE`), so every Android screen
+// measures against this instead, standalone or not.
 
 /** The bar itself, not counting the gap beneath it. */
 export const NAV_BAR_H = 62;
@@ -89,13 +90,15 @@ export const NATIVE_TAB_BAR_H = Platform.select({ ios: 68, android: 84, default:
  * The right inset that centres a floating control of `controlWidth` over the
  * *last* tab item — Settings — instead of hard against the screen edge.
  *
- * iOS 26 floats the tab bar in from both edges, so its items are spread across
- * a narrower strip than the screen; every other platform spans edge to edge.
- * `NAV_BAR_INSET` stands in for Apple's floating margin, which is within a
- * couple of points of it.
+ * `floating` is true wherever the bar floats in from both edges rather than
+ * spanning them — iOS 26's own tab bar, and Android's AuraTabBar, which
+ * always floats — so its items sit across a narrower strip than the screen.
+ * Every other case spans edge to edge. `NAV_BAR_INSET` stands in for both:
+ * Apple's floating margin is within a couple of points of it, and it is
+ * AuraTabBar's actual margin.
  */
-export function tabAlignedRightInset(controlWidth: number, tabCount: number): number {
-  const barEdge = isIOS26OrNewer ? NAV_BAR_INSET : 0;
+export function tabAlignedRightInset(controlWidth: number, tabCount: number, floating: boolean): number {
+  const barEdge = floating ? NAV_BAR_INSET : 0;
   const lastItemCentreFromRight = barEdge + (W - barEdge * 2) / (tabCount * 2);
   return Math.max(8, Math.round(lastItemCentreFromRight - controlWidth / 2));
 }

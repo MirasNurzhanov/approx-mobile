@@ -3,6 +3,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { api } from './api';
+import { registerDevice } from './device';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -138,7 +139,16 @@ async function registerForPushNotificationsImpl(): Promise<string | null> {
 
     console.log('[Push] sending to backend...');
     try {
-      await api.patch('/api/users/profile/', { push_token: token.data });
+      // Both, deliberately. The device row is what push actually fans out
+      // over now — one row per installation, so a phone and a tablet on the
+      // same account both keep receiving — and it is what raises the
+      // new-sign-in alert. The profile column is the old single-token field,
+      // written alongside so a rollback of the server leaves this build
+      // working, and so anything still reading it stays correct.
+      await Promise.all([
+        registerDevice(token.data),
+        api.patch('/api/users/profile/', { push_token: token.data }),
+      ]);
       console.log('[Push] token saved successfully');
     } catch (error: any) {
       console.log('[Push] error:', error.response?.status, JSON.stringify(error.response?.data), error.message);

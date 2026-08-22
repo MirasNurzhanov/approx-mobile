@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ActivityIndicator,
@@ -10,6 +10,7 @@ import {
     KeyboardAvoidingView,
     Linking,
     Modal,
+    PanResponder,
     Platform,
     Pressable,
     StyleSheet,
@@ -1841,6 +1842,44 @@ export default function MapScreen() {
     currentUserIdRef.current = currentUserId;
   });
 
+  // ── The composer, and the swipe that opens it ──
+  // `/compose` sends "Story" back here rather than opening a composer of its
+  // own: the sheet is this screen's (`composerOpen`), and only this screen
+  // holds the coordinate that decides whether the story becomes a pin.
+  //
+  // The param is cleared as it is read. Left in the route it would survive the
+  // sheet being closed, and every later pass through here would reopen it.
+  const { compose: composeParam } = useLocalSearchParams<{ compose?: string }>();
+  useEffect(() => {
+    if (composeParam !== 'story') return;
+    router.setParams({ compose: undefined });
+    // `coordsRef`, not `coords`: this reacts to the param arriving, not to
+    // every position that lands afterwards.
+    setCreateStoryCoord(coordsRef.current ?? null);
+    setComposerOpen(true);
+  }, [composeParam, router]);
+
+  // The left-edge strip that opens `/compose`. PanResponder rather than a
+  // gesture-handler `Pan`, matching components/StoryViewer: these callbacks
+  // run on the JS thread, so navigating from one needs no worklet hop.
+  //
+  // Both `shouldSet` callbacks earn their place. `onStart` returning false
+  // lets a tap — or a vertical drag beginning at the edge — fall straight
+  // through to the map underneath, so the strip costs the map nothing until a
+  // gesture is both clearly horizontal and clearly rightward.
+  const composeEdge = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gs) =>
+          gs.dx > 12 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+        onPanResponderRelease: (_, gs) => {
+          if (gs.dx > 40) router.push('/compose');
+        },
+      }),
+    [router],
+  );
+
   const sheetY = useSharedValue(SHEET_H);
   const reduceMotion = useReduceMotion();
 
@@ -3133,6 +3172,18 @@ export default function MapScreen() {
         </MapView>
       )}
 
+      {/* Swipe right from the left edge to open the composer.
+          A narrow strip rather than the whole map, because the map wants
+          horizontal drags too — panning east would otherwise be indisting-
+          uishable from asking to post something. This is the same edge the
+          system's own back gesture used to occupy here, which is what the
+          swipe already felt like reaching for; that one is off now (it was
+          popping signed-in users out to the sign-up screen — see the
+          `(tabs)` entry in app/_layout).
+          Rendered directly after the map so every control below still takes
+          the touch ahead of it. */}
+      <View style={styles.composeEdge} {...composeEdge.panHandlers} />
+
       {/* Top bar */}
       <TopBar
         nearby={visibleNearby.length}
@@ -3550,6 +3601,16 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   selfCoreHidden: { borderColor: colors.t3 },
 
   // ── "Getting your location" chip ──
+  // Invisible, and narrow enough that the map keeps almost all of its width
+  // for panning. It claims nothing until a drag turns out to be a rightward
+  // horizontal one — see `composeEdge`.
+  composeEdge: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 22,
+  },
   pendingChip: {
     position: 'absolute',
     alignSelf: 'center',

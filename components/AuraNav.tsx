@@ -1,5 +1,6 @@
 import { AuraTabBar } from '@/components/nav/AuraTabBar';
 import { Speedometer } from '@/components/Speedometer';
+import { BAR_STYLE_IS_NATIVE } from '@/constants/platform';
 import { useNavStyle } from '@/context/NavStyleContext';
 
 interface AuraNavProps {
@@ -35,15 +36,17 @@ export function AuraNav({ highlightSection, standalone }: AuraNavProps = {}) {
     return <Speedometer highlightSection={highlightSection} standalone={standalone} />;
   }
 
-  // Bar style: the navigator itself is a native tab bar (UITabBarController on
-  // iOS, Material 3 on Android — see app/(tabs)/_layout), so a screen inside it
-  // draws no nav at all. Drawing one here would be a second bar stacked on the
-  // real one.
+  // Bar style, where it is the real native tab bar (iOS — UITabBarController,
+  // see app/(tabs)/_layout's NativeTabsLayout): the navigator itself draws it,
+  // so a screen inside it draws no nav at all. Drawing one here would be a
+  // second bar stacked on the real one. `/market` is the exception: the root
+  // stack pushes it *above* the tab navigator, where there is no native bar
+  // to inherit, so it is the one screen that still needs one drawn from here.
   //
-  // `/market` is the exception, and the reason this component still renders
-  // anything on this path: the root stack pushes it *above* the tab navigator,
-  // where there is no native bar to inherit.
-  if (!standalone) return null;
+  // Bar style, where it is not (Android — see BAR_STYLE_IS_NATIVE for why):
+  // there is no native bar to inherit on *any* screen, so every screen draws
+  // this one, exactly like `/market` does on iOS.
+  if (BAR_STYLE_IS_NATIVE && !standalone) return null;
 
-  return <AuraTabBar highlightSection={highlightSection} standalone />;
+  return <AuraTabBar highlightSection={highlightSection} standalone={standalone} />;
 }

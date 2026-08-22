@@ -59,7 +59,7 @@ function toError(e: any): AppleMusicError {
   const data = e?.response?.data ?? {};
   const code: AppleMusicFault = data.code ?? (status === 503 ? 'not_configured' : 'unavailable');
   return new AppleMusicError(
-    data.detail ?? 'Apple Music could not be reached. Please try again.',
+    data.detail ?? 'The music catalogue could not be reached. Please try again.',
     code,
     status === 503,
   );

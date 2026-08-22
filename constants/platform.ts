@@ -31,3 +31,26 @@ export const IOS_MAJOR_VERSION = resolveIOSMajorVersion(Platform.OS, Platform.Ve
  * is the only place that should normally need it.
  */
 export const isIOS26OrNewer = IOS_MAJOR_VERSION >= 26;
+
+/**
+ * Whether the bottom nav's 'bar' style (context/NavStyleContext) means the
+ * real native tab bar, rather than this app's own drawn one
+ * (components/nav/AuraTabBar).
+ *
+ * True only on iOS. `react-native-screens`' Android Material 3 tab bar
+ * exposes just a colour for its press ripple and a colour for its
+ * selected-tab indicator — no way to turn the ripple off, no way to resize
+ * or reshape the indicator. An app that wants either has nothing further the
+ * native component can give it, so Android's 'bar' style routes through the
+ * same headless navigator the wheel uses instead (see
+ * app/(tabs)/_layout's HeadlessTabsLayout) and draws a bar it fully
+ * controls. See components/AuraNav for where this is consulted.
+ *
+ * A pure function for the same reason `resolveIOSMajorVersion` is one: it can
+ * be tested without mocking react-native's `Platform`.
+ */
+export function resolvesToNativeBar(os: string): boolean {
+  return os === 'ios';
+}
+
+export const BAR_STYLE_IS_NATIVE = resolvesToNativeBar(Platform.OS);

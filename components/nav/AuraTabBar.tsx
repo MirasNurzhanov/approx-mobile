@@ -26,10 +26,6 @@ import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { MAX_SCALE_FIXED, lightColors, type as typography, withAlpha } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 
-/** Selection pill behind the active icon. */
-const PILL_W = 46;
-const PILL_H = 30;
-
 const FADE = { duration: 220, easing: Easing.out(Easing.cubic) };
 
 /**
@@ -67,17 +63,33 @@ interface AuraTabBarProps {
    *  item dims and this one pulses coral. Same contract the wheel honours, so
    *  the zone tutorial can point at Settings without caring which nav is on. */
   highlightSection?: string;
-  /** Set on `/market`, which sits outside the tab navigator. See NavTrigger. */
+  /** True on any screen outside the tab navigator — today just `/market`.
+   *  See NavTrigger. Every screen inside the navigator draws this on Android,
+   *  where it *is* the bar style — see constants/platform's
+   *  `BAR_STYLE_IS_NATIVE` and components/AuraNav. */
   standalone?: boolean;
 }
 
 /**
- * The standard bottom tab bar, and the app's default nav.
+ * The app's default nav, and — see `BAR_STYLE_IS_NATIVE` — Android's only one
+ * for bar style: `react-native-screens`' Material 3 bottom nav exposes just a
+ * colour for its press ripple and a colour for its selected-tab indicator, no
+ * way to turn the ripple off and no way to resize or reshape the indicator,
+ * so this draws Android's bar itself instead. iOS keeps the real
+ * `UITabBarController` and only reaches this component on `/market`.
  *
  * A floating capsule rather than an edge-to-edge bar: that is the shape iOS 26
  * uses, it keeps the map visible under both ends, and it gives the same result
  * on older iOS and on Android instead of one layout for the newest phones and
  * another for everything else.
+ *
+ * The selected tab fills its *whole* item — icon, label and all — rather than
+ * sitting a small pill behind just the icon. Each item is already its own
+ * flex slice of the row, so a fill sized to the slice reads as one of several
+ * divided sections lighting up, not a badge floating over a shared bar. No tab
+ * has a press state of its own (no ripple, no opacity dip): the fill lighting
+ * up *is* the feedback, and it lands the instant the route changes rather
+ * than racing a separate animation to say the same thing.
  */
 export function AuraTabBar({ highlightSection, standalone }: AuraTabBarProps = {}) {
   const pathname = usePathname();
@@ -132,12 +144,18 @@ export function AuraTabBar({ highlightSection, standalone }: AuraTabBarProps = {
             const badge = badgeFor(i, badges.chat, badges.alerts);
             const isHighlighted = highlightSection === s.name;
             const isDimmed = !!highlightSection && !isHighlighted;
-            const tint = isHighlighted
+            // The highlighted state overrides "active": a tutorial pointing
+            // at Settings still pulses coral even if Settings is the screen
+            // you are already on.
+            const showActiveFill = isActive && !isHighlighted;
+            // Icon and label now share one filled section rather than a pill
+            // wrapping just the icon, so both need the fill's contrast colour
+            // rather than the bar-background one the label used to sit on.
+            const contentColor = isHighlighted
               ? lightColors.coral
-              : isActive
-                ? colors.navActive
+              : showActiveFill
+                ? colors.navOnActive
                 : colors.navInactive;
-            const glyphColor = isActive && !isHighlighted ? colors.navOnActive : tint;
 
             return (
               <NavTrigger
@@ -150,29 +168,31 @@ export function AuraTabBar({ highlightSection, standalone }: AuraTabBarProps = {
               >
                 <View
                   style={[
-                    styles.pill,
-                    isActive && !isHighlighted && { backgroundColor: colors.navActive },
+                    styles.sectionFill,
+                    showActiveFill && { backgroundColor: colors.navActive },
                     isHighlighted && { backgroundColor: withAlpha(lightColors.coral, 0.18) },
                   ]}
                 >
-                  <SectionGlyph section={s} active={isActive} size={20} color={glyphColor} />
-                  {badge > 0 && (
-                    <View style={styles.badge} importantForAccessibility="no-hide-descendants">
-                      <Text style={styles.badgeText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
-                        {badge > 99 ? '99+' : String(badge)}
-                      </Text>
-                    </View>
-                  )}
+                  <View style={styles.iconWrap}>
+                    <SectionGlyph section={s} active={isActive} size={20} color={contentColor} />
+                    {badge > 0 && (
+                      <View style={styles.badge} importantForAccessibility="no-hide-descendants">
+                        <Text style={styles.badgeText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
+                          {badge > 99 ? '99+' : String(badge)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text
+                    numberOfLines={1}
+                    // The bar's height is fixed, so the label is capped rather
+                    // than allowed to scale until it clips.
+                    maxFontSizeMultiplier={MAX_SCALE_FIXED}
+                    style={[styles.label, { color: contentColor }, isActive && styles.labelActive]}
+                  >
+                    {s.label}
+                  </Text>
                 </View>
-                <Text
-                  numberOfLines={1}
-                  // The bar's height is fixed, so the label is capped rather
-                  // than allowed to scale until it clips.
-                  maxFontSizeMultiplier={MAX_SCALE_FIXED}
-                  style={[styles.label, { color: tint }, isActive && styles.labelActive]}
-                >
-                  {s.label}
-                </Text>
               </NavTrigger>
             );
           })}
@@ -213,22 +233,34 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   row: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 6,
+    // `stretch`, not `center`: each item fills the row's full height, so its
+    // section fill does too rather than sitting a small pill in the middle
+    // of a taller, uncoloured slice.
+    alignItems: 'stretch',
+    // No padding, deliberately. Any inset here leaves a band of bar showing
+    // outside the first and last sections, so Map's fill stops short of the
+    // capsule's left cap and Settings' of its right — the selected section
+    // reads as floating inside the bar rather than as part of it. At zero the
+    // outer sections run right into the caps, and `bar`'s `overflow: hidden`
+    // trims them to the curve. Only `gap` separates the sections now, which
+    // is interior and so never touches the two ends.
+    gap: 4,
   },
-  item: {
+  // Every item is its own flex slice of the row; a fill sized to `flex: 1`
+  // fills that whole slice, which is what makes the selected one read as one
+  // of several divided sections lighting up rather than a pill floating over
+  // a shared bar. `999` rather than a computed half-height caps it at a full
+  // capsule however tall the slice ends up being — which at full row height is
+  // exactly the cap radius `bar` uses, so the outer sections trace its ends.
+  item: { flex: 1 },
+  sectionFill: {
     flex: 1,
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
   },
-  pill: {
-    width: PILL_W,
-    height: PILL_H,
-    borderRadius: PILL_H / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  iconWrap: { alignItems: 'center', justifyContent: 'center' },
   dimmed: { opacity: 0.35 },
   label: {
     fontSize: typography.micro,
@@ -239,8 +271,11 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   labelActive: { fontWeight: '800' },
   badge: {
     position: 'absolute',
-    top: -4,
-    right: -2,
+    // `iconWrap` hugs the glyph tightly now (it used to be a wider pill with
+    // the icon centred inside it), so the badge sits closer in to land back
+    // on the icon's own corner instead of drifting into empty space.
+    top: -6,
+    right: -8,
     // Sized for 10pt text at the 1.4 cap.
     minWidth: 18,
     height: 18,

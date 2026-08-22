@@ -13,9 +13,11 @@
 import { Platform } from 'react-native';
 
 import {
+  BAR_STYLE_IS_NATIVE,
   IOS_MAJOR_VERSION,
   isIOS26OrNewer,
   resolveIOSMajorVersion,
+  resolvesToNativeBar,
 } from '../../constants/platform';
 
 const gate = (os: string, version: unknown) => resolveIOSMajorVersion(os, version) >= 26;
@@ -84,5 +86,21 @@ describe('the exported constants', () => {
   it('derive from the running platform', () => {
     expect(IOS_MAJOR_VERSION).toBe(resolveIOSMajorVersion(Platform.OS, Platform.Version));
     expect(isIOS26OrNewer).toBe(IOS_MAJOR_VERSION >= 26);
+    expect(BAR_STYLE_IS_NATIVE).toBe(resolvesToNativeBar(Platform.OS));
+  });
+});
+
+describe('resolvesToNativeBar', () => {
+  it('is true only on iOS', () => {
+    expect(resolvesToNativeBar('ios')).toBe(true);
+  });
+
+  it('is false on Android, whose Material 3 bar this app cannot fully control', () => {
+    expect(resolvesToNativeBar('android')).toBe(false);
+  });
+
+  it('is false everywhere else too', () => {
+    expect(resolvesToNativeBar('web')).toBe(false);
+    expect(resolvesToNativeBar('windows')).toBe(false);
   });
 });

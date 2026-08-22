@@ -143,12 +143,12 @@ export default function ZoneAppleMusicScreen() {
 
   return (
     <View style={styles.root}>
-      <ScreenHeader title="Apple Music">
+      <ScreenHeader title="Music">
         <View style={[styles.header, { paddingTop: top + 6 }]}>
           <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color={colors.t1} />
           </Pressable>
-          <Text style={styles.headerTitle}>Apple Music</Text>
+          <Text style={styles.headerTitle}>Music</Text>
           <View style={styles.headerSpacer} />
         </View>
       </ScreenHeader>
@@ -167,7 +167,7 @@ export default function ZoneAppleMusicScreen() {
                 autoFocus
                 autoCorrect={false}
                 returnKeyType="search"
-                accessibilityLabel="Search Apple Music"
+                accessibilityLabel="Search for music"
               />
               {query.length > 0 && (
                 <Pressable
@@ -181,8 +181,8 @@ export default function ZoneAppleMusicScreen() {
               )}
             </View>
             <Text style={styles.previewNote}>
-              Zones play Apple&rsquo;s 30-second preview — full tracks need each
-              listener&rsquo;s own Apple Music subscription.
+              Zones play a 30-second preview — full tracks need each
+              listener&rsquo;s own subscription.
             </Text>
           </View>
 

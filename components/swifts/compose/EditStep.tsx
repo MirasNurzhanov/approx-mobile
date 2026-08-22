@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,15 +7,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEvent, useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { TrimSlider } from '@/components/TrimSlider';
-import { MusicStep } from '@/components/swifts/compose/MusicStep';
 import { VolumeSlider } from '@/components/swifts/compose/VolumeSlider';
 import {
-  IconClose, IconFrame, IconMusic, IconScissors, IconText, IconVolume,
+  IconScissors, IconText, IconVolume,
 } from '@/components/ui/icons';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -31,12 +28,14 @@ import {
 /**
  * The editor.
  *
- * Every control here writes a *parameter* on the draft; nothing re-encodes.
+ * Every control here writes a *parameter* on the draft; nothing re-encodes,
+ * and nothing on the server does either any more — see `services/swiftDraft`.
  * The preview above applies what it can locally — it seeks within the trim,
- * loops the kept range, and sets the player's volume — so what you see is what
- * the server will render, with one honest exception: the text overlay is a
- * React view sitting over the video rather than pixels inside it. The final
- * render burns it in. The preview step says so in words.
+ * loops the kept range, and sets the player's volume — and the feed applies
+ * the same three things at watch time, so what you see here is exactly what a
+ * viewer sees, with one honest exception: the text overlay is a React view
+ * sitting over the video in both places rather than pixels inside it, since
+ * nothing composites it into the file either.
  *
  * The looping is the fiddly part and it is done here rather than with the
  * player's own `loop`: `expo-video` loops the whole asset, and the kept range
@@ -44,7 +43,7 @@ import {
  * updates.
  */
 
-type Tab = 'trim' | 'sound' | 'cover' | 'text';
+type Tab = 'trim' | 'sound' | 'text';
 
 interface Props {
   draft: SwiftDraft;
@@ -65,8 +64,6 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const [tab, setTab] = useState<Tab>('trim');
-  const [pickingMusic, setPickingMusic] = useState(false);
-  const insets = useSafeAreaInsets();
 
   const player = useVideoPlayer(draft.uri ?? '', (p) => {
     p.loop = false;
@@ -125,7 +122,6 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
 
   const positionMs = currentTime * 1000;
   const kept = trimEnd - draft.trimStartMs;
-  const coverMs = draft.coverMs ?? draft.trimStartMs;
 
   function scrubTo(ms: number) {
     seeking.current = true;
@@ -169,7 +165,6 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
         {([
           ['trim', 'Trim', IconScissors],
           ['sound', 'Sound', IconVolume],
-          ['cover', 'Cover', IconFrame],
           ['text', 'Text', IconText],
         ] as const).map(([key, label, Glyph]) => {
           const active = tab === key;
@@ -233,89 +228,9 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
             />
             <Text style={styles.sectionHint}>
               {draft.originalVolume === 0
-                ? 'The video is muted — add a track below, or it publishes silent.'
+                ? 'The video publishes silent.'
                 : 'The sound recorded with the video.'}
             </Text>
-
-            <View style={styles.divider} />
-
-            {/* Music is reachable from here, not only from the step after this
-                one. Balancing a track against the original is the whole reason
-                both sliders exist, and sending someone to another screen to
-                pick one and back again to hear the result is the wrong shape
-                for a decision made by ear. */}
-            {draft.track ? (
-              <>
-                <View style={styles.trackRow}>
-                  <IconMusic size={16} color={colors.teal} />
-                  <Text style={styles.trackTitle} numberOfLines={1}>
-                    {draft.track.title} — {draft.track.artist}
-                  </Text>
-                  <Pressable
-                    onPress={() => setPickingMusic(true)}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel="Change track"
-                  >
-                    <Text style={styles.trackAction}>Change</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => onChange({ track: null, trackOffsetMs: 0 })}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove track"
-                  >
-                    <Text style={styles.trackRemove}>Remove</Text>
-                  </Pressable>
-                </View>
-                <VolumeSlider
-                  label="Music"
-                  value={draft.musicVolume}
-                  onChange={(v) => onChange({ musicVolume: v })}
-                />
-              </>
-            ) : (
-              <Pressable
-                onPress={() => setPickingMusic(true)}
-                style={styles.addMusic}
-                accessibilityRole="button"
-                accessibilityLabel="Add music"
-              >
-                <IconMusic size={18} color={colors.teal} />
-                <Text style={styles.addMusicLabel}>Add music</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
-
-        {tab === 'cover' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionHint}>
-              Scrub to the frame you want as the cover, then set it.
-            </Text>
-            <TrimSlider
-              duration={draft.durationMs || 1}
-              startMs={draft.trimStartMs}
-              endMs={trimEnd}
-              minLengthMs={MIN_SWIFT_MS}
-              positionMs={positionMs}
-              format={formatMs}
-              disabled
-              onChange={() => {}}
-              onCommit={() => {}}
-            />
-            <View style={styles.coverRow}>
-              <Text style={styles.coverValue}>
-                Cover at {formatMs(coverMs - draft.trimStartMs)}
-              </Text>
-              <Pressable
-                onPress={() => onChange({ coverMs: Math.round(positionMs) })}
-                style={styles.smallBtn}
-                accessibilityRole="button"
-              >
-                <Text style={styles.smallBtnLabel}>Use this frame</Text>
-              </Pressable>
-            </View>
           </View>
         )}
 
@@ -349,38 +264,11 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
               })}
             </View>
             <Text style={styles.sectionHint}>
-              One line, burned into the video when it publishes.
+              One line, drawn over the video — here and wherever it plays.
             </Text>
           </View>
         )}
       </ScrollView>
-
-      {/* The picker, over the editor rather than instead of it. `MusicStep` is
-          the same component the standalone step renders — one implementation,
-          two entry points, so the two can never drift. */}
-      <Modal
-        visible={pickingMusic}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setPickingMusic(false)}
-      >
-        <View style={styles.sheet}>
-          <View style={[styles.sheetHeader, { paddingTop: insets.top + 10 }]}>
-            <Text style={styles.sheetTitle} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
-              Add music
-            </Text>
-            <Pressable
-              onPress={() => setPickingMusic(false)}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Done"
-            >
-              <IconClose size={20} color={colors.t2} />
-            </Pressable>
-          </View>
-          <MusicStep draft={draft} onChange={onChange} />
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -457,94 +345,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: typography.small,
     color: colors.red,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-    marginVertical: 6,
-  },
-
-  addMusic: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: radius.m,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.tealLine,
-    backgroundColor: colors.tealTint,
-  },
-  addMusicLabel: {
-    fontFamily: fonts.body,
-    fontWeight: '600',
-    fontSize: typography.body,
-    color: colors.teal,
-  },
-  trackRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  trackTitle: {
-    flex: 1,
-    fontFamily: fonts.body,
-    fontWeight: '600',
-    fontSize: typography.small,
-    color: colors.t1,
-  },
-  trackAction: {
-    fontFamily: fonts.body,
-    fontWeight: '600',
-    fontSize: typography.caption,
-    color: colors.teal,
-  },
-  trackRemove: {
-    fontFamily: fonts.body,
-    fontWeight: '600',
-    fontSize: typography.caption,
-    color: colors.red,
-  },
-
-  sheet: { flex: 1, backgroundColor: colors.bg },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  sheetTitle: {
-    fontFamily: fonts.display,
-    fontWeight: '600',
-    fontSize: typography.title,
-    color: colors.t1,
-  },
-
-  coverRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  coverValue: {
-    fontFamily: fonts.body,
-    fontSize: typography.small,
-    color: colors.t2,
-    fontVariant: ['tabular-nums'],
-  },
-  smallBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: radius.s,
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  smallBtnLabel: {
-    fontFamily: fonts.body,
-    fontWeight: '600',
-    fontSize: typography.small,
-    color: colors.t1,
   },
 
   input: {

@@ -166,7 +166,7 @@ export function CaptureStep({ onCaptured, onCancel }: Props) {
         uri: result.uri,
         durationMs: Math.min(durationMs, MAX_SWIFT_MS),
         // The camera does not report dimensions; the composer reads them off
-        // the player, and Cloudinary reports them authoritatively on upload.
+        // the player once the source loads — see EditStep's `onMeasured`.
         width: 0,
         height: 0,
         source: 'camera',

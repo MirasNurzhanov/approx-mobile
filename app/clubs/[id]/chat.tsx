@@ -26,7 +26,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
-import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { clubsApi } from '@/services/clubs';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -903,11 +902,15 @@ function useClubChat(
       sender_id: currentUserIdRef.current ?? -1,
       created_at: new Date().toISOString(), pending: true,
     }]);
-    // Straight to Cloudinary, then only the URL to Django — the server
-    // broadcasts it to the club socket group like any other message.
-    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
-      .then((imageUrl) => api.post(`/api/clubs/${clubId}/messages/`, { image_url: imageUrl }))
-      .catch(() => {});
+    const form = new FormData();
+    form.append('image', {
+      uri: asset.uri,
+      name: asset.uri.split('/').pop() ?? 'photo.jpg',
+      type: asset.mimeType ?? 'image/jpeg',
+    } as any);
+    api.post(`/api/clubs/${clubId}/messages/`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).catch(() => {});
   }
 
   async function handleAttach() {

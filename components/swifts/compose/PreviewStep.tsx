@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
-import { IconGlobe, IconLock, IconMusic, IconPeople, IconPin } from '@/components/ui/icons';
+import { IconGlobe, IconLock, IconPeople, IconPin } from '@/components/ui/icons';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -13,12 +13,10 @@ import type { UploadProgress } from '@/services/swiftUpload';
 /**
  * The last look before publishing, and the upload's progress once it starts.
  *
- * The preview is honest about what it is. The trim and the original volume are
- * applied locally and are exactly what the server will produce; the music and
- * the burned-in text are not — they are composited during the render, and
- * playing a second audio track here in sync with the video would drift
- * visibly within one loop. So the summary below *lists* what will be applied
- * rather than pretending the preview already shows it.
+ * The preview is honest about what it is, and — since the R2 migration — that
+ * is now "the whole thing": the trim and the original volume are applied
+ * locally, and the text overlay is drawn exactly the way it will be watched.
+ * Nothing here is composited server-side any more for this to diverge from.
  */
 
 interface Props {
@@ -124,14 +122,6 @@ export function PreviewStep({
           <View style={styles.fact}>
             <Text style={styles.factText}>{seconds}s</Text>
           </View>
-          {draft.track ? (
-            <View style={styles.fact}>
-              <IconMusic size={16} color={colors.t3} />
-              <Text style={styles.factText} numberOfLines={1}>
-                {draft.track.title}
-              </Text>
-            </View>
-          ) : null}
           {draft.shareLocation ? (
             <View style={styles.fact}>
               <IconPin size={16} color={colors.teal} />
@@ -141,16 +131,6 @@ export function PreviewStep({
             </View>
           ) : null}
         </View>
-
-        {(draft.track || draft.overlayText.trim()) && (
-          <Text style={styles.note}>
-            {draft.track && draft.overlayText.trim()
-              ? 'Your track and text are added when the Swift publishes, so they aren’t in this preview.'
-              : draft.track
-                ? 'Your track is mixed in when the Swift publishes, so it isn’t in this preview.'
-                : 'Your text is added when the Swift publishes, so it isn’t in this preview.'}
-          </Text>
-        )}
 
         {draft.shareLocation && (
           <Text style={styles.privacyNote}>
@@ -181,11 +161,9 @@ export function PreviewStep({
             </View>
             <View style={styles.progressRow}>
               <Text style={styles.progressText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
-                {progress?.stage === 'signing' && 'Preparing…'}
                 {progress?.stage === 'uploading' &&
                   `Uploading ${Math.round((progress?.ratio ?? 0) * 100)}%` +
                   (progress.attempt > 1 ? ` · retry ${progress.attempt}` : '')}
-                {progress?.stage === 'saving' && 'Finishing…'}
               </Text>
               <Pressable onPress={onCancelUpload} hitSlop={10} accessibilityRole="button">
                 <Text style={styles.cancel}>Cancel</Text>

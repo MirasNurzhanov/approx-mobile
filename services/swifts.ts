@@ -59,6 +59,20 @@ export interface Swift {
   aspect_ratio: number | null;
   status: 'uploading' | 'processing' | 'ready' | 'failed';
 
+  // ── Applied at playback, not baked into `video_url` ──────────────────────
+  // R2 only stores and serves bytes — it cannot trim, mix or overlay text the
+  // way Cloudinary's delivery transformations used to. `video_url` is the raw
+  // upload; a player has to seek within [trim_start_ms, trim_end_ms], set its
+  // own volume from `original_volume`, and draw `overlay_text` as a layer over
+  // the video itself. See `components/swifts/SwiftCard`.
+  trim_start_ms: number;
+  /** Null means "to the end of the source". */
+  trim_end_ms: number | null;
+  /** 0–100. */
+  original_volume: number;
+  overlay_text: string;
+  overlay_position: 'top' | 'middle' | 'bottom';
+
   track: SwiftTrackCredit | null;
   audio_title: string;
   audio_artist: string;

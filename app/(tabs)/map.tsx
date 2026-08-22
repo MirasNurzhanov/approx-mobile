@@ -74,7 +74,6 @@ import { useNavAlignedRight, useNavClearance } from '@/hooks/useNavMetrics';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
-import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { fetchMapNearby, isLocationNotAvailable } from '@/services/discovery';
@@ -2360,13 +2359,19 @@ export default function MapScreen() {
         }
       : {};
     try {
-      // The photo goes straight to Cloudinary; Django only ever sees the URL.
-      // One hop instead of two, and no Railway worker held for the transfer.
-      const imageUrl = photoUri ? await uploadImageToCloudinary(photoUri) : null;
-      const response = await api.post('/api/stories/', {
-        content: text,
-        ...position,
-        ...(imageUrl ? { image_url: imageUrl } : {}),
+      const form = new FormData();
+      form.append('content', text);
+      if ('latitude' in position) form.append('latitude', String(position.latitude));
+      if ('longitude' in position) form.append('longitude', String(position.longitude));
+      if (photoUri) {
+        form.append('image', {
+          uri: photoUri,
+          name: photoUri.split('/').pop() ?? 'story.jpg',
+          type: 'image/jpeg',
+        } as any);
+      }
+      const response = await api.post('/api/stories/', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       // The POST echoes the story back through the same serializer as the map
       // poll, so its coordinates need the same coercion — this is the one path

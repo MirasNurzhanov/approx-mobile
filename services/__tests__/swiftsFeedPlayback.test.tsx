@@ -124,6 +124,8 @@ function makeSwift(id: number, overrides: Partial<Swift> = {}): Swift {
     thumbnail_url: `https://cdn.example.com/v/${id}.jpg`,
     duration_ms: 15_000, width: 1080, height: 1920, aspect_ratio: 0.5625,
     status: 'ready',
+    trim_start_ms: 0, trim_end_ms: null, original_volume: 100,
+    overlay_text: '', overlay_position: 'middle',
     track: null, audio_title: '', audio_artist: '', uses_original_audio: true,
     visibility: 'public', allow_comments: true, allow_reposts: true,
     like_count: 10, comment_count: 2, repost_count: 1, view_count: 0,

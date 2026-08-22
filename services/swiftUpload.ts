@@ -1,11 +1,19 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File } from 'expo-file-system';
 
-import { api } from './api';
+import { BASE_URL } from './api';
+import { keptDurationMs, MAX_UPLOAD_BYTES, type SwiftDraft } from './swiftDraft';
 
 /**
- * Getting a recorded video from the phone to Cloudinary, and back as a Swift.
+ * Publishing a Swift, after the R2 migration.
  *
- * Three properties this module exists to hold, all of which are easy to lose:
+ * One multipart POST straight to Django — not a signed upload to Cloudinary
+ * followed by a separate JSON POST of what it returned. There is only one
+ * place left to send the file to, so there is only one request: the video
+ * (and every edit parameter) goes to `/api/swifts/` in the same form.
+ *
+ * Two properties carried over from the old signed-upload flow, because the
+ * reasons for them had nothing to do with Cloudinary:
  *
  * **The video never enters JS memory.** The file is handed to `FormData` as a
  * `{ uri }` descriptor, and the native networking layer streams it off disk.
@@ -16,99 +24,19 @@ import { api } from './api';
  *
  * **Progress and cancellation are real.** `fetch` in React Native reports
  * neither, so this uses `XMLHttpRequest` directly: `upload.onprogress` for the
- * bar and `abort()` for the cancel button. Axios would work too — it wraps XHR
- * on this platform — but the raw object is one fewer layer between the byte
- * count and the screen.
+ * bar and `abort()` for the cancel button.
  *
- * **Retries reuse the signature.** A signature is valid for an hour, so a
- * failed attempt on a flaky connection retries against the same one rather
- * than round-tripping to Django again. Only a genuinely expired signature
- * costs a new request.
+ * What is new: this goes through raw XHR rather than the shared `api` axios
+ * instance, so it carries its own `Authorization` header rather than axios's
+ * interceptor attaching one — a single large transfer with its own retry loop
+ * has no need for axios's 401-refresh-and-retry behaviour racing this one.
  */
 
-// ── The contract with the backend ────────────────────────────────────────────
-export interface UploadSignature {
-  cloud_name: string;
-  api_key: string;
-  timestamp: number;
-  signature: string;
-  public_id: string;
-  /** Exactly the parameters the server put through SHA-1, verbatim.
-   *
-   *  The form used to hardcode that list, which meant the two ends could
-   *  disagree without either one being obviously wrong — and a form that does
-   *  not match the signed set is a 401 from Cloudinary with no explanation of
-   *  which parameter it was. Echoing the server's own dict makes the set
-   *  changeable in one place. */
-  params?: Record<string, string>;
-  /** @deprecated Pre-`params` shape, still read so an installed build keeps
-   *  working against either backend. */
-  folder?: string;
-  /** @deprecated See `folder`. */
-  image_metadata?: string;
-  upload_url: string;
-  max_bytes: number;
-  max_duration_ms: number;
-}
-
-/** The form fields that have to match what was signed, whichever shape the
- *  server answered in. */
-function signedParams(signature: UploadSignature): Record<string, string> {
-  if (signature.params) return signature.params;
-  const legacy: Record<string, string> = {
-    timestamp: String(signature.timestamp),
-    public_id: signature.public_id,
-  };
-  if (signature.folder) legacy.folder = signature.folder;
-  if (signature.image_metadata) legacy.image_metadata = signature.image_metadata;
-  return legacy;
-}
-
-/** Cloudinary answers a rejection with `{"error":{"message":"..."}}` — the
- *  only place the actual reason exists. Discarding it, which this module used
- *  to do, turns every 4xx into the same dead end on screen. */
-function cloudinaryReason(responseText: string): string {
-  try {
-    const message = JSON.parse(responseText)?.error?.message;
-    return typeof message === 'string' ? message.trim() : '';
-  } catch {
-    return '';
-  }
-}
-
-/**
- * What to put in front of the creator.
- *
- * The split that matters is whose problem it is. A 401 or 403 from Cloudinary
- * is the account — wrong credentials, or a cloud whose uploads are switched
- * off — and "this video was rejected" is then both wrong and unactionable:
- * the video is fine and there is nothing the person holding the phone can do
- * about it. Cloudinary's wording for that case names the cloud, which is a
- * deployment detail and not something to show a stranger, so it stays in the
- * log and on `UploadError.detail` where whoever is debugging will find it.
- */
-function uploadFailureMessage(status: number, reason: string): string {
-  if (status >= 500 || status === 0) return 'The upload failed. Check your connection.';
-  if (status === 401 || status === 403) return 'Video uploads are unavailable right now.';
-  return reason
-    ? `This video was rejected: ${reason}`
-    : `This video was rejected (HTTP ${status}).`;
-}
-
-export interface CloudinaryVideo {
-  public_id: string;
-  secure_url: string;
-  duration?: number;
-  width?: number;
-  height?: number;
-  bytes?: number;
-}
-
-export type UploadStage = 'idle' | 'signing' | 'uploading' | 'saving' | 'done' | 'error';
+export type UploadStage = 'idle' | 'uploading' | 'done' | 'error';
 
 export interface UploadProgress {
   stage: UploadStage;
-  /** 0–1 across the transfer only; the signing and saving steps are quick. */
+  /** 0–1 across the transfer. */
   ratio: number;
   attempt: number;
 }
@@ -123,10 +51,9 @@ export class UploadCancelled extends Error {
 
 export class UploadError extends Error {
   readonly retryable: boolean;
-  /** HTTP status, when the failure came back as one. */
   readonly status?: number;
-  /** Whatever the upload service said, unedited. Kept off `message`, which has
-   *  to stay short enough for an alert. */
+  /** Whatever the server said, unedited. Kept off `message`, which has to
+   *  stay short enough for an alert. */
   readonly detail?: string;
   constructor(
     message: string,
@@ -183,52 +110,95 @@ export function discardTempFile(uri?: string | null): void {
   }
 }
 
-// ── Signing ──────────────────────────────────────────────────────────────────
-export async function getUploadSignature(): Promise<UploadSignature> {
-  try {
-    const { data } = await api.get<UploadSignature>('/api/swifts/upload-signature/');
-    return data;
-  } catch (e: any) {
-    if (e?.response?.data?.code === 'not_configured') {
-      throw new UploadError('Video uploads are unavailable right now.', false);
-    }
-    throw new UploadError('Could not start the upload.');
-  }
+export interface PublishedSwift {
+  id: number;
+  video_url: string;
+  thumbnail_url: string;
+  status: string;
+  location_available: boolean;
 }
 
-// ── The transfer ─────────────────────────────────────────────────────────────
+/**
+ * Turn a draft into the form Django expects.
+ *
+ * The coordinates here are a *proposal*. `swifts.views._position_for` runs
+ * them through the creator's own location-sharing mode and may snap them to a
+ * ~500m grid or drop them entirely — a paused creator's Swift carries no
+ * location whatever this sends, which is the point.
+ */
+function buildForm(draft: SwiftDraft): FormData {
+  const form = new FormData();
+  form.append('video', {
+    uri: draft.uri as string,
+    type: 'video/mp4',
+    name: 'swift.mp4',
+  } as any);
+
+  form.append('duration_ms', String(keptDurationMs(draft)));
+  if (draft.width) form.append('width', String(draft.width));
+  if (draft.height) form.append('height', String(draft.height));
+  form.append('caption', draft.caption.trim());
+
+  form.append('trim_start_ms', String(Math.round(draft.trimStartMs)));
+  if (draft.trimEndMs !== null) {
+    form.append('trim_end_ms', String(Math.round(draft.trimEndMs)));
+  }
+  form.append('original_volume', String(Math.round(draft.originalVolume)));
+  form.append('overlay_text', draft.overlayText.trim());
+  form.append('overlay_position', draft.overlayPosition);
+  form.append('uses_original_audio', String(draft.originalVolume > 0));
+
+  form.append('visibility', draft.visibility);
+  form.append('allow_comments', String(draft.allowComments));
+  form.append('allow_reposts', String(draft.allowReposts));
+
+  if (draft.shareLocation && draft.latitude !== null && draft.longitude !== null) {
+    form.append('latitude', String(draft.latitude));
+    form.append('longitude', String(draft.longitude));
+    form.append('place_name', draft.placeName);
+    form.append('location_shared', 'true');
+  }
+  return form;
+}
+
+/** The first validation message in a DRF error body, whatever shape it took —
+ *  `{"detail": "..."}` or `{"field": ["...", ...]}`. */
+function serverErrorReason(responseText: string): string {
+  try {
+    const body = JSON.parse(responseText);
+    if (typeof body?.detail === 'string') return body.detail;
+    for (const value of Object.values(body ?? {})) {
+      if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+      if (typeof value === 'string') return value;
+    }
+  } catch {
+    // Not JSON — nothing to extract.
+  }
+  return '';
+}
+
+/** What to put in front of the creator. A 401/403 here means the session
+ *  expired mid-upload, which is the account's problem to fix by signing in
+ *  again, not the video's. */
+function uploadFailureMessage(status: number, reason: string): string {
+  if (status >= 500 || status === 0) return 'The upload failed. Check your connection.';
+  if (status === 401 || status === 403) return 'Please sign in again and try publishing.';
+  return reason
+    ? `This video was rejected: ${reason}`
+    : `This video was rejected (HTTP ${status}).`;
+}
+
 interface TransferOptions {
-  uri: string;
-  signature: UploadSignature;
+  draft: SwiftDraft;
+  token: string | null;
   onProgress?: (ratio: number) => void;
   signal?: AbortSignal;
 }
 
-/**
- * One attempt at pushing the file to Cloudinary.
- *
- * Deliberately not `fetch`. Every parameter here is one the signature covers,
- * so Cloudinary rejects the upload outright if any of them is altered in
- * flight — which is exactly why the set is taken from the server's response
- * rather than written out again here.
- */
-function transfer({ uri, signature, onProgress, signal }: TransferOptions): Promise<CloudinaryVideo> {
+/** One attempt at posting the Swift. */
+function transfer({ draft, token, onProgress, signal }: TransferOptions): Promise<PublishedSwift> {
   return new Promise((resolve, reject) => {
-    const form = new FormData();
-    // The descriptor, not the bytes. See the module note.
-    form.append('file', {
-      uri,
-      type: 'video/mp4',
-      name: 'swift.mp4',
-    } as any);
-    for (const [key, value] of Object.entries(signedParams(signature))) {
-      form.append(key, value);
-    }
-    // Neither of these is part of the signed payload — Cloudinary excludes
-    // `api_key`, `signature`, `file` and `resource_type` when it recomputes.
-    form.append('api_key', signature.api_key);
-    form.append('signature', signature.signature);
-
+    const form = buildForm(draft);
     const xhr = new XMLHttpRequest();
     let settled = false;
 
@@ -263,22 +233,18 @@ function transfer({ uri, signature, onProgress, signal }: TransferOptions): Prom
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
-          finish(() => resolve(JSON.parse(xhr.responseText) as CloudinaryVideo));
+          finish(() => resolve(JSON.parse(xhr.responseText) as PublishedSwift));
         } catch {
-          finish(() => reject(new UploadError('The upload service sent something unreadable.')));
+          finish(() => reject(new UploadError('The server sent something unreadable.')));
         }
         return;
       }
-      // 4xx from Cloudinary is a rejected request — a bad signature, a file
-      // over the account limit — and retrying sends the same thing again.
+      // 4xx is a rejected request — a bad field, a file over the ceiling —
+      // and retrying sends the same thing again.
       const retryable = xhr.status >= 500 || xhr.status === 0;
-      const reason = cloudinaryReason(xhr.responseText);
-      // Logged as well as shown. "This video was rejected" on its own is
-      // unactionable: the difference between an invalid signature, a file over
-      // the account's ceiling and an unsupported codec is the whole of what a
-      // creator or whoever they report it to needs, and it only exists here.
+      const reason = serverErrorReason(xhr.responseText);
       console.warn(
-        `[Swifts] upload rejected — HTTP ${xhr.status}${reason ? `: ${reason}` : ''}`,
+        `[Swifts] publish rejected — HTTP ${xhr.status}${reason ? `: ${reason}` : ''}`,
       );
       finish(() => reject(new UploadError(
         uploadFailureMessage(xhr.status, reason),
@@ -293,7 +259,8 @@ function transfer({ uri, signature, onProgress, signal }: TransferOptions): Prom
     // that fires mid-upload wastes everything already sent.
     xhr.timeout = 10 * 60 * 1000;
 
-    xhr.open('POST', signature.upload_url);
+    xhr.open('POST', `${BASE_URL}/api/swifts/`);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.send(form);
   });
 }
@@ -321,35 +288,29 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export interface UploadOptions {
-  uri: string;
+export interface PublishOptions {
   onProgress?: (progress: UploadProgress) => void;
   signal?: AbortSignal;
-  /** Reuse a signature from an earlier attempt rather than asking again. */
-  signature?: UploadSignature;
 }
 
 /**
- * Upload a local video and return what Cloudinary stored.
- *
- * Retries transient failures up to `MAX_ATTEMPTS` against the same signature.
- * A rejection (bad signature, oversized file) is not retried — sending the
+ * Publish a draft. Retries transient failures up to `MAX_ATTEMPTS`; a
+ * rejection (bad field, oversized file) is not retried — sending the
  * identical request again would waste the user's data to get the same answer.
  */
-export async function uploadSwiftVideo({
-  uri,
-  onProgress,
-  signal,
-  signature: existing,
-}: UploadOptions): Promise<{ asset: CloudinaryVideo; signature: UploadSignature }> {
-  onProgress?.({ stage: 'signing', ratio: 0, attempt: 1 });
-  const signature = existing ?? (await getUploadSignature());
+export async function publishSwift(
+  draft: SwiftDraft,
+  { onProgress, signal }: PublishOptions = {},
+): Promise<PublishedSwift> {
+  if (!draft.uri) throw new UploadError('Nothing to publish.', false);
 
-  const file = inspectFile(uri);
-  if (file.size > 0 && file.size > signature.max_bytes) {
-    const limitMb = Math.round(signature.max_bytes / (1024 * 1024));
+  const file = inspectFile(draft.uri);
+  if (file.size > 0 && file.size > MAX_UPLOAD_BYTES) {
+    const limitMb = Math.round(MAX_UPLOAD_BYTES / (1024 * 1024));
     throw new UploadError(`That video is too large (limit ${limitMb}MB).`, false);
   }
+
+  const token = await AsyncStorage.getItem('access_token');
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -357,13 +318,12 @@ export async function uploadSwiftVideo({
     try {
       await wait(RETRY_DELAY_MS[attempt - 1], signal);
       onProgress?.({ stage: 'uploading', ratio: 0, attempt });
-      const asset = await transfer({
-        uri,
-        signature,
+      return await transfer({
+        draft,
+        token,
         signal,
         onProgress: (ratio) => onProgress?.({ stage: 'uploading', ratio, attempt }),
       });
-      return { asset, signature };
     } catch (e) {
       if (e instanceof UploadCancelled) throw e;
       if (e instanceof UploadError && !e.retryable) throw e;

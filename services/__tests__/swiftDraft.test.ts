@@ -8,7 +8,6 @@ import {
   validateDraft,
   type SwiftDraft,
 } from '../swiftDraft';
-import { clampTrackOffset, formatTrackDuration } from '../swiftTracks';
 
 /**
  * The composer's pure logic.
@@ -114,43 +113,7 @@ describe('the default draft', () => {
     expect(EMPTY_DRAFT.placeName).toBe('');
   });
 
-  it('starts with the original sound audible and no track', () => {
+  it('starts with the original sound audible', () => {
     expect(EMPTY_DRAFT.originalVolume).toBe(100);
-    expect(EMPTY_DRAFT.track).toBeNull();
-  });
-});
-
-describe('clampTrackOffset', () => {
-  it('leaves a workable offset alone', () => {
-    expect(clampTrackOffset(30_000, 180_000, 15_000)).toBe(30_000);
-  });
-
-  it('stops the song starting so late that the Swift runs past its end', () => {
-    // 180s track, 15s Swift — the latest usable start is 165s.
-    expect(clampTrackOffset(179_000, 180_000, 15_000)).toBe(165_000);
-  });
-
-  it('floors at zero', () => {
-    expect(clampTrackOffset(-5_000, 180_000, 15_000)).toBe(0);
-  });
-
-  it('collapses to zero when the track is shorter than the Swift', () => {
-    expect(clampTrackOffset(4_000, 10_000, 15_000)).toBe(0);
-  });
-
-  it('survives a track with no known duration', () => {
-    expect(clampTrackOffset(4_000, 0, 15_000)).toBe(0);
-  });
-});
-
-describe('formatTrackDuration', () => {
-  it.each([
-    [0, '0:00'],
-    [9_000, '0:09'],
-    [65_000, '1:05'],
-    [187_000, '3:07'],
-    [600_000, '10:00'],
-  ])('%dms is %s', (ms, expected) => {
-    expect(formatTrackDuration(ms)).toBe(expected);
   });
 });

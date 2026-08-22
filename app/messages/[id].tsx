@@ -18,7 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
-import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { decodeStoryReply } from '@/services/storyReply';
 import { announce } from '@/hooks/useReduceMotion';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
@@ -404,11 +403,15 @@ export default function MessagesScreen() {
       { id: tempId, image: asset.uri, sender_id: currentUserIdRef.current ?? -1, created_at: new Date().toISOString(), pending: true },
     ]);
 
-    // Straight to Cloudinary, then only the URL to Django — the server
-    // broadcasts it over the socket to both ends like any other message.
-    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
-      .then((imageUrl) => api.post(`/api/friends/messages/${id}/`, { image_url: imageUrl }))
-      .catch(() => {});
+    const form = new FormData();
+    form.append('image', {
+      uri: asset.uri,
+      name: asset.uri.split('/').pop() ?? 'photo.jpg',
+      type: asset.mimeType ?? 'image/jpeg',
+    } as any);
+    api.post(`/api/friends/messages/${id}/`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).catch(() => {});
   }
 
   async function handleAttach() {

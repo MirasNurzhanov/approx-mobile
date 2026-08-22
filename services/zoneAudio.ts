@@ -16,8 +16,9 @@ function bareUrl(url: string): string {
   return url.split('?')[0].split('#')[0];
 }
 
-/** "…/zones/nocturne_04_ab12cd.mp3" → "Nocturne 04". Cloudinary appends a
- *  random suffix to raw uploads, which is noise in a track title. */
+/** "…/zones/nocturne_04_ab12cd.mp3" → "Nocturne 04". Storage appends a random
+ *  suffix to an upload that collides with an existing name, which is noise in
+ *  a track title. */
 export function fileTitle(url: string): string {
   let name = '';
   try {

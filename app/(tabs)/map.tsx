@@ -2509,8 +2509,6 @@ export default function MapScreen() {
       await startWatching();
       // Background gets no primer sheet of its own — straight to the OS
       // dialog once foreground is already granted and the map is working.
-      // Android never reaches this: the permission is not in the manifest,
-      // so the only thing asking could produce is a dialog that fails.
       if (SUPPORTS_BACKGROUND_LOCATION) {
         await requestPermission('locationBackground');
         await startBackgroundLocationUpdates();

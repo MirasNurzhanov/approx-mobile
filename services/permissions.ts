@@ -16,12 +16,13 @@ import { useSyncExternalStore } from 'react';
 //     from Settings while we are suspended — so the store re-checks on
 //     foreground rather than trusting what it saw at launch.
 
-// Android deliberately ships without ACCESS_BACKGROUND_LOCATION: app.json sets
-// expo-location's `isAndroidBackgroundLocationEnabled: false`, so the OS has no
-// permission to grant. Asking anyway would show a dialog that can only fail, and
-// Settings would list a row that can never turn green. iOS is untouched — it
-// still declares the background mode and still requests it.
-export const SUPPORTS_BACKGROUND_LOCATION = Platform.OS !== 'android';
+// Both platforms declare ACCESS_BACKGROUND_LOCATION now: app.json sets
+// expo-location's `isAndroidBackgroundLocationEnabled: true` (with
+// `isAndroidForegroundServiceEnabled` alongside it, since Android will not keep
+// updates flowing while backgrounded without a foreground service). Location
+// sharing is otherwise account-scoped, not app-lifecycle-scoped — it should
+// stop only on sign-out or the user choosing Paused, not on backgrounding.
+export const SUPPORTS_BACKGROUND_LOCATION = true;
 
 export type PermissionKey =
   | 'camera'

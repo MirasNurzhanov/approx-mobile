@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
@@ -154,9 +156,9 @@ function NowPlayingSection({ zone, audioUrl, title, musicRadius, silent, trimmed
       ) : (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>
-            Nothing is playing in your zone yet. Pick a song from Apple Music
-            or upload your own track below — anyone who walks into your music
-            zone can then choose to play it.
+            Nothing is playing in your zone yet. Pick a song from the
+            catalogue or upload your own track below — anyone who walks into
+            your music zone can then choose to play it.
           </Text>
         </View>
       )}
@@ -321,7 +323,7 @@ function AppleMusicSection({ zone, isApple, appleTitle, onBrowse, onRemove }: {
   const styles = makeStyles(colors);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>FROM APPLE MUSIC</Text>
+      <Text style={styles.sectionLabel}>PICK A SONG</Text>
 
       {isApple ? (
         <View style={styles.fileCard}>
@@ -345,7 +347,7 @@ function AppleMusicSection({ zone, isApple, appleTitle, onBrowse, onRemove }: {
             hitSlop={8}
             style={({ pressed }) => [styles.fileAction, pressed && styles.pressed]}
             accessibilityRole="button"
-            accessibilityLabel="Pick a different Apple Music track"
+            accessibilityLabel="Pick a different song"
           >
             <Text style={styles.fileActionText}>Change</Text>
           </Pressable>
@@ -354,7 +356,7 @@ function AppleMusicSection({ zone, isApple, appleTitle, onBrowse, onRemove }: {
             hitSlop={8}
             style={({ pressed }) => [styles.fileRemove, pressed && styles.pressed]}
             accessibilityRole="button"
-            accessibilityLabel="Remove this Apple Music track"
+            accessibilityLabel="Remove this song"
           >
             <IconClose size={16} color={colors.t3} />
           </Pressable>
@@ -364,17 +366,17 @@ function AppleMusicSection({ zone, isApple, appleTitle, onBrowse, onRemove }: {
           onPress={onBrowse}
           style={({ pressed }) => [styles.appleTile, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Search Apple Music"
+          accessibilityLabel="Search music"
           accessibilityHint="Opens the catalogue to pick a song for your zone"
         >
           <View style={styles.appleRing}>
             <IconMusic size={22} color={colors.teal} />
           </View>
           <View style={styles.appleTileText}>
-            <Text style={styles.uploadTitle}>Search the catalogue</Text>
+            <Text style={styles.uploadTitle}>Search music</Text>
             <Text style={styles.appleTileHint}>
-              Pick any song on Apple Music. Zones play the 30-second preview —
-              full tracks need each listener&rsquo;s own subscription.
+              Pick any song. Zones play the 30-second preview — full tracks
+              need each listener&rsquo;s own subscription.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.t3} />
@@ -444,7 +446,7 @@ function UploadSection({ isUpload, uploading, uploadPct, title, onPick, onRemove
           </View>
 
           <Text style={styles.uploadTitle}>
-            {uploading ? 'Uploading your track…' : 'Upload your own track'}
+            {uploading ? 'Uploading your track…' : 'Upload a track'}
           </Text>
           <Text style={styles.uploadHint}>
             {uploading
@@ -690,15 +692,17 @@ export default function ZoneScreen() {
   return (
     <View style={styles.root}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Zone Music</Text>
-        <View style={styles.headerSpacer}>
-          {saving ? <ActivityIndicator color={colors.t3} size="small" /> : null}
+      <ScreenHeader title="Zone Music">
+        <View style={[styles.header, { paddingTop: top + 6 }]}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.t1} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Zone Music</Text>
+          <View style={styles.headerSpacer}>
+            {saving ? <ActivityIndicator color={colors.t3} size="small" /> : null}
+          </View>
         </View>
-      </View>
+      </ScreenHeader>
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}

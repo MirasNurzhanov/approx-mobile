@@ -10,10 +10,16 @@
  * wrong place is a marker at 0,0 in the Gulf of Guinea.
  */
 import {
+  clearArchive,
   fetchFriendStories,
+  getStoryArchive,
   groupStoriesByAuthor,
   normalizeStories,
   placedStories,
+  refreshMine,
+  resetArchive,
+  starStory,
+  unstarStories,
   type FeedStory,
 } from '../stories';
 
@@ -24,7 +30,7 @@ jest.mock('../api', () => ({
 
 const { api } = jest.requireMock('../api');
 
-const EMPTY_REACTIONS = { like: 0, funny: 0, helpful: 0, interesting: 0 };
+const EMPTY_REACTIONS = { like: 0 };
 
 function story(overrides: Partial<FeedStory> & { id: number }): FeedStory {
   return {
@@ -145,5 +151,99 @@ describe('fetchFriendStories', () => {
   it('survives a response with no results at all', async () => {
     api.get.mockResolvedValue({ data: {} });
     await expect(fetchFriendStories()).resolves.toEqual([]);
+  });
+});
+
+// Starring is the author's own act on their own story — there is no
+// bookmarking of anyone else's, so "Starred" is always a subset of "Mine".
+// See stories/models.Story.is_starred on the backend.
+describe('starring your own stories', () => {
+  beforeEach(async () => {
+    await resetArchive();
+  });
+
+  function seedMine(stories: FeedStory[]) {
+    api.get.mockResolvedValueOnce({ data: { count: stories.length, results: stories } });
+    return refreshMine();
+  }
+
+  it('stars a story into the starred list and flags it in mine', async () => {
+    const s = story({ id: 1 });
+    await seedMine([s]);
+    api.post.mockResolvedValue({});
+
+    await starStory(s);
+
+    const archive = getStoryArchive();
+    expect(archive.starredIds.has(1)).toBe(true);
+    expect(archive.starred?.map((x) => x.id)).toEqual([1]);
+    expect(archive.mine?.find((x) => x.id === 1)?.is_starred).toBe(true);
+    expect(api.post).toHaveBeenCalledWith('/api/stories/1/star/');
+  });
+
+  it('is a no-op if the story is already starred', async () => {
+    const s = story({ id: 1 });
+    await seedMine([s]);
+    api.post.mockResolvedValue({});
+    await starStory(s);
+    api.post.mockClear();
+
+    await starStory(s);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the star if the server refuses it', async () => {
+    const s = story({ id: 1 });
+    await seedMine([s]);
+    api.post.mockRejectedValue(new Error('nope'));
+
+    await expect(starStory(s)).rejects.toThrow();
+
+    const archive = getStoryArchive();
+    expect(archive.starredIds.has(1)).toBe(false);
+    expect(archive.mine?.find((x) => x.id === 1)?.is_starred).toBeFalsy();
+  });
+
+  it('unstarring drops it from starred and clears the flag in mine', async () => {
+    const s = story({ id: 1 });
+    await seedMine([s]);
+    api.post.mockResolvedValue({});
+    await starStory(s);
+    api.delete.mockResolvedValue({});
+
+    await unstarStories([1]);
+
+    const archive = getStoryArchive();
+    expect(archive.starredIds.has(1)).toBe(false);
+    expect(archive.starred).toEqual([]);
+    expect(archive.mine?.find((x) => x.id === 1)?.is_starred).toBe(false);
+    expect(api.delete).toHaveBeenCalledWith('/api/stories/1/star/');
+  });
+
+  it('rolls back if unstarring fails', async () => {
+    const s = story({ id: 1 });
+    await seedMine([s]);
+    api.post.mockResolvedValue({});
+    await starStory(s);
+    api.delete.mockRejectedValue(new Error('nope'));
+
+    await expect(unstarStories([1])).rejects.toThrow();
+    expect(getStoryArchive().starredIds.has(1)).toBe(true);
+  });
+
+  it('clearing starred unstars everything but leaves mine untouched', async () => {
+    const s = story({ id: 1 });
+    await seedMine([s]);
+    api.post.mockResolvedValue({});
+    await starStory(s);
+    api.delete.mockResolvedValue({});
+
+    await clearArchive('starred');
+
+    const archive = getStoryArchive();
+    expect(archive.starred).toEqual([]);
+    expect(archive.mine?.map((x) => x.id)).toEqual([1]);
+    expect(archive.mine?.[0].is_starred).toBe(false);
+    expect(api.delete).toHaveBeenCalledWith('/api/stories/starred/');
   });
 });

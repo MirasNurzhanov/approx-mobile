@@ -9,13 +9,14 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { Avatar } from '@/components/ui/Avatar';
 import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -148,7 +149,7 @@ export default function SearchScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const router = useRouter();
-  const { top } = useSafeAreaInsets();
+  const top = useScreenTopInset();
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchUser[]>([]);
@@ -249,6 +250,9 @@ export default function SearchScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        // Required by `headerSearchBarOptions`: it is what lets UIKit inset the
+        // list for the search bar and collapse it as the list scrolls.
+        contentInsetAdjustmentBehavior="automatic"
         ListHeaderComponent={
           <Text style={styles.resultsLabel}>
             {results.length} RESULT{results.length !== 1 ? 'S' : ''}
@@ -269,36 +273,47 @@ export default function SearchScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      {/* Search bar */}
-      <View style={styles.searchBar}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
+      <ScreenHeader
+        title="Search"
+        search={{
+          placeholder: 'Search by username…',
+          autoFocus: true,
+          onChangeText: handleChange,
+          onSubmit: (text) => text.trim().length >= 2 && doSearch(text.trim()),
+          onCancel: clear,
+        }}
+      >
+        {/* Search bar */}
+        <View style={styles.searchBar}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.t1} />
+          </Pressable>
 
-        <View style={[styles.inputPill, focused && styles.inputPillFocused]}>
-          <Ionicons name="search-outline" size={16} color={colors.t3} />
-          <TextInput
-            ref={inputRef}
-            style={styles.input}
-            value={query}
-            onChangeText={handleChange}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            placeholder="Search by username…"
-            placeholderTextColor={colors.t3}
-            autoFocus
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            onSubmitEditing={() => query.trim().length >= 2 && doSearch(query.trim())}
-          />
-          {query.length > 0 && (
-            <Pressable onPress={clear} hitSlop={8}>
-              <Ionicons name="close-outline" size={20} color={colors.t3} />
-            </Pressable>
-          )}
+          <View style={[styles.inputPill, focused && styles.inputPillFocused]}>
+            <Ionicons name="search-outline" size={16} color={colors.t3} />
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              value={query}
+              onChangeText={handleChange}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder="Search by username…"
+              placeholderTextColor={colors.t3}
+              autoFocus
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              onSubmitEditing={() => query.trim().length >= 2 && doSearch(query.trim())}
+            />
+            {query.length > 0 && (
+              <Pressable onPress={clear} hitSlop={8}>
+                <Ionicons name="close-outline" size={20} color={colors.t3} />
+              </Pressable>
+            )}
+          </View>
         </View>
-      </View>
+      </ScreenHeader>
 
       {renderBody()}
     </View>

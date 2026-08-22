@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 
 import { IconClose, IconMusic, IconSearch } from '@/components/ui/icons';
@@ -141,13 +143,15 @@ export default function ZoneAppleMusicScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Apple Music</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <ScreenHeader title="Music">
+        <View style={[styles.header, { paddingTop: top + 6 }]}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.t1} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Music</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </ScreenHeader>
 
       {!fault ? (
         <>
@@ -163,7 +167,7 @@ export default function ZoneAppleMusicScreen() {
                 autoFocus
                 autoCorrect={false}
                 returnKeyType="search"
-                accessibilityLabel="Search Apple Music"
+                accessibilityLabel="Search for music"
               />
               {query.length > 0 && (
                 <Pressable
@@ -177,8 +181,8 @@ export default function ZoneAppleMusicScreen() {
               )}
             </View>
             <Text style={styles.previewNote}>
-              Zones play Apple&rsquo;s 30-second preview — full tracks need each
-              listener&rsquo;s own Apple Music subscription.
+              Zones play a 30-second preview — full tracks need each
+              listener&rsquo;s own subscription.
             </Text>
           </View>
 

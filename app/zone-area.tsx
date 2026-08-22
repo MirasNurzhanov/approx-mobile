@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 
@@ -916,15 +918,17 @@ export default function ZoneAreaScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Zone Size</Text>
-        <View style={styles.headerSpacer}>
-          {saving ? <ActivityIndicator color={colors.t3} size="small" /> : null}
+      <ScreenHeader title="Zone Size">
+        <View style={[styles.header, { paddingTop: top + 6 }]}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.t1} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Zone Size</Text>
+          <View style={styles.headerSpacer}>
+            {saving ? <ActivityIndicator color={colors.t3} size="small" /> : null}
+          </View>
         </View>
-      </View>
+      </ScreenHeader>
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}

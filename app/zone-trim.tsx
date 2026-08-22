@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
@@ -138,15 +140,17 @@ export default function ZoneTrimScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.t1} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Trim the loop</Text>
-        <View style={styles.headerSpacer}>
-          {saving ? <ActivityIndicator color={colors.t3} size="small" /> : null}
+      <ScreenHeader title="Trim the loop">
+        <View style={[styles.header, { paddingTop: top + 6 }]}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.t1} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Trim the loop</Text>
+          <View style={styles.headerSpacer}>
+            {saving ? <ActivityIndicator color={colors.t3} size="small" /> : null}
+          </View>
         </View>
-      </View>
+      </ScreenHeader>
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}

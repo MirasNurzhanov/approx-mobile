@@ -11,18 +11,24 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { usePathname, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import { usePathname } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
-import { NAV_ARC_R_OUT } from '@/components/navArc';
-import { IconSwift, type IconComponent } from '@/components/ui/icons';
+import { NAV_ARC_R_OUT } from '@/components/navGeometry';
+import { NavTrigger } from '@/components/nav/NavTrigger';
+import {
+  NAV_SECTIONS,
+  badgeFor,
+  matchSection,
+  tabLabel,
+  type NavSection,
+} from '@/components/navSections';
 import { useScrollNav } from '@/context/ScrollNavContext';
+import { useNavBadges } from '@/hooks/useNavBadges';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
-import { refreshAlertsCount, useAlertsCount } from '@/services/alerts';
-import { api } from '@/services/api';
 import { MAX_SCALE_FIXED, lightColors, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -46,46 +52,25 @@ const SLIM_H = 56; // slim tab bar row height
 const SPRING = { damping: 18, stiffness: 150, mass: 0.9 };
 const FADE   = { duration: 200, easing: Easing.out(Easing.cubic) };
 
-// ─── Badge indices ────────────────────────────────────────────────────────────
-const CHAT_IDX = 2; // 'Chat' is index 2
+// ─── Wedge angles ─────────────────────────────────────────────────────────────
+// Where each of the shared NAV_SECTIONS sits on the 0–180° arc. Five wedges of
+// 36°, written out rather than derived so one can be nudged without moving its
+// neighbours. Keyed by section name so reordering the shared list reorders the
+// arc with it.
+interface Wedge { start: number; end: number; mid: number }
 
-// ─── Sections ─────────────────────────────────────────────────────────────────
-type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+const WEDGES: Record<string, Wedge> = {
+  map:      { start: 144, end: 180, mid: 162 },
+  profile:  { start: 108, end: 144, mid: 126 },
+  chat:     { start: 72,  end: 108, mid: 90  },
+  swifts:   { start: 36,  end: 72,  mid: 54  },
+  settings: { start: 0,   end: 36,  mid: 18  },
+};
 
-interface Section {
-  label: string;
-  icon?: IoniconName;
-  activeIcon?: IoniconName;
-  /** A glyph from the app's own icon set, for sections Ionicons has no word
-   *  for. Wins over `icon`/`activeIcon` — it carries its own state through
-   *  colour, like every other icon on the arc. */
-  Glyph?: IconComponent;
-  /** Optical size correction for a `Glyph` whose shape doesn't fill its box.
-   *  Multiplies the rendered size everywhere the icon appears, so the arc and
-   *  the collapsed bar stay in proportion with each other. */
-  glyphScale?: number;
-  route: string;
-  name: string;
-  start: number;
-  end: number;
-  mid: number;
-  /** Extra path fragments that should light this wedge. A pushed screen owned
-   *  by a section keeps its parent selected instead of falling back to Map. */
-  owns?: string[];
-}
+/** The arc's own view of a section: the shared entry plus its angles. */
+type Section = NavSection & Wedge;
 
-// Five wedges divide the 0–180° arc into 36° each. The angles are written out
-// rather than derived so a section can be nudged without moving its neighbours.
-const SECTIONS: Section[] = [
-  { label: 'Map',      icon: 'map-outline',         activeIcon: 'map',            route: '/(tabs)/map',      name: 'map',      start: 144, end: 180, mid: 162 },
-  { label: 'Profile',  icon: 'person-outline',      activeIcon: 'person',         route: '/(tabs)/profile',  name: 'profile',  start: 108, end: 144, mid: 126 },
-  { label: 'Chat',     icon: 'chatbubbles-outline', activeIcon: 'chatbubbles',    route: '/(tabs)/chat',     name: 'chat',     start: 72,  end: 108, mid: 90, owns: ['notification', 'messages', 'clubs', 'create-club'] },
-  // The swift is a wide, shallow silhouette — at the same nominal size as the
-  // Ionicons around it, which fill their square, it reads smaller than its
-  // neighbours. The bump is optical, not a size change.
-  { label: 'Swifts',   Glyph: IconSwift, glyphScale: 1.3,                         route: '/(tabs)/swifts',   name: 'swifts',   start: 36,  end: 72,  mid: 54  },
-  { label: 'Settings', icon: 'settings-outline',    activeIcon: 'settings-sharp', route: '/(tabs)/settings', name: 'settings', start: 0,   end: 36,  mid: 18  },
-];
+const SECTIONS: Section[] = NAV_SECTIONS.map((s) => ({ ...s, ...WEDGES[s.name] }));
 
 function SectionGlyph({
   section,
@@ -131,29 +116,6 @@ function sectorPath(start: number, end: number, gap = 1.2): string {
   ].join(' ');
 }
 
-/** With Alerts gone from the arc, its unread count rides on the Chat wedge —
- *  which is where the feed now lives, as Chat's first tab. Two sources with no
- *  overlap: unread messages, and everything in Alerts. */
-function badgeFor(index: number, chatBadge: number, alertsBadge: number): number {
-  return index === CHAT_IDX ? chatBadge + alertsBadge : 0;
-}
-
-/** "Chat, 3 unread" rather than "Chat" followed by a bare "3". */
-function tabLabel(label: string, badge: number): string {
-  if (badge <= 0) return label;
-  return `${label}, ${badge > 99 ? 'over 99' : badge} unread`;
-}
-
-function matchSection(pathname: string): number {
-  const idx = SECTIONS.findIndex(
-    s =>
-      pathname === s.route ||
-      pathname.startsWith(s.route) ||
-      pathname.endsWith(`/${s.name}`) ||
-      (s.owns?.some(fragment => pathname.includes(fragment)) ?? false),
-  );
-  return idx >= 0 ? idx : 0;
-}
 
 const BG_PATH = [
   `M ${(CX - R_OUT).toFixed(2)} ${CY.toFixed(2)}`,
@@ -167,16 +129,22 @@ const GLOW_ARC = [
 ].join(' ');
 
 interface SpeedometerProps {
-  /** Name of a SECTIONS entry (e.g. 'settings') to spotlight — every other
+  /** Name of a NAV_SECTIONS entry (e.g. 'settings') to spotlight — every other
    *  wedge dims and this one pulses coral. Used by the zone tutorial to point
    *  at Settings without a static colour override fighting the arc's own
    *  active/inactive colours once the tutorial ends. */
   highlightSection?: string;
+  /** Set on `/market`, which sits outside the tab navigator. See NavTrigger. */
+  standalone?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
-  const router            = useRouter();
+/**
+ * The wheel nav — the app's original bottom navigation, now an opt-in
+ * alternative to the tab bar (Settings → Preferences → Wheel navigation bar).
+ * Screens render `components/AuraNav` rather than this directly.
+ */
+export function Speedometer({ highlightSection, standalone }: SpeedometerProps = {}) {
   const pathname          = usePathname();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { collapsed }     = useScrollNav();
@@ -188,10 +156,9 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
   // the whole arc a second time on every navigation, with the old wedge still
   // lit in between.
   const activeIdx = matchSection(pathname);
-  const [chatBadge, setChatBadge] = useState(0);
-  // Same store the Alerts tab inside Chat reads, so the wedge badge and the tab
-  // badge can never disagree.
-  const alertsBadge = useAlertsCount();
+  // Shared with the tab bar, so the two nav styles can never show different
+  // counts for the same inbox.
+  const badges = useNavBadges();
 
   // The needle sweep and the collapse spring are decorative. With Reduce
   // Motion on they jump to the end state instead — the feedback is kept, the
@@ -226,47 +193,6 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
     opacity: 0.55 + highlightPulse.get() * 0.45,
     transform: [{ scale: 1 + highlightPulse.get() * 0.18 }],
   }));
-
-  // ── Chat badge: unread messages only ─────────────────────────────────────────
-  // Pending Hi requests used to be counted here too. They are part of Alerts
-  // now, which `alertsBadge` already counts — and this badge adds the two
-  // together, so counting requests in both would show every one of them twice.
-  const fetchChatBadge = useCallback(async () => {
-    try {
-      const [unreadRes] = await Promise.allSettled([
-        api.get<unknown>('/api/friends/messages/unread/'),
-      ]);
-      let count = 0;
-      if (unreadRes.status === 'fulfilled') {
-        const d = unreadRes.value.data;
-        if (typeof d === 'number') count += d;
-        else if (Array.isArray(d)) count += d.length;
-        else if (d && typeof d === 'object') count += Number((d as any).unread_count ?? (d as any).count ?? 0);
-      }
-      setChatBadge(count);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    fetchChatBadge();
-    const id = setInterval(fetchChatBadge, 10_000);
-    return () => clearInterval(id);
-  }, [fetchChatBadge]);
-
-  // Re-fetch on tab focus; optimistic clear when entering a message thread
-  useEffect(() => {
-    // Chat is where both halves of this badge get read, so entering it is the
-    // one navigation that can make either half stale.
-    if (pathname.includes('chat')) {
-      fetchChatBadge();
-      refreshAlertsCount();
-    }
-    if (pathname.includes('messages')) {
-      setChatBadge(0);
-      const t = setTimeout(() => fetchChatBadge(), 1500);
-      return () => clearTimeout(t);
-    }
-  }, [pathname, fetchChatBadge]);
 
   const needleAngle      = useSharedValue(SECTIONS[matchSection(pathname)].mid);
   const containerH       = useSharedValue(SVG_H + safeBottom);
@@ -304,13 +230,17 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
     collapseProgress.set(animate(collapsed ? 1 : 0, false));
   }, [collapsed, animate, containerH, collapseProgress]);
 
-  function handlePress(idx: number) {
-    // The needle still moves on the press, so the arc answers the tap at once.
-    // Which wedge is *lit* follows the route, since that is what it reports —
-    // lighting it here as well meant a failed navigation left the arc claiming
-    // to be somewhere the app never went.
+  /**
+   * The needle sweeps on the press rather than on arrival, so the arc answers
+   * the tap at once. Which wedge is *lit* still follows the route, since that
+   * is what it reports — lighting it here as well meant a failed navigation
+   * left the arc claiming to be somewhere the app never went.
+   *
+   * Navigation itself is NavTrigger's, which runs this first and then hands
+   * the move to the navigator.
+   */
+  function sweepNeedle(idx: number) {
     needleAngle.set(animate(SECTIONS[idx].mid, true));
-    router.navigate(SECTIONS[idx].route as any);
   }
 
   const lineProps = useAnimatedProps(() => {
@@ -347,38 +277,47 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
           {/* SVG — no touch events */}
           <View pointerEvents="none">
             <Svg width={SVG_W} height={SVG_H} style={{ backgroundColor: 'transparent' }}>
-              <Path d={BG_PATH} fill={colors.bg} />
+              <Path d={BG_PATH} fill={colors.navBg} />
 
-              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={18} strokeLinecap="round" opacity={0.06} />
-              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={10} strokeLinecap="round" opacity={0.12} />
-              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={5}  strokeLinecap="round" opacity={0.30} />
-              <Path d={GLOW_ARC} fill="none" stroke={colors.teal} strokeWidth={1.5} strokeLinecap="round" opacity={0.90} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.navActive} strokeWidth={18} strokeLinecap="round" opacity={0.06} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.navActive} strokeWidth={10} strokeLinecap="round" opacity={0.12} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.navActive} strokeWidth={5}  strokeLinecap="round" opacity={0.30} />
+              <Path d={GLOW_ARC} fill="none" stroke={colors.navActive} strokeWidth={1.5} strokeLinecap="round" opacity={0.90} />
 
               {SECTIONS.map((s, i) => (
                 <Path
                   key={s.name}
                   d={sectorPath(s.start, s.end)}
-                  fill={i === activeIdx ? colors.teal : colors.surface}
+                  // Opaque both ways. An unselected wedge used to be a 12%
+                  // wash of the inactive text colour, which put a grey veil
+                  // over the whole dial in light mode; `navWedge` is that same
+                  // colour flattened in dark mode and plain white in light, so
+                  // the arc is a solid surface and the selected wedge is the
+                  // only coloured thing on it.
+                  fill={i === activeIdx ? colors.navActive : colors.navWedge}
                   // Used to be a flat "#000000" at 2px — a hard black ring
                   // around every wedge on top of the gap that already
                   // separates them, and it didn't soften for light mode. The
                   // same border colour every other card and divider in the
                   // app already uses reads as a seam, not a cutout.
-                  stroke={colors.border}
-                  strokeWidth={1}
+                  stroke={colors.navBorder}
+                  // 1.5 rather than 1: now that an unselected wedge is the
+                  // same colour as the arc behind it, this seam is the only
+                  // thing that makes the dial read as segmented at all.
+                  strokeWidth={1.5}
                 />
               ))}
 
-              <Circle cx={CX} cy={CY} r={R_IN * 0.22} fill={colors.bg} />
+              <Circle cx={CX} cy={CY} r={R_IN * 0.22} fill={colors.navBg} />
               <AnimatedLine
                 x1={CX} y1={CY}
                 animatedProps={lineProps}
-                stroke={colors.t1}
+                stroke={colors.navActive}
                 strokeWidth={2.5}
                 strokeLinecap="round"
               />
-              <AnimatedCircle animatedProps={dotProps} r={4} fill={colors.t1} />
-              <Circle cx={CX} cy={CY} r={R_IN * 0.09} fill={colors.teal} />
+              <AnimatedCircle animatedProps={dotProps} r={4} fill={colors.navActive} />
+              <Circle cx={CX} cy={CY} r={R_IN * 0.09} fill={colors.navActive} />
             </Svg>
           </View>
 
@@ -386,26 +325,23 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
           {SECTIONS.map((s, i) => {
             const isActive = i === activeIdx;
             const pos = polar(R_ICO, s.mid);
-            const badge = badgeFor(i, chatBadge, alertsBadge);
+            const badge = badgeFor(i, badges.chat, badges.alerts);
             const isHighlighted = highlightSection === s.name;
             const isDimmed = !!highlightSection && !isHighlighted;
-            const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.bg : colors.t3;
+            const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.navOnActive : colors.navInactive;
             return (
-              <Pressable
+              <NavTrigger
                 key={s.name}
-                onPress={() => handlePress(i)}
+                section={s}
+                selected={isActive}
+                label={tabLabel(s.label, badge)}
+                standalone={standalone}
+                onPress={() => sweepNeedle(i)}
                 style={[
                   styles.iconBtn,
                   { left: pos.x - 26, top: pos.y - 24 },
                   isDimmed && styles.tutorialDimmed,
                 ]}
-                hitSlop={10}
-                // One node per tab, so the badge is read as part of the tab
-                // ("Chat, 3 unread") instead of as a stray number after it.
-                accessible
-                accessibilityRole="tab"
-                accessibilityState={{ selected: isActive }}
-                accessibilityLabel={tabLabel(s.label, badge)}
               >
                 <Animated.View style={isHighlighted ? highlightStyle : undefined}>
                   <SectionGlyph section={s} active={isActive} size={18} color={wedgeColor} />
@@ -426,7 +362,7 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
                     </Text>
                   </View>
                 )}
-              </Pressable>
+              </NavTrigger>
             );
           })}
         </Animated.View>
@@ -444,22 +380,22 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
           <View style={styles.slimRow}>
             {SECTIONS.map((s, i) => {
               const isActive = i === activeIdx;
-              const badge = badgeFor(i, chatBadge, alertsBadge);
+              const badge = badgeFor(i, badges.chat, badges.alerts);
               const isHighlighted = highlightSection === s.name;
               const isDimmed = !!highlightSection && !isHighlighted;
-              const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.teal : colors.t3;
+              const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.navActive : colors.navInactive;
               return (
-                <Pressable
+                // The collapsed bar has no visible text at all, so without the
+                // spoken label NavTrigger attaches it is five unnamed buttons
+                // to a screen reader.
+                <NavTrigger
                   key={s.name}
-                  onPress={() => handlePress(i)}
+                  section={s}
+                  selected={isActive}
+                  label={tabLabel(s.label, badge)}
+                  standalone={standalone}
+                  onPress={() => sweepNeedle(i)}
                   style={[styles.slimBtn, isDimmed && styles.tutorialDimmed]}
-                  hitSlop={10}
-                  // The collapsed bar has no visible text at all, so without
-                  // this it is six unnamed buttons to a screen reader.
-                  accessible
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: isActive }}
-                  accessibilityLabel={tabLabel(s.label, badge)}
                 >
                   <Animated.View style={[{ position: 'relative' }, isHighlighted && highlightStyle]}>
                     <SectionGlyph section={s} active={isActive} size={22} color={wedgeColor} />
@@ -471,11 +407,11 @@ export function Speedometer({ highlightSection }: SpeedometerProps = {}) {
                       </View>
                     )}
                   </Animated.View>
-                </Pressable>
+                </NavTrigger>
               );
             })}
           </View>
-          <View style={{ height: safeBottom, backgroundColor: colors.bg }} />
+          <View style={{ height: safeBottom, backgroundColor: colors.navBg }} />
         </Animated.View>
       </View>
 
@@ -510,9 +446,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     right: 0,
   },
   slimBar: {
-    backgroundColor: colors.bg,
+    backgroundColor: colors.navBg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    borderTopColor: colors.navBorder,
   },
   slimRow: {
     height: SLIM_H,

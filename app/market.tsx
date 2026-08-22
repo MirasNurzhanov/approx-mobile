@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { AuraMark } from '@/components/ui/AuraMark';
-import { Speedometer } from '@/components/Speedometer';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -136,8 +135,6 @@ export default function MarketScreen() {
           Spend your Aura Points on frames, banners and zone upgrades
         </Text>
       </View>
-
-      <Speedometer />
     </View>
   );
 }

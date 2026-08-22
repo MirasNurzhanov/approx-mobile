@@ -4,6 +4,19 @@ export type ColorPalette = {
   teal: string; tealTint: string; tealLine: string;
   purple: string; blue: string; orange: string; red: string; green: string;
   coral: string; coralSoft: string; violet: string;
+  // Bottom navigation. Deliberately its own set rather than reusing `teal` /
+  // `surface`: the nav is the one piece of chrome present on every screen, and
+  // it is held to a two-colour scheme of its own — orange on white in light
+  // mode, white on black in dark — so it reads as a fixed frame around the app
+  // rather than as another surface that shifts with the accent.
+  navBg: string; navActive: string; navOnActive: string;
+  navInactive: string; navBorder: string;
+  /** Fill of an *unselected* wheel wedge. Its own token, and opaque, because
+   *  the wheel is a stack of SVG paths over the arc's background — a
+   *  translucent fill there reads as a grey wash over what should be a clean
+   *  white dial. Light mode wants it identical to `navBg`, so the wedges are
+   *  told apart by their `navBorder` seam alone. */
+  navWedge: string;
 }
 
 export const colors: ColorPalette = {
@@ -29,6 +42,17 @@ export const colors: ColorPalette = {
   coral: '#1FC7B6',
   coralSoft: '#0E2421',
   violet: '#8B5CF6',
+  // Dark mode's nav is black and white.
+  navBg: '#0A0A0B',
+  navActive: '#FFFFFF',
+  navOnActive: '#0A0A0B',
+  // t2, not t3: at 11pt on near-black, t3 (#5E5E68) is 3.1:1 and fails AA.
+  navInactive: '#9C9CA6',
+  navBorder: '#2A2A31',
+  // The opaque equivalent of the 12%-navInactive wash the wedges used to carry
+  // — same colour on screen, no alpha. Dark mode keeps the faint lift; it is
+  // light mode that wanted a flat white dial.
+  navWedge: '#1C1C21',
 }
 
 export const lightColors: ColorPalette = {
@@ -51,6 +75,31 @@ export const lightColors: ColorPalette = {
   coral: '#E8714A',
   coralSoft: '#FCEEE8',
   violet: '#8B6FD4',
+  // Light mode's nav is orange on white: a flat white ground, grey for what is
+  // not selected, orange for what is. It was greyscale for a stretch, on the
+  // argument that the one piece of chrome on every screen should stay a frame
+  // rather than a second accent — but grey-on-white gave the selected item
+  // nothing to say with, so the orange is back.
+  navBg: '#FFFFFF',
+  // The palette's `orange` (#F97316) darkened until it clears AA as *text*.
+  // This value has to work in both directions at once — it is the label and
+  // tint colour on a white bar, and the pill/wedge fill under a white glyph —
+  // and both are the same ratio, so one number settles it. #F97316 itself is
+  // 2.80:1 and misses even the 3:1 graphical floor; this is 4.59:1, the most
+  // saturated orange at this hue that clears 4.5. Do not brighten it without
+  // re-checking the tab label, which is 11pt and gets no large-text exemption.
+  navActive: '#C75000',
+  navOnActive: '#FFFFFF',
+  // A neutral grey rather than the palette's warm `t2` (#6B6455), which read as
+  // a muddy brown next to the others. Not iOS's own #8E8E93 either, which is
+  // 3.3:1 on white and misses AA at tab-label sizes. This is 5.05:1.
+  navInactive: '#6E6E76',
+  navBorder: '#E8E4DA',
+  // Same white as `navBg`, deliberately: an unselected wedge is not a shape of
+  // its own, it is the dial. The `navBorder` seam between wedges is the whole
+  // of what separates them, which is what keeps the one orange wedge the only
+  // thing on the arc with a colour.
+  navWedge: '#FFFFFF',
 }
 
 // Legacy light/dark palette kept for the Expo template components

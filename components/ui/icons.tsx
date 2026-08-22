@@ -137,19 +137,6 @@ export function IconLike({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
-export function IconFunny({ size = 24, color = colors.t2 }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <G stroke={color} {...stroke}>
-        <Circle cx={12} cy={12} r={8.25} />
-        <Path d="M8.3 13.5a4.2 4.2 0 007.4 0" />
-      </G>
-      <Circle cx={9} cy={9.5} r={1.2} fill={color} />
-      <Circle cx={15} cy={9.5} r={1.2} fill={color} />
-    </Svg>
-  )
-}
-
 export function IconInsight({ size = 24, color = colors.t2 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
@@ -756,6 +743,20 @@ export function IconTarget({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
+/** The wheel nav, drawn small: the speedometer arc with its needle. Used by the
+ *  Settings row that turns it on, so the row shows what it switches to. */
+export function IconGauge({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M3.75 16.75A8.25 8.25 0 0 1 20.25 16.75" />
+        <Line x1={12} y1={16.75} x2={15.9} y2={11.4} />
+      </G>
+      <Circle cx={12} cy={16.75} r={1.4} fill={color} />
+    </Svg>
+  )
+}
+
 export function IconSnow({ size = 24, color = colors.t2 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
@@ -941,6 +942,75 @@ export function IconMoon({ size = 24, color = colors.t2 }: IconProps) {
     <Svg width={size} height={size} viewBox="0 0 24 24">
       <G stroke={color} {...stroke}>
         <Path d="M21 12.8a9 9 0 01-9.8 9A9 9 0 0111.2 3 7 7 0 0021 12.8z" />
+      </G>
+    </Svg>
+  )
+}
+
+// ── Swift composer ──────────────────────────────────────────────────────────
+// Drawn for the capture and edit screens. Same 24px grid, 1.5px stroke and
+// squared terminals as everything above, so the camera chrome reads as Aura's
+// rather than as a stock camera kit dropped into it.
+
+export function IconFlash({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M13 2.5L5.5 13.5h5l-1 8L18 10.5h-5z" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconFlashOff({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M13 2.5L5.5 13.5h5l-1 8L18 10.5h-5z" />
+        <Path d="M3.5 3.5l17 17" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconCameraFlip({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4 8.5h3l1.5-2.5h7L17 8.5h3v11H4z" />
+        <Path d="M9.5 13.5a2.5 2.5 0 014.6-1.4M14.5 15a2.5 2.5 0 01-4.6 1.4" />
+        <Path d="M14.6 10.4v1.8h-1.8M9.4 18.1v-1.8h1.8" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconText({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M5 6V4.5h14V6M12 4.5v15M9 19.5h6" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconFrame({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={3.5} y={5.5} width={17} height={13} rx={1.5} />
+        <Path d="M8 5.5v13M16 5.5v13" />
+      </G>
+    </Svg>
+  )
+}
+
+export function IconVolume({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4zM15.5 9.7a3.2 3.2 0 010 4.6" />
       </G>
     </Svg>
   )

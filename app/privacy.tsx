@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { Card } from '@/components/ui/Card';
 import { LocationSharingConsent } from '@/components/LocationSharingConsent';
@@ -20,7 +22,6 @@ import {
   type SharingPrecision,
 } from '@/components/LocationVisibilityCard';
 import {
-  IconBack,
   IconBlocked,
   IconChevron,
   IconLock,
@@ -159,7 +160,8 @@ function ToggleRow({
 export default function PrivacyScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
   const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -227,20 +229,11 @@ export default function PrivacyScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          style={({ pressed }) => pressed && styles.pressed}
-          onPress={() => router.back()}
-          hitSlop={12}
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Privacy &amp; safety</Text>
-          <Text style={styles.subtitle}>Control who sees what</Text>
-        </View>
-        {saving && <ActivityIndicator color={colors.teal} size="small" />}
-      </View>
+      <ScreenHeader
+        title="Privacy & safety"
+        subtitle="Control who sees what"
+        accessory={saving ? <ActivityIndicator color={colors.teal} size="small" /> : null}
+      />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}

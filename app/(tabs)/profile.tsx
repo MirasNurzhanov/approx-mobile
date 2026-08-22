@@ -22,7 +22,7 @@ import { sectionise } from '@/services/interestCategories';
 import { registerProfileRefresh } from '@/services/profileRefresh';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
-import { Speedometer } from '@/components/Speedometer';
+import { AuraNav } from '@/components/AuraNav';
 import { AuraMark } from '@/components/ui/AuraMark';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -39,6 +39,7 @@ import {
   type IconProps,
 } from '@/components/ui/icons';
 import { iconForInterest } from '@/components/ui/interestIcons';
+import { useNavContentPadding } from '@/hooks/useNavMetrics';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -106,8 +107,9 @@ export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const router = useRouter();
-  const { top, bottom } = useSafeAreaInsets();
+  const { top } = useSafeAreaInsets();
   const scrollProps = useScrollHandler();
+  const navPadding = useNavContentPadding();
 
   const [profile, setProfile] = useState<Profile | null>(_cache?.profile ?? null);
   const [friendCount, setFriendCount] = useState(_cache?.friendCount ?? 0);
@@ -220,7 +222,7 @@ export default function ProfileScreen() {
     return (
       <View style={[styles.root, styles.center]}>
         <ActivityIndicator color={colors.teal} size="large" />
-        <Speedometer />
+        <AuraNav />
       </View>
     );
   }
@@ -243,7 +245,7 @@ export default function ProfileScreen() {
   return (
     <View style={styles.root}>
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: bottom + 110 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: navPadding }]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />}
         {...scrollProps}
@@ -361,7 +363,7 @@ export default function ProfileScreen() {
             <ActionRow icon={IconMarket} label="Market"         onPress={() => router.push('/market')} />
             <ActionRow icon={IconSound}  label="My zone"        onPress={() => router.push('/zone')} />
             <ActionRow icon={IconHeart}  label="Edit interests" onPress={() => router.push('/interests')} />
-            <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/saved-stories')} />
+            <ActionRow icon={IconImage}  label="My stories"     onPress={() => router.push('/starred-stories')} />
             <ActionRow icon={IconGlobe}  label="Links"          onPress={() => router.push('/edit-links')} />
           </View>
         </View>
@@ -372,7 +374,7 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      <Speedometer />
+      <AuraNav />
     </View>
   );
 }

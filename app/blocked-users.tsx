@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -32,7 +34,8 @@ import {
 export default function BlockedUsersScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
   const { list } = useBlockedUsers();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -69,19 +72,21 @@ export default function BlockedUsersScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          style={({ pressed }) => [pressed && styles.pressed]}
-          onPress={() => router.back()}
-          hitSlop={12}
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Blocked users</Text>
-          <Text style={styles.subtitle}>They can’t see you, and you can’t see them</Text>
+      <ScreenHeader title="Blocked users">
+        <View style={styles.header}>
+          <Pressable
+            style={({ pressed }) => [pressed && styles.pressed]}
+            onPress={() => router.back()}
+            hitSlop={12}
+          >
+            <IconBack size={22} color={colors.t1} />
+          </Pressable>
+          <View style={styles.headerText}>
+            <Text style={styles.title}>Blocked users</Text>
+            <Text style={styles.subtitle}>They can’t see you, and you can’t see them</Text>
+          </View>
         </View>
-      </View>
+      </ScreenHeader>
 
       {list === null ? (
         <View style={styles.loadingWrap}>

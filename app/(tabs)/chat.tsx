@@ -17,7 +17,7 @@ import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Speedometer } from '@/components/Speedometer';
+import { AuraNav } from '@/components/AuraNav';
 import { DraggableTabs, type DraggableTabKey } from '@/components/DraggableTabs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
@@ -27,6 +27,7 @@ import { blockUser, refreshBlocked, useBlockedUsers } from '@/services/blocked';
 import { triggerNearbyRefresh } from '@/services/nearbyRefresh';
 import { storyReplyPreview } from '@/services/storyReply';
 import {
+  clearAllAlerts,
   deriveAlerts,
   EMPTY_ALERTS,
   isClubAlert,
@@ -45,6 +46,7 @@ import {
   groupStoriesByAuthor,
   type FeedStory,
 } from '@/services/stories';
+import { useNavContentPadding } from '@/hooks/useNavMetrics';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import {
   clubsApi,
@@ -411,6 +413,7 @@ function SearchResultsList({ rows, trimmed, scrollProps, onMessage, onOpenClub }
   onOpenClub: (clubId: number) => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <FlatList
@@ -429,7 +432,7 @@ function SearchResultsList({ rows, trimmed, scrollProps, onMessage, onOpenClub }
         }
         return <ClubCard club={item.club} onPress={() => onOpenClub(item.club.id)} />;
       }}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingBottom: navPadding }]}
       ListEmptyComponent={
         <EmptyState
           message={`Nothing matches “${trimmed}”\nThis searches your friends, connections and clubs`}
@@ -441,20 +444,24 @@ function SearchResultsList({ rows, trimmed, scrollProps, onMessage, onOpenClub }
   );
 }
 
-function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, markingRead, refreshControl, scrollProps, onRequest, onOpenActivity, onOpenProfile, onMarkAllRead }: {
+function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, hasActivity, markingRead, clearingAlerts, refreshControl, scrollProps, onRequest, onOpenActivity, onOpenProfile, onMarkAllRead, onClearAll }: {
   rows: AlertRow[];
   actioning: Record<string, 'accept' | 'decline'>;
   unreadCount: number;
   hasUnreadActivity: boolean;
+  hasActivity: boolean;
   markingRead: boolean;
+  clearingAlerts: boolean;
   refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
   scrollProps: ScrollProps;
   onRequest: (request: AlertRequest, action: 'accept' | 'decline') => void;
   onOpenActivity: (notif: Notification) => void;
   onOpenProfile: (userId: number) => void;
   onMarkAllRead: () => void;
+  onClearAll: () => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <FlatList
@@ -481,24 +488,39 @@ function AlertsList({ rows, actioning, unreadCount, hasUnreadActivity, markingRe
         return <NotifRow notif={item.notif} onPress={() => onOpenActivity(item.notif)} />;
       }}
       ListHeaderComponent={
-        unreadCount > 0 ? (
+        unreadCount > 0 || hasActivity ? (
           <View style={styles.alertsHeader}>
-            <View style={styles.unreadPill}>
-              <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
+            <View>
+              {unreadCount > 0 && (
+                <View style={styles.unreadPill}>
+                  <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
+                </View>
+              )}
             </View>
-            {hasUnreadActivity && (
-              <Pressable onPress={onMarkAllRead} disabled={markingRead} hitSlop={10}>
-                {markingRead ? (
-                  <ActivityIndicator color={colors.teal} size="small" />
-                ) : (
-                  <Text style={styles.markReadBtn}>Mark all read</Text>
-                )}
-              </Pressable>
-            )}
+            <View style={styles.alertsHeaderActions}>
+              {hasUnreadActivity && (
+                <Pressable onPress={onMarkAllRead} disabled={markingRead} hitSlop={10}>
+                  {markingRead ? (
+                    <ActivityIndicator color={colors.teal} size="small" />
+                  ) : (
+                    <Text style={styles.markReadBtn}>Mark all read</Text>
+                  )}
+                </Pressable>
+              )}
+              {hasActivity && (
+                <Pressable onPress={onClearAll} disabled={clearingAlerts} hitSlop={10}>
+                  {clearingAlerts ? (
+                    <ActivityIndicator color={colors.red} size="small" />
+                  ) : (
+                    <Text style={styles.clearAllBtn}>Clear all</Text>
+                  )}
+                </Pressable>
+              )}
+            </View>
           </View>
         ) : null
       }
-      contentContainerStyle={styles.alertsList}
+      contentContainerStyle={[styles.alertsList, { paddingBottom: navPadding }]}
       ListEmptyComponent={
         <EmptyState message={"You're all caught up\nRequests and story activity land here"} />
       }
@@ -521,6 +543,7 @@ function ChatsList({ users, sentRequestIds, storiesByAuthor, refreshControl, scr
   onOpenStory: (stories: FeedStory[]) => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <FlatList
@@ -540,7 +563,7 @@ function ChatsList({ users, sentRequestIds, storiesByAuthor, refreshControl, scr
           onOpenStory={onOpenStory}
         />
       )}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingBottom: navPadding }]}
       ListEmptyComponent={<EmptyState message={'No chats yet\nAccept incoming Hi requests'} />}
       refreshControl={refreshControl}
       showsVerticalScrollIndicator={false}
@@ -563,11 +586,12 @@ function ClubsTab({ myClubs, discoverClubs, clubPlace, loadingClubs, refreshingP
   onRetryLocation: () => void;
 }) {
   const { colors } = useTheme();
+  const navPadding = useNavContentPadding();
   const styles = makeStyles(colors);
   return (
     <ScrollView
       style={{ flex: 1 }}
-      contentContainerStyle={styles.clubsScroll}
+      contentContainerStyle={[styles.clubsScroll, { paddingBottom: navPadding }]}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl refreshing={loadingClubs} onRefresh={onRefreshClubs} tintColor={colors.teal} colors={[colors.teal]} />
@@ -899,6 +923,7 @@ export default function ChatScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
   const [markingRead, setMarkingRead] = useState(false);
+  const [clearingAlerts, setClearingAlerts] = useState(false);
   const [actioning, setActioning] = useState<Record<string, 'accept' | 'decline'>>({});
   // Live stories from friends, keyed by author. Not derived from anything on
   // the map: a friend who has paused location sharing is off the map and still
@@ -1039,6 +1064,29 @@ export default function ChatScreen() {
     setMarkingRead(false);
   }
 
+  function confirmClearAll() {
+    Alert.alert(
+      'Clear all alerts?',
+      "This removes all activity from your alerts. Pending requests aren't affected.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear all', style: 'destructive', onPress: clearAll },
+      ],
+    );
+  }
+
+  async function clearAll() {
+    setClearingAlerts(true);
+    // Optimistic: the feed empties now, the server catches up.
+    setAlerts((prev) => ({ ...prev, notifications: [] }));
+    try {
+      await clearAllAlerts();
+    } catch {}
+    // Refresh either way — a failed clear still wants the true state back.
+    await fetchAll();
+    setClearingAlerts(false);
+  }
+
   /** Follow an alert to whatever it is about. A reply lives in the chat it was
    *  sent to; a reaction has no thread, so it goes to who reacted. */
   function openActivity(n: Notification) {
@@ -1150,13 +1198,16 @@ export default function ChatScreen() {
           actioning={actioning}
           unreadCount={unreadCount}
           hasUnreadActivity={hasUnreadActivity}
+          hasActivity={activity.length > 0}
           markingRead={markingRead}
+          clearingAlerts={clearingAlerts}
           refreshControl={refreshControl}
           scrollProps={scrollProps}
           onRequest={handleRequest}
           onOpenActivity={openActivity}
           onOpenProfile={(userId) => router.push({ pathname: '/profile/[id]', params: { id: userId } } as any)}
           onMarkAllRead={markAllRead}
+          onClearAll={confirmClearAll}
         />
       ) : activeTab === 'chats' ? (
         <ChatsList
@@ -1192,7 +1243,7 @@ export default function ChatScreen() {
         />
       )}
 
-      <Speedometer />
+      <AuraNav />
     </View>
   );
 }
@@ -1252,11 +1303,13 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // List
-  list: { padding: 16, paddingBottom: 230, gap: 10 },
+  // paddingBottom comes from useNavContentPadding at each use site — it
+  // depends on which bottom nav is switched on.
+  list: { padding: 16, gap: 10 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   // Alerts list — rows carry their own dividers, so no gap between them
-  alertsList: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 230 },
+  alertsList: { paddingHorizontal: 20, paddingTop: 4 },
   alertsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1273,6 +1326,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     marginTop: 18,
     marginBottom: 6,
   },
+  alertsHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   unreadPill: {
     backgroundColor: colors.surface2,
     borderRadius: 999,
@@ -1292,6 +1346,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: colors.teal,
+  },
+  clearAllBtn: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.red,
   },
 
   // Card internals
@@ -1369,7 +1429,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // Clubs tab
-  clubsScroll: { padding: 16, paddingBottom: 230 },
+  clubsScroll: { padding: 16 },
 
   createClubBtn: {
     flexDirection: 'row',

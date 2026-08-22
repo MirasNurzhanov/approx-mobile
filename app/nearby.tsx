@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -11,13 +10,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import * as Location from 'expo-location';
 
 import { fetchNearbyUsers, isLocationNotAvailable } from '@/services/discovery';
 import { Avatar } from '@/components/ui/Avatar';
 import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
-import { IconBack } from '@/components/ui/icons';
 import {
   RelationshipBadge,
   type Relationship,
@@ -137,7 +137,8 @@ function summarise(user: NearbyUser): string {
 export default function NearbyListScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
   const [users, setUsers] = useState<NearbyUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -212,27 +213,16 @@ export default function NearbyListScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={({ pressed }) => pressed && styles.pressed}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title} accessibilityRole="header">People nearby</Text>
-          <Text style={styles.subtitle}>
-            {awaitingFix
-              ? 'Getting your location…'
-              : users === null
-                ? 'Loading…'
-                : `${users.length} within range`}
-          </Text>
-        </View>
-      </View>
+      <ScreenHeader
+        title="People nearby"
+        subtitle={
+          awaitingFix
+            ? 'Getting your location…'
+            : users === null
+              ? 'Loading…'
+              : `${users.length} within range`
+        }
+      />
 
       {ordered === null ? (
         <View

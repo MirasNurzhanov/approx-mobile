@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,11 +12,13 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import * as Notifications from 'expo-notifications';
 
 import { Card } from '@/components/ui/Card';
 import {
-  IconBack,
   IconBell,
   IconCalendar,
   IconHeart,
@@ -144,7 +146,8 @@ function ToggleRow({
 export default function NotificationSettingsScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { top, bottom } = useSafeAreaInsets();
+  const { bottom } = useSafeAreaInsets();
+  const top = useScreenTopInset();
   const prefs = useNotificationPrefs();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -212,22 +215,11 @@ export default function NotificationSettingsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Pressable
-          style={({ pressed }) => pressed && styles.pressed}
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          hitSlop={12}
-        >
-          <IconBack size={22} color={colors.t1} />
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title}>Notifications</Text>
-          <Text style={styles.subtitle}>Choose what is worth interrupting you</Text>
-        </View>
-        {saving && <ActivityIndicator color={colors.teal} size="small" />}
-      </View>
+      <ScreenHeader
+        title="Notifications"
+        subtitle="Choose what is worth interrupting you"
+        accessory={saving ? <ActivityIndicator color={colors.teal} size="small" /> : null}
+      />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}

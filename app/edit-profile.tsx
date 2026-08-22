@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
@@ -421,27 +423,37 @@ export default function EditProfileScreen() {
     <View style={styles.root}>
 
       {/* ── Header ── */}
-      <View style={[styles.header, { paddingTop: top + 6 }]}>
-        <Pressable
-          onPress={() => router.back()}
-          hitSlop={12}
-          style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.2 }]}
-        >
-          <Ionicons name="chevron-back" size={26} color={colors.teal} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Edit Profile</Text>
-        <Pressable
-          onPress={save}
-          disabled={saving || !fields.username.trim()}
-          hitSlop={12}
-          style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.2 }]}
-        >
-          {saving
-            ? <ActivityIndicator color={colors.teal} size="small" />
-            : <Text style={[styles.saveText, !fields.username.trim() && { opacity: 0.4 }]}>Save</Text>
-          }
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Edit Profile"
+        action={{
+          label: 'Save',
+          onPress: save,
+          disabled: saving || !fields.username.trim(),
+          prominent: true,
+        }}
+      >
+        <View style={[styles.header, { paddingTop: top + 6 }]}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.2 }]}
+          >
+            <Ionicons name="chevron-back" size={26} color={colors.teal} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Edit Profile</Text>
+          <Pressable
+            onPress={save}
+            disabled={saving || !fields.username.trim()}
+            hitSlop={12}
+            style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.2 }]}
+          >
+            {saving
+              ? <ActivityIndicator color={colors.teal} size="small" />
+              : <Text style={[styles.saveText, !fields.username.trim() && { opacity: 0.4 }]}>Save</Text>
+            }
+          </Pressable>
+        </View>
+      </ScreenHeader>
 
       {loading ? (
         <View style={styles.center}>

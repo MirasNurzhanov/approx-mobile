@@ -198,6 +198,14 @@ export async function countUnreadAlerts(): Promise<number> {
   return deriveAlerts(await loadAlerts()).unreadCount;
 }
 
+/** Deletes every notification (story activity, club activity, …) server-side.
+ *  Deliberately does not touch `requests` — a Hi or friend request still
+ *  needs an accept/decline, so "clear" cannot make it disappear the way it
+ *  can a read notification. */
+export async function clearAllAlerts(): Promise<void> {
+  await api.delete('/api/notifications/clear-all/');
+}
+
 // ─── Unread store ─────────────────────────────────────────────────────────────
 // The count has two subscribers that are on screen at the same time — the nav
 // arc's Chat badge and the Alerts tab in Chat. One shared poll rather than one

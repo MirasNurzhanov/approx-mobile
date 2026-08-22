@@ -1,62 +1,108 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { memo } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { fonts, MAX_SCALE_FIXED } from '@/constants/theme';
+import {
+  SwiftCommentIcon,
+  SwiftLikeIcon,
+  SwiftMoreIcon,
+  SwiftMuteIcon,
+  SwiftRepostIcon,
+  SwiftSoundIcon,
+  type SwiftIconComponent,
+} from '@/components/swifts/icons';
+import {
+  SwiftLocationButton, type RevealState,
+} from '@/components/swifts/SwiftLocationButton';
+import { fonts, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { formatCount } from '@/services/swifts';
 
-type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+/**
+ * The action rail.
+ *
+ * Every glyph here is Aura's own — see `components/swifts/icons.tsx`. No icon
+ * pack: the rail sits over arbitrary user video, and these need real two-state
+ * designs (a *filled* like, a *revealed* location) that a single-weight pack
+ * cannot provide without tinting the same outline and hoping.
+ *
+ * ## Touch targets
+ *
+ * The glyphs are 28pt, which is under the 44pt minimum on its own. Each button
+ * carries `hitSlop` that takes the tappable area past it — the visual density
+ * of a video rail and the size of a finger are different problems, and hitSlop
+ * is how they are both solved at once.
+ *
+ * ## Rerenders
+ *
+ * `memo` with the default shallow comparison. The feed re-renders on every
+ * scroll tick and on every optimistic count change; without this, five icons
+ * and their SVG trees are rebuilt for cards nobody is looking at. Every prop
+ * here is a primitive or a stable callback from the feed, so the shallow
+ * compare is exact rather than approximate.
+ */
 
 export interface SwiftActionsProps {
+  locationAvailable: boolean;
+  revealState: RevealState;
+  onRevealLocation: () => void;
+
   isLiked: boolean;
   likeCount: number;
   commentCount: number;
-  shareCount: number;
+  isReposted: boolean;
+  repostCount: number;
+  /** The creator turned reposts off; the control is hidden rather than inert. */
+  allowReposts: boolean;
+  allowComments: boolean;
+
   muted: boolean;
   onLike: () => void;
   onComment: () => void;
-  onShare: () => void;
+  onRepost: () => void;
   onMore: () => void;
   onToggleMute: () => void;
-  /** Distance from the bottom of the screen; the caller works this out from the
-   *  nav arc so the rail never sits under it. */
+  /** Distance from the bottom, worked out by the caller from the nav arc. */
   bottom: number;
 }
 
-/** 1284 → "1.2K". Counts sit under a 24pt icon and have no room to grow. */
-function fmtCount(n: number): string {
-  if (n < 1_000) return String(n);
-  if (n < 1_000_000) {
-    const k = n / 1_000;
-    return `${k < 10 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k)}K`;
-  }
-  const m = n / 1_000_000;
-  return `${m < 10 ? m.toFixed(1).replace(/\.0$/, '') : Math.round(m)}M`;
+interface ActionProps {
+  Glyph: SwiftIconComponent;
+  on?: boolean;
+  onColor?: string;
+  label?: string;
+  busy?: boolean;
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  onPress: () => void;
 }
 
+const GLYPH = 28;
+/** Takes each 28pt glyph past the 44pt touch minimum without spacing the rail
+ *  out to the point where it covers the video. */
+const HIT_SLOP = { top: 10, bottom: 10, left: 12, right: 12 };
+
 function ActionButton({
-  icon,
-  label,
-  tint,
-  accessibilityLabel,
-  onPress,
-}: {
-  icon: IoniconName;
-  label?: string;
-  tint?: string;
-  accessibilityLabel: string;
-  onPress: () => void;
-}) {
+  Glyph, on = false, onColor, label, busy = false,
+  accessibilityLabel, accessibilityHint, onPress,
+}: ActionProps) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+      style={({ pressed }) => [styles.action, pressed && styles.pressed]}
       onPress={onPress}
-      hitSlop={8}
+      disabled={busy}
+      hitSlop={HIT_SLOP}
       accessibilityRole="button"
+      accessibilityState={{ selected: on, busy }}
       accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
     >
-      <Ionicons name={icon} size={28} color={tint ?? '#FFFFFF'} />
+      <View style={styles.glyphSlot}>
+        {busy
+          ? <ActivityIndicator size="small" color="#FFFFFF" />
+          : <Glyph size={GLYPH} color="#FFFFFF" on={on} onColor={onColor} />}
+      </View>
       {label ? (
-        <Text style={styles.actionLabel} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
+        <Text style={styles.label} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
           {label}
         </Text>
       ) : null}
@@ -64,52 +110,80 @@ function ActionButton({
   );
 }
 
-export function SwiftActions({
-  isLiked,
-  likeCount,
-  commentCount,
-  shareCount,
-  muted,
-  onLike,
-  onComment,
-  onShare,
-  onMore,
-  onToggleMute,
-  bottom,
+function SwiftActionsImpl({
+  locationAvailable, revealState, onRevealLocation,
+  isLiked, likeCount, commentCount, isReposted, repostCount,
+  allowReposts, allowComments,
+  muted, onLike, onComment, onRepost, onMore, onToggleMute, bottom,
 }: SwiftActionsProps) {
   const { colors } = useTheme();
+
   return (
     <View style={[styles.rail, { bottom }]}>
       <ActionButton
-        icon={muted ? 'volume-mute' : 'volume-high'}
+        Glyph={muted ? SwiftMuteIcon : SwiftSoundIcon}
         accessibilityLabel={muted ? 'Unmute' : 'Mute'}
         onPress={onToggleMute}
       />
+
       <ActionButton
-        icon={isLiked ? 'heart' : 'heart-outline'}
-        label={fmtCount(likeCount)}
-        tint={isLiked ? colors.red : undefined}
+        Glyph={SwiftLikeIcon}
+        on={isLiked}
+        onColor={colors.red}
+        label={formatCount(likeCount)}
         accessibilityLabel={
-          isLiked ? `Unlike, ${likeCount} likes` : `Like, ${likeCount} likes`
+          isLiked
+            ? `Unlike. ${likeCount} likes`
+            : `Like. ${likeCount} likes`
         }
         onPress={onLike}
       />
+
+      {allowComments && (
+        <ActionButton
+          Glyph={SwiftCommentIcon}
+          label={formatCount(commentCount)}
+          accessibilityLabel={`Comments. ${commentCount}`}
+          onPress={onComment}
+        />
+      )}
+
+      {allowReposts && (
+        <ActionButton
+          Glyph={SwiftRepostIcon}
+          on={isReposted}
+          onColor={colors.green}
+          label={formatCount(repostCount)}
+          accessibilityLabel={
+            isReposted
+              ? `Undo repost. ${repostCount} reposts`
+              : `Repost. ${repostCount} reposts`
+          }
+          onPress={onRepost}
+        />
+      )}
+
+      {/* Only when this viewer could actually reveal it. A Swift whose
+          location they could never see draws nothing, so the control's
+          presence is not itself a signal about content out of reach. */}
+      {locationAvailable && (
+        <SwiftLocationButton
+          state={revealState}
+          onPress={onRevealLocation}
+          activeTint={colors.teal}
+        />
+      )}
+
       <ActionButton
-        icon="chatbubble-outline"
-        label={fmtCount(commentCount)}
-        accessibilityLabel={`Comments, ${commentCount}`}
-        onPress={onComment}
+        Glyph={SwiftMoreIcon}
+        accessibilityLabel="More options"
+        onPress={onMore}
       />
-      <ActionButton
-        icon="arrow-redo-outline"
-        label={fmtCount(shareCount)}
-        accessibilityLabel={`Share, ${shareCount} shares`}
-        onPress={onShare}
-      />
-      <ActionButton icon="ellipsis-horizontal" accessibilityLabel="More options" onPress={onMore} />
     </View>
   );
 }
+
+export const SwiftActions = memo(SwiftActionsImpl);
 
 const styles = StyleSheet.create({
   rail: {
@@ -119,10 +193,16 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   action: { alignItems: 'center', gap: 3 },
-  actionPressed: { opacity: 0.6 },
-  actionLabel: {
+  pressed: { opacity: 0.6 },
+  glyphSlot: {
+    width: GLYPH,
+    height: GLYPH,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  label: {
     fontFamily: fonts.body,
-    fontSize: 12,
+    fontSize: typography.caption,
     fontWeight: '600',
     color: '#FFFFFF',
     textShadowColor: 'rgba(0,0,0,0.6)',

@@ -126,7 +126,7 @@ export interface PublishedSwift {
  * ~500m grid or drop them entirely — a paused creator's Swift carries no
  * location whatever this sends, which is the point.
  */
-function buildForm(draft: SwiftDraft): FormData {
+export function buildForm(draft: SwiftDraft): FormData {
   const form = new FormData();
   form.append('video', {
     uri: draft.uri as string,
@@ -153,8 +153,13 @@ function buildForm(draft: SwiftDraft): FormData {
   form.append('allow_reposts', String(draft.allowReposts));
 
   if (draft.shareLocation && draft.latitude !== null && draft.longitude !== null) {
-    form.append('latitude', String(draft.latitude));
-    form.append('longitude', String(draft.longitude));
+    // `swifts.models.Swift.latitude/longitude` are DecimalField(max_digits=9,
+    // decimal_places=6). A raw GPS fix has full double precision — sending it
+    // unrounded overflows max_digits and the publish is rejected with "Ensure
+    // that there are no more than 9 digits in total." services/location.ts
+    // rounds to the same 6 places before a position ever leaves the phone.
+    form.append('latitude', draft.latitude.toFixed(6));
+    form.append('longitude', draft.longitude.toFixed(6));
     form.append('place_name', draft.placeName);
     form.append('location_shared', 'true');
   }

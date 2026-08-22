@@ -30,6 +30,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AuraNav } from '@/components/AuraNav';
+import { STORY_LIKE } from '@/components/storyReactions';
 import { StoryViewer } from '@/components/StoryViewer';
 import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay';
 import { Avatar } from '@/components/ui/Avatar';
@@ -41,7 +42,6 @@ import {
     IconEyeOff,
     IconHi,
     IconImage,
-    IconLike,
     IconList,
     IconLocate,
     IconLocateFixed,
@@ -991,7 +991,11 @@ function StoryBubble({ story, count, onAvatarLoad }: { story: Story; count: numb
       <View style={styles.storyCardTail} />
       {likeCount > 0 && (
         <View style={styles.storyReactionPill}>
-          <IconLike size={11} color={colors.t2} />
+          {/* Through `STORY_LIKE` rather than naming an icon here, so the
+              badge and the viewer's own button cannot end up showing two
+              different symbols for the same act. Solid: at 11px an outline
+              heart closes up into a blob. */}
+          <STORY_LIKE.Icon size={11} color={colors.t2} filled />
           <Text style={styles.storyReactionText}>{likeCount}</Text>
         </View>
       )}
@@ -1219,9 +1223,14 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
     if (!result.canceled && result.assets[0]) setPhotoUri(result.assets[0].uri);
   }
 
+  // A photo on its own is a story; so is a line of text. Only nothing at all
+  // is not one. The caption used to be required, which made the commonest
+  // story of all — a picture, posted without commentary — impossible.
+  const canPost = !!photoUri || text.trim().length > 0;
+
   async function handlePost() {
-    if (!text.trim()) {
-      Alert.alert('Write something', 'Your story needs some text.');
+    if (!canPost) {
+      Alert.alert('Nothing to post', 'Add a photo or write something first.');
       return;
     }
     setPosting(true);
@@ -1309,7 +1318,7 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
           <View style={styles.captionWrap}>
             <TextInput
               style={styles.storyInput}
-              placeholder="What's happening here?"
+              placeholder={photoUri ? 'Add a caption (optional)' : "What's happening here?"}
               // Was a hardcoded '#444', which is nearly body-text dark on the
               // light theme's surface — the placeholder read as typed text.
               placeholderTextColor={colors.t3}
@@ -1339,13 +1348,13 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
           <Pressable
             style={({ pressed }) => [
               styles.postBtn,
-              (!text.trim() || posting) && styles.postBtnDisabled,
+              (!canPost || posting) && styles.postBtnDisabled,
               pressed && { opacity: 0.85 },
             ]}
             onPress={handlePost}
-            disabled={!text.trim() || posting}
+            disabled={!canPost || posting}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !text.trim() || posting }}
+            accessibilityState={{ disabled: !canPost || posting }}
           >
             {posting ? (
               <ActivityIndicator color={colors.bg} size="small" />

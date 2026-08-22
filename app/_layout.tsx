@@ -159,6 +159,7 @@ function AppShell() {
         <Stack.Screen name="messages/[id]"   options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="notifications"   options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="swifts/compose"  options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="swifts/[id]"     options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="zone"            options={{ headerShown: false, animation: 'slide_from_right' }} />
         {/* Both draw their own header; without an entry here the navigator adds
             a second, native one above it. */}

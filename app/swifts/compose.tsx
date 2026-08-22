@@ -183,7 +183,7 @@ export default function SwiftComposerScreen() {
     abortRef.current = controller;
 
     try {
-      await publishSwift(draft, {
+      const published = await publishSwift(draft, {
         signal: controller.signal,
         onProgress: setProgress,
       });
@@ -193,7 +193,11 @@ export default function SwiftComposerScreen() {
       discardTempFile(tempUriRef.current);
       tempUriRef.current = null;
 
-      router.replace('/(tabs)/swifts');
+      // Not the main feed: the ranked feed excludes the viewer's own Swifts
+      // (recs/candidates.py — same rule every For You feed follows), so
+      // landing there right after publishing would show everything *except*
+      // what was just posted. The permalink is the one place that can.
+      router.replace({ pathname: '/swifts/[id]', params: { id: published.id } });
     } catch (e: any) {
       if (e instanceof UploadCancelled) {
         setProgress(null);

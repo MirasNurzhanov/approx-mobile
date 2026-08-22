@@ -14,7 +14,10 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -62,11 +65,18 @@ export default function SocialBirthdayScreen() {
   }
 
   return (
-    <View style={s.root}>
+    <KeyboardAvoidingView
+      style={s.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <View style={s.blobTL} />
       <View style={s.blobBR} />
 
-      <View style={[s.content, { paddingTop: top + 32 }]}>
+      <ScrollView
+        contentContainerStyle={[s.content, { paddingTop: top + 32 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={s.header}>
           <Text style={s.title}>One last thing</Text>
           <Text style={s.subtitle}>
@@ -94,8 +104,8 @@ export default function SocialBirthdayScreen() {
         <Pressable onPress={confirmLogout} hitSlop={8} style={s.outRow}>
           <Text style={s.outText}>Not you? Sign out</Text>
         </Pressable>
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -121,7 +131,7 @@ const s = StyleSheet.create({
     backgroundColor: '#E8E4F5',
   },
 
-  content: { flex: 1, paddingHorizontal: 24, gap: 24 },
+  content: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 32, gap: 24 },
   header: { gap: 10 },
   title: {
     fontFamily: fonts.display,

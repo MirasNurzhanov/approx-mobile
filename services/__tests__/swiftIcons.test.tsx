@@ -1,4 +1,4 @@
-// The action rail's icons are Aura's own, and stay that way.
+// The action rail's icons are Approx's own, and stay that way.
 //
 // The brief for the viewing experience was explicit: like, comment, repost and
 // reveal-location are drawn for this app, in vector paths, and not pulled from

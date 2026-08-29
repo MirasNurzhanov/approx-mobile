@@ -42,7 +42,7 @@ const PRECISION: { key: SharingPrecision; Icon: IconComponent; label: string; su
 
 /** What each state means, written as the state the reader is in. */
 const EXPLAINER: Record<LocationSharing, string> = {
-  live: 'Nearby people can see where you actually are, and it keeps updating as you move — including while Aura is in the background.',
+  live: 'Nearby people can see where you actually are, and it keeps updating as you move — including while Approx is in the background.',
   approximate:
     'Nearby people see a rough area instead of a point. Your position is rounded to about 500m before it leaves your phone, and your exact location is never stored.',
   paused:
@@ -185,8 +185,8 @@ export function LocationVisibilityCard({
           it is the only thing on the screen that does. */}
       <Text style={styles.footnote}>
         {visible
-          ? 'Checking in lasts for this visit. Closing Aura checks you out, and you choose again next time.'
-          : 'Aura never checks you in on its own — not on launch, not when you grant location access.'}
+          ? 'Checking in lasts for this visit. Closing Approx checks you out, and you choose again next time.'
+          : 'Approx never checks you in on its own — not on launch, not when you grant location access.'}
       </Text>
     </View>
   );

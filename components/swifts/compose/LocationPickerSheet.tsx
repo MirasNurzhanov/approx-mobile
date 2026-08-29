@@ -163,7 +163,7 @@ function PickerBody({
       if (!granted) {
         setError(
           prompt
-            ? 'Aura needs location access to find where you are. You can still pan the map.'
+            ? 'Approx needs location access to find where you are. You can still pan the map.'
             : null,
         );
         return;

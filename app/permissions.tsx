@@ -163,14 +163,14 @@ export default function PermissionsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <ScreenHeader title="Permissions" subtitle="What Aura can access, and why" />
+      <ScreenHeader title="Permissions" subtitle="What Approx can access, and why" />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
         {/* The distinction this screen is most likely to be misread on, said
-            first and unconditionally. Letting Aura read your location is not
+            first and unconditionally. Letting Approx read your location is not
             the same as other people being able to see it — that takes choosing
             Live or Approximate in Privacy & safety. It is not implied by
             anything on this page, and none of these switches can turn it on. */}
@@ -180,12 +180,12 @@ export default function PermissionsScreen() {
           </Text>
           <Text style={styles.noticeBody}>
             {paused
-              ? 'Location permission lets Aura show you who is nearby. You are only shown to other people once you choose Live or Approximate in Privacy & safety — never automatically, and never just because this permission is granted.'
-              : 'People nearby can see you, including with Aura in the background, until you choose Paused in Privacy & safety or close Aura.'}
+              ? 'Location permission lets Approx show you who is nearby. You are only shown to other people once you choose Live or Approximate in Privacy & safety — never automatically, and never just because this permission is granted.'
+              : 'People nearby can see you, including with Approx in the background, until you choose Paused in Privacy & safety or close Approx.'}
           </Text>
         </Card>
 
-        {/* An OS permission being granted is not the same as Aura using it.
+        {/* An OS permission being granted is not the same as Approx using it.
             Someone who paused sharing should see that here, not conclude the
             permission is broken. */}
         {(paused || approximate) && (
@@ -195,7 +195,7 @@ export default function PermissionsScreen() {
             </Text>
             <Text style={styles.noticeBody}>
               {paused
-                ? 'Aura has location permission but is not using it — you are off the map until you resume.'
+                ? 'Approx has location permission but is not using it — you are off the map until you resume.'
                 : 'Your position is rounded to about 500m before it leaves your phone.'}
             </Text>
             <Pressable
@@ -225,7 +225,7 @@ export default function PermissionsScreen() {
         </Card>
 
         <Text style={styles.footnote}>
-          Aura never asks for the photo library. Picking an existing photo uses the system picker,
+          Approx never asks for the photo library. Picking an existing photo uses the system picker,
           which hands over only the image you choose.
         </Text>
 
@@ -233,7 +233,7 @@ export default function PermissionsScreen() {
           onPress={openAppSettings}
           style={({ pressed }) => [styles.settingsBtn, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Open Aura in system settings"
+          accessibilityLabel="Open Approx in system settings"
         >
           <Text style={styles.settingsBtnText}>Open system settings</Text>
         </Pressable>

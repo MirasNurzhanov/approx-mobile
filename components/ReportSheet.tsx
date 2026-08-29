@@ -177,7 +177,7 @@ export function ReportSheet({
               <Text style={styles.doneTitle}>Report sent</Text>
               <Text style={styles.doneBody}>
                 Thank you. Our moderation team reviews every report, and we act
-                on anything that breaks the Community Guidelines — Aura has zero
+                on anything that breaks the Community Guidelines — Approx has zero
                 tolerance for objectionable content and abusive users.
               </Text>
               <Text style={styles.doneBody}>

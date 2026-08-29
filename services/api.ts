@@ -7,9 +7,9 @@ export const BASE_URL = 'https://project-x-production-3261.up.railway.app';
 
 /** Kept here rather than imported from ./presence: that module imports this
  * one, and the interceptor below needs the name at module scope. */
-const PRESENCE_HEADER = 'X-Aura-Presence';
+const PRESENCE_HEADER = 'X-Approx-Presence';
 
-export const CLIENT_BUILD_HEADER = 'X-Aura-Build';
+export const CLIENT_BUILD_HEADER = 'X-Approx-Build';
 
 /**
  * Which build of the app this is, read from the binary rather than written

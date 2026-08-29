@@ -116,7 +116,7 @@ export default function BlockedUsersScreen() {
               <Text style={styles.emptyTitle}>No blocked users</Text>
               <Text style={styles.emptyMessage}>
                 Block someone from their profile or from a chat — they’ll stop seeing you anywhere in
-                Aura, and you’ll stop seeing them.
+                Approx, and you’ll stop seeing them.
               </Text>
             </View>
           }

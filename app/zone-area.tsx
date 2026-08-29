@@ -535,7 +535,7 @@ function PlaceCard({ region, follows, followStale, locating, saving, lookupError
           not standing is the setting working as asked, not a problem. */}
       {region && follows && followStale ? (
         <Text style={styles.followStale}>
-          Aura could not find an area where you are now, so your zone is still
+          Approx could not find an area where you are now, so your zone is still
           on {region.name}. It will move on its own as soon as it finds one.
         </Text>
       ) : null}
@@ -598,7 +598,7 @@ function PlaceCard({ region, follows, followStale, locating, saving, lookupError
       <Text style={styles.hint}>
         Your zone follows the real border of the place, however big it is. It can
         only be somewhere you actually are — whether you trace it or find it by
-        name, Aura checks that you are inside it before it takes effect.
+        name, Approx checks that you are inside it before it takes effect.
       </Text>
     </Card>
   );

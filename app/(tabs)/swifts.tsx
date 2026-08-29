@@ -1,6 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 
-import { AuraNav } from '@/components/AuraNav';
+import { ApproxNav } from '@/components/ApproxNav';
 import { SwiftsFeed } from '@/components/swifts/SwiftsFeed';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -24,7 +24,7 @@ export default function SwiftsScreen() {
         <SwiftsFeed />
       </View>
 
-      <AuraNav />
+      <ApproxNav />
     </View>
   );
 }

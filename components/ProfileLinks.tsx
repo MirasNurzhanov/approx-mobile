@@ -19,7 +19,7 @@ function confirmAndOpen(link: ProfileLink) {
   const host = hostOf(link.url);
   Alert.alert(
     `Open ${host}?`,
-    `This will leave Aura and open ${link.url} in your browser.`,
+    `This will leave Approx and open ${link.url} in your browser.`,
     [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -75,7 +75,7 @@ export function ProfileLinkRow({ link }: { link: ProfileLink }) {
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
       accessibilityRole="link"
       accessibilityLabel={`${platformName(link.platform)}, ${link.label}`}
-      accessibilityHint={`Opens ${host} outside Aura`}
+      accessibilityHint={`Opens ${host} outside Approx`}
     >
       {Icon({ size: 18, color: colors.teal })}
       <Text style={styles.label} numberOfLines={1}>{link.label}</Text>

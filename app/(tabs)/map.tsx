@@ -31,7 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GestureDetector } from 'react-native-gesture-handler';
 
-import { AuraNav } from '@/components/AuraNav';
+import { ApproxNav } from '@/components/ApproxNav';
 import { STORY_LIKE } from '@/components/storyReactions';
 import { StoryViewer } from '@/components/StoryViewer';
 import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay';
@@ -1061,7 +1061,7 @@ const LOCATE_HINT: Record<LocateState, string | undefined> = {
   off:         'Moves the map to where you are and keeps it there as you move',
   following:   undefined,
   locating:    undefined,
-  unavailable: 'Aura does not have permission to use your location',
+  unavailable: 'Approx does not have permission to use your location',
 };
 
 function LocateButton({
@@ -1133,7 +1133,7 @@ function TopBar({
   const { top } = useSafeAreaInsets();
   return (
     <View style={[styles.topBar, { paddingTop: top + 6 }]}>
-      <Text style={styles.topLogoText} accessibilityRole="header">AURA</Text>
+      <Text style={styles.topLogoText} accessibilityRole="header">APPROX</Text>
 
       {/* The count is the only part of the map a screen reader can reach, so
           it carries the plural and the unit rather than a bare number. */}
@@ -2099,7 +2099,7 @@ export default function MapScreen() {
 
   /** Set once the viewer is standing where the basemap disagrees with GPS.
    *
-   * Google serves GCJ-02 tiles inside mainland China while everything Aura
+   * Google serves GCJ-02 tiles inside mainland China while everything Approx
    * measures is WGS-84, so the two are a few hundred metres apart. Saying so
    * beats drawing a zone that silently sits in the wrong street. */
   const chinaOffsetNotice = useMemo(
@@ -2592,7 +2592,7 @@ export default function MapScreen() {
       // under 5.1.1(iv) as consent the app had gone looking for.
       //
       // Background location is still fully supported. It is now asked for from
-      // Privacy & safety, when somebody turns on "Keep sharing while Aura is
+      // Privacy & safety, when somebody turns on "Keep sharing while Approx is
       // closed", which is a feature that genuinely cannot work without it. See
       // services/permissions.requestBackground.
       //
@@ -2845,7 +2845,7 @@ export default function MapScreen() {
     if (!target) {
       Alert.alert(
         'Can’t find you yet',
-        'Aura couldn’t get a location fix. Move somewhere with a clearer view of the sky and try again.',
+        'Approx couldn’t get a location fix. Move somewhere with a clearer view of the sky and try again.',
       );
       return;
     }
@@ -2904,8 +2904,8 @@ export default function MapScreen() {
           <Text style={styles.emptyTitle}>The map needs location access</Text>
           <Text style={styles.errorText}>
             {permState === 'blocked'
-              ? 'Location is turned off for Aura in system settings. The map can’t show anyone nearby until it’s back on.'
-              : 'Aura shows people with shared interests near you right now. Without location there’s nothing to show.'}
+              ? 'Location is turned off for Approx in system settings. The map can’t show anyone nearby until it’s back on.'
+              : 'Approx shows people with shared interests near you right now. Without location there’s nothing to show.'}
           </Text>
           <Pressable
             onPress={async () => {
@@ -3392,7 +3392,7 @@ export default function MapScreen() {
 
       {primer}
 
-      <AuraNav />
+      <ApproxNav />
 
       {/* Locate / follow control.
           Rendered after the nav on purpose. The wheel's root is a full-width

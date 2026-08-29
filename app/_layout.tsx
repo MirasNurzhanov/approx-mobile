@@ -25,7 +25,7 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 
-import { AuraLoader } from '@/components/AuraLoader';
+import { ApproxLoader } from '@/components/ApproxLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LocationLaunchPrompt } from '@/components/LocationLaunchPrompt';
 import { TermsGate } from '@/components/TermsGate';
@@ -135,7 +135,7 @@ function AppShell() {
   }, [isAuthenticated]);
 
   if (isLoading) {
-    return <AuraLoader />;
+    return <ApproxLoader />;
   }
 
   return (

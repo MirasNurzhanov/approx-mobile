@@ -168,7 +168,7 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     distanceInterval: 50,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
-      notificationTitle: 'Aura',
+      notificationTitle: 'Approx',
       notificationBody: 'You are sharing your location — keeping your place on the map up to date',
       notificationColor: '#00b4a6',
     },

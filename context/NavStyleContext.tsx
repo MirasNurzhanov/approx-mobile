@@ -4,7 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 /**
  * Which bottom nav the app draws.
  *
- * - `bar`   the standard tab bar (components/nav/AuraTabBar)
+ * - `bar`   the standard tab bar (components/nav/ApproxTabBar)
  * - `wheel` the speedometer arc (components/Speedometer)
  *
  * The bar is the default on every device and every OS version. The wheel is the

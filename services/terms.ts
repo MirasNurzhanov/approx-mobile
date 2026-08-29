@@ -27,7 +27,7 @@ export interface TermsDocuments {
 /** Used only until the real answer arrives, and when the fetch fails outright.
  *
  *  Built from `BASE_URL` rather than hard-coded, because the documents are
- *  served by Aura's own backend at /legal/ — there is no separate marketing
+ *  served by Approx's own backend at /legal/ — there is no separate marketing
  *  domain, and inventing one would mean shipping links that resolve to nothing.
  *  If a domain is put in front of the API later, the server's own
  *  `LEGAL_BASE_URL` answers with it and this is never reached.

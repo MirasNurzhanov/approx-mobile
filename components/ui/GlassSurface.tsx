@@ -10,7 +10,7 @@ import { useTheme } from '@/context/ThemeContext';
 /**
  * A piece of floating chrome that lets the screen behind it show through.
  *
- * The one place the app's glass recipe lives. `components/nav/AuraTabBar` had
+ * The one place the app's glass recipe lives. `components/nav/ApproxTabBar` had
  * it inline first — a `BlurView` under a tinted wash, iOS only — and this is
  * that recipe extracted so the map's controls and anything after them get the
  * same treatment rather than each re-deriving it and landing somewhere
@@ -24,7 +24,7 @@ import { useTheme } from '@/context/ThemeContext';
  * or a real blur, because it looks like a rendering fault rather than a
  * material. So `GLASS` gates it, and Android gets an opaque surface: the same
  * component, the same geometry, a different fill. This is the same call
- * `AuraTabBar` already makes, and it is deliberately not a TODO — it is the
+ * `ApproxTabBar` already makes, and it is deliberately not a TODO — it is the
  * correct output for a platform whose blur does not sample the background.
  *
  * Older iOS is excluded for a different reason: capability is not the question

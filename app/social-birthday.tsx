@@ -1,7 +1,7 @@
 /**
  * The one thing Google and Apple cannot tell us.
  *
- * Neither provider hands over a date of birth, and Aura is 13+ — so an account
+ * Neither provider hands over a date of birth, and Approx is 13+ — so an account
  * created by tapping a provider button arrives without the one fact the age
  * gate is made of. This screen is where it is asked for, and it is the only
  * step between a social sign-up and the rest of onboarding.
@@ -80,7 +80,7 @@ export default function SocialBirthdayScreen() {
         <View style={s.header}>
           <Text style={s.title}>One last thing</Text>
           <Text style={s.subtitle}>
-            Aura is for 13 and over, and your provider does not share your
+            Approx is for 13 and over, and your provider does not share your
             birthday — so we have to ask. Only your age group is ever shown to
             anyone else.
           </Text>

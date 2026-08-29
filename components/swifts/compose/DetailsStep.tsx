@@ -49,7 +49,7 @@ interface Props {
 }
 
 const AUDIENCES = [
-  { key: 'public' as const, label: 'Everyone', Glyph: IconGlobe, hint: 'Anyone on Aura can watch.' },
+  { key: 'public' as const, label: 'Everyone', Glyph: IconGlobe, hint: 'Anyone on Approx can watch.' },
   { key: 'friends' as const, label: 'Friends', Glyph: IconPeople, hint: 'Only people you are friends with.' },
   { key: 'private' as const, label: 'Only me', Glyph: IconLock, hint: 'Saved to your profile, shown to nobody.' },
 ];
@@ -188,7 +188,7 @@ export function DetailsStep({ draft, onChange }: Props) {
         </Text>
         <Text style={styles.footnote}>
           A Swift stays up until you delete it, so a place attached here lasts
-          too — unlike the map, which pauses when you close Aura.
+          too — unlike the map, which pauses when you close Approx.
         </Text>
       </View>
 

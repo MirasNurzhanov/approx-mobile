@@ -81,7 +81,7 @@ export default function LoginScreen() {
         >
           {/* Header */}
           <View style={s.header}>
-            <Text style={s.wordmark}>AURA</Text>
+            <Text style={s.wordmark}>APPROX</Text>
             <Text style={s.tagline}>Find your people nearby</Text>
           </View>
 

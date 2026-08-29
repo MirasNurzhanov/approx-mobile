@@ -15,7 +15,7 @@ import { fonts, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
  *
  * ## The icon
  *
- * `SwiftLocationIcon` by default — Aura's own drawing, a pin with a signal arc
+ * `SwiftLocationIcon` by default — Approx's own drawing, a pin with a signal arc
  * that resolves to a filled pin once answered. `Glyph` stays a prop so the
  * artwork can be swapped without touching the rail or the card.
  *

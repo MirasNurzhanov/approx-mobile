@@ -46,7 +46,7 @@ export function TermsAgreement({ accepted, onToggle, disabled = false }: Props) 
         style={({ pressed }) => [s.row, pressed && !disabled && s.pressed]}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: accepted, disabled }}
-        accessibilityLabel="I agree to the Aura Terms of Use, Community Guidelines and Privacy Policy"
+        accessibilityLabel="I agree to the Approx Terms of Use, Community Guidelines and Privacy Policy"
         accessibilityHint="Required before you can create an account or sign in"
       >
         <View style={[s.box, accepted && s.boxChecked, disabled && s.dimmed]}>
@@ -57,7 +57,7 @@ export function TermsAgreement({ accepted, onToggle, disabled = false }: Props) 
         </View>
 
         <Text style={[s.label, disabled && s.dimmed]}>
-          I am 13 or older and I agree to Aura&rsquo;s{' '}
+          I am 13 or older and I agree to Approx&rsquo;s{' '}
           <Text style={s.link} onPress={() => openDocument(documents.terms_url)}>
             Terms of Use
           </Text>
@@ -77,7 +77,7 @@ export function TermsAgreement({ accepted, onToggle, disabled = false }: Props) 
           not only in the linked document. A reviewer who never opens the links
           has still been shown it. */}
       <Text style={s.zeroTolerance}>
-        Aura has zero tolerance for objectionable content or abusive behaviour.
+        Approx has zero tolerance for objectionable content or abusive behaviour.
         Posts that break the guidelines are removed and the accounts behind them
         are suspended or banned.
       </Text>

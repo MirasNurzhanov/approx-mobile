@@ -1,9 +1,9 @@
-import { AuraTabBar } from '@/components/nav/AuraTabBar';
+import { ApproxTabBar } from '@/components/nav/ApproxTabBar';
 import { Speedometer } from '@/components/Speedometer';
 import { BAR_STYLE_IS_NATIVE } from '@/constants/platform';
 import { useNavStyle } from '@/context/NavStyleContext';
 
-interface AuraNavProps {
+interface ApproxNavProps {
   /** Name of a NAV_SECTIONS entry to spotlight for a tutorial. Both nav styles
    *  honour it, so a caller never has to know which one is on. */
   highlightSection?: string;
@@ -25,7 +25,7 @@ interface AuraNavProps {
  * Settings hands it a `highlightSection` during the zone tutorial, and because
  * `/market` needs it from outside the tab group entirely.
  */
-export function AuraNav({ highlightSection, standalone }: AuraNavProps = {}) {
+export function ApproxNav({ highlightSection, standalone }: ApproxNavProps = {}) {
   const { navStyle, ready } = useNavStyle();
 
   // Nothing until the stored choice is back. One frame of no nav is invisible;
@@ -48,5 +48,5 @@ export function AuraNav({ highlightSection, standalone }: AuraNavProps = {}) {
   // this one, exactly like `/market` does on iOS.
   if (BAR_STYLE_IS_NATIVE && !standalone) return null;
 
-  return <AuraTabBar highlightSection={highlightSection} standalone={standalone} />;
+  return <ApproxTabBar highlightSection={highlightSection} standalone={standalone} />;
 }

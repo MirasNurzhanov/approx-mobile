@@ -35,7 +35,7 @@ export const isIOS26OrNewer = IOS_MAJOR_VERSION >= 26;
 /**
  * Whether the bottom nav's 'bar' style (context/NavStyleContext) means the
  * real native tab bar, rather than this app's own drawn one
- * (components/nav/AuraTabBar).
+ * (components/nav/ApproxTabBar).
  *
  * True only on iOS. `react-native-screens`' Android Material 3 tab bar
  * exposes just a colour for its press ripple and a colour for its
@@ -44,7 +44,7 @@ export const isIOS26OrNewer = IOS_MAJOR_VERSION >= 26;
  * native component can give it, so Android's 'bar' style routes through the
  * same headless navigator the wheel uses instead (see
  * app/(tabs)/_layout's HeadlessTabsLayout) and draws a bar it fully
- * controls. See components/AuraNav for where this is consulted.
+ * controls. See components/ApproxNav for where this is consulted.
  *
  * A pure function for the same reason `resolveIOSMajorVersion` is one: it can
  * be tested without mocking react-native's `Platform`.

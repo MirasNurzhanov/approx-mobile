@@ -77,7 +77,7 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   camera: {
     title: 'Camera',
     primer:
-      'Aura needs the camera to post a story or send a photo in chat. Photos are only sent when you choose to share one.',
+      'Approx needs the camera to post a story or send a photo in chat. Photos are only sent when you choose to share one.',
     purpose: 'Take stories and photos in chat.',
     denied:
       'Stories and photos in chat need camera access before you can capture one.',
@@ -85,18 +85,18 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   location: {
     title: 'Location',
     primer:
-      'Aura shows people with shared interests near you right now. Without location the map has nothing to show. You control how precise it is, and can pause it any time.',
+      'Approx shows people with shared interests near you right now. Without location the map has nothing to show. You control how precise it is, and can pause it any time.',
     purpose: 'Find people nearby and place you on the map.',
     denied:
       'The map can’t show anyone nearby without location access.',
   },
   locationBackground: {
-    title: 'Keep sharing while Aura is closed',
+    title: 'Keep sharing while Approx is closed',
     primer:
-      'iOS will ask whether Aura may use your location Always. That is what keeps your place on the map current while Aura is closed and your phone is locked — only while you are sharing, and only until you turn this off, choose Paused, or close Aura.',
-    purpose: 'Keep your place on the map current while Aura is closed.',
+      'iOS will ask whether Approx may use your location Always. That is what keeps your place on the map current while Approx is closed and your phone is locked — only while you are sharing, and only until you turn this off, choose Paused, or close Approx.',
+    purpose: 'Keep your place on the map current while Approx is closed.',
     denied:
-      'Aura will only update your location while the app is open. You can change this in Settings → Aura → Location.',
+      'Approx will only update your location while the app is open. You can change this in Settings → Approx → Location.',
   },
   notifications: {
     title: 'Notifications',
@@ -229,7 +229,7 @@ export function openAppSettings(): void {
 //
 // The rule, stated once: **nothing requests background location because a
 // screen mounted.** It is requested when somebody turns on a feature that
-// cannot work without it — keeping their location current while Aura is closed
+// cannot work without it — keeping their location current while Approx is closed
 // — and at no other time. `app/(tabs)/map.tsx` used to chain it off the
 // foreground grant on mount, which is a request nobody asked for.
 //

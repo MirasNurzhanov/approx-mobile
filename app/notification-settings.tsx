@@ -232,11 +232,11 @@ export default function NotificationSettingsScreen() {
             style={styles.banner}
             onPress={() => Linking.openSettings()}
             accessibilityRole="button"
-            accessibilityLabel="Open system settings to turn on notifications for Aura"
+            accessibilityLabel="Open system settings to turn on notifications for Approx"
           >
             <IconBell size={18} color={colors.orange} />
             <Text style={styles.bannerText}>
-              Notifications are turned off for Aura on this device, so nothing below can
+              Notifications are turned off for Approx on this device, so nothing below can
               reach you. Tap to open system settings.
             </Text>
           </Pressable>

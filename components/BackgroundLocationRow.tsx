@@ -18,10 +18,10 @@ import {
   stopBackgroundLocationUpdates,
 } from '@/services/backgroundLocation';
 
-// "Keep sharing while Aura is closed" — the one control that asks for Always.
+// "Keep sharing while Approx is closed" — the one control that asks for Always.
 //
 // This exists because of the shape of the 5.1.1(iv) rejection, not in spite of
-// it. Background location is a real Aura feature and it is staying; what was
+// it. Background location is a real Approx feature and it is staying; what was
 // wrong was *when* it was requested. The map used to chain the Always request
 // off the foreground grant on mount, so opening the app asked for it. Nobody
 // had turned anything on.
@@ -34,7 +34,7 @@ import {
 // The order below is the one iOS requires and the one the guideline expects:
 //
 //   user turns the switch on
-//     -> Aura explains why, in the card the switch sits in
+//     -> Approx explains why, in the card the switch sits in
 //     -> the switch is the Continue
 //     -> iOS's own "Change to Always Allow?" dialog
 //     -> whatever the user chooses is what happens
@@ -77,14 +77,14 @@ export function BackgroundLocationRow({ sharing }: Props) {
     } else if (outcome === 'needs_foreground') {
       Alert.alert(
         'Location access first',
-        'Aura needs ordinary location access before iOS will consider keeping '
+        'Approx needs ordinary location access before iOS will consider keeping '
         + 'it running in the background. Turn on Location in Settings → '
         + 'Permissions, then come back.',
       );
     } else if (outcome === 'needs_settings') {
       Alert.alert(
         'Set this in Settings',
-        'iOS will not ask again from inside the app. Open Settings → Aura → '
+        'iOS will not ask again from inside the app. Open Settings → Approx → '
         + 'Location and choose "Always".',
         [
           { text: 'Not now', style: 'cancel' },
@@ -100,13 +100,13 @@ export function BackgroundLocationRow({ sharing }: Props) {
   async function turnOff() {
     setBusy(true);
     // The OS permission is the user's to revoke in Settings; what this switch
-    // owns is whether Aura *uses* it. Stopping the task is the honest meaning
+    // owns is whether Approx *uses* it. Stopping the task is the honest meaning
     // of turning this off, and it takes effect immediately.
     await stopBackgroundLocationUpdates().catch(() => {});
     Alert.alert(
       'Background updates off',
-      'Aura will only update your location while the app is open. To withdraw '
-      + 'the permission itself, use Settings → Aura → Location.',
+      'Approx will only update your location while the app is open. To withdraw '
+      + 'the permission itself, use Settings → Approx → Location.',
     );
     await refresh();
     setBusy(false);
@@ -118,12 +118,12 @@ export function BackgroundLocationRow({ sharing }: Props) {
         + 'to keep updating while sharing is paused.';
     }
     if (on) {
-      return 'Your location stays current with Aura in the background and your '
+      return 'Your location stays current with Approx in the background and your '
         + 'phone locked, for as long as you are sharing. Choosing Paused or '
-        + 'closing Aura stops it.';
+        + 'closing Approx stops it.';
     }
     if (status === 'needs_settings') {
-      return 'iOS will not ask again from inside the app. Open Settings → Aura '
+      return 'iOS will not ask again from inside the app. Open Settings → Approx '
         + '→ Location and choose "Always".';
     }
     if (status === 'needs_foreground') {
@@ -137,7 +137,7 @@ export function BackgroundLocationRow({ sharing }: Props) {
     <Card style={styles.card}>
       <View style={styles.row}>
         <View style={styles.text}>
-          <Text style={styles.label}>Keep sharing while Aura is closed</Text>
+          <Text style={styles.label}>Keep sharing while Approx is closed</Text>
           <Text style={styles.hint}>{explanation}</Text>
         </View>
         <Switch
@@ -146,7 +146,7 @@ export function BackgroundLocationRow({ sharing }: Props) {
           disabled={busy || !sharing}
           trackColor={{ false: colors.border, true: colors.teal }}
           thumbColor={colors.bg}
-          accessibilityLabel="Keep sharing my location while Aura is closed"
+          accessibilityLabel="Keep sharing my location while Approx is closed"
           accessibilityHint={
             on
               ? 'Turns off background location updates'
@@ -156,7 +156,7 @@ export function BackgroundLocationRow({ sharing }: Props) {
       </View>
 
       <Text style={styles.optional}>
-        Optional. Everything on the map works while Aura is open without this.
+        Optional. Everything on the map works while Approx is open without this.
       </Text>
     </Card>
   );

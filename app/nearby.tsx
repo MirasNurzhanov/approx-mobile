@@ -258,7 +258,7 @@ export default function NearbyListScreen() {
                 {error ? 'Nothing to show' : 'Nobody nearby right now'}
               </Text>
               <Text style={styles.emptyBody}>
-                {error ?? 'Aura shows people with shared interests within about 500 metres.'}
+                {error ?? 'Approx shows people with shared interests within about 500 metres.'}
               </Text>
             </View>
           }

@@ -3,7 +3,7 @@
  * current route back out of them.
  *
  * Shared by both nav styles (the wheel in components/Speedometer and the bar in
- * components/nav/AuraTabBar) so switching between them can never change *where*
+ * components/nav/ApproxTabBar) so switching between them can never change *where*
  * the app can go, only how that choice is drawn. Kept out of both components
  * because a plain module can be imported by the other without either one losing
  * its Fast Refresh boundary.

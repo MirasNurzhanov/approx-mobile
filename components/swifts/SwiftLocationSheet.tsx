@@ -182,7 +182,7 @@ export function SwiftLocationSheet({
                 style={styles.mapBtn}
                 onPress={handleOpenMap}
                 accessibilityRole="button"
-                accessibilityLabel="Open the Aura map"
+                accessibilityLabel="Open the Approx map"
               >
                 <IconGlobe size={18} color={colors.t1} />
                 <Text style={styles.mapBtnLabel}>Open the map</Text>

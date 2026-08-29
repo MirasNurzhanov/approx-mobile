@@ -111,7 +111,7 @@ function VisibilitySection({ place, loadingPlace, levelOptions, level, onSelectL
         <Ionicons name="location-outline" size={18} color={colors.t3} />
         <Text style={styles.placeHint}>
           {place.detail ||
-            'Aura could not work out which area you are in, so a club cannot be created here yet.'}
+            'Approx could not work out which area you are in, so a club cannot be created here yet.'}
         </Text>
         <Pressable
           style={styles.retryBtn}
@@ -361,7 +361,7 @@ export default function CreateClubScreen() {
     if (!level) {
       Alert.alert(
         'Where is this club?',
-        place.detail || 'Aura needs to know where you are before you can create a club.',
+        place.detail || 'Approx needs to know where you are before you can create a club.',
       );
       return;
     }

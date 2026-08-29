@@ -20,7 +20,7 @@ import { formatCount } from '@/services/swifts';
 /**
  * The action rail.
  *
- * Every glyph here is Aura's own — see `components/swifts/icons.tsx`. No icon
+ * Every glyph here is Approx's own — see `components/swifts/icons.tsx`. No icon
  * pack: the rail sits over arbitrary user video, and these need real two-state
  * designs (a *filled* like, a *revealed* location) that a single-weight pack
  * cannot provide without tinting the same outline and hoping.

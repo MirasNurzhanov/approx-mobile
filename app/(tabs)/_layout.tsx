@@ -58,7 +58,7 @@ const TAB_ICONS = {
   profile: { sf: 'person.fill', md: 'person' },
   // Chat is the app's own Ionicons `chatbubbles` on both platforms rather than
   // an SF Symbol, which is what it looked like before this bar was native and
-  // what the wheel and AuraTabBar still draw (see navSections). The nearest
+  // what the wheel and ApproxTabBar still draw (see navSections). The nearest
   // symbol, `bubble.left.and.bubble.right.fill`, is two bubbles set side by
   // side facing apart; Ionicons' is two stacked and overlapping, and the pair
   // read as different icons rather than as the same one in two styles.
@@ -81,7 +81,7 @@ const TAB_ICONS = {
  * selected-tab indicator — no way to turn the ripple off, no way to resize
  * or reshape the indicator — so Android gets nothing further from the native
  * component. Android's bar style renders through `HeadlessTabsLayout` below
- * instead, the same navigator the wheel uses, with `components/nav/AuraTabBar`
+ * instead, the same navigator the wheel uses, with `components/nav/ApproxTabBar`
  * drawing a bar this app fully controls. See `constants/platform`'s
  * `BAR_STYLE_IS_NATIVE`, which is what decides between the two.
  *
@@ -157,9 +157,9 @@ function NativeTabsLayout() {
  * its indicator resized, so neither wants `NativeTabs` as its navigator.
  * Both keep the headless `expo-router/ui` navigator instead: the `TabList`
  * below declares the tabs and draws nothing, and the visible bar — the arc's
- * wedges, or `AuraTabBar`'s items — is `TabTrigger`s referring back to these
+ * wedges, or `ApproxTabBar`'s items — is `TabTrigger`s referring back to these
  * by name, the "multiple tab bars" pattern from the custom-tabs guide.
- * Screens render `components/AuraNav`, which draws whichever one floats over
+ * Screens render `components/ApproxNav`, which draws whichever one floats over
  * their own content.
  */
 function HeadlessTabsLayout() {
@@ -190,7 +190,7 @@ export default function TabsLayout() {
   // Bar style is the real native tab bar only where that component has
   // anything to offer — iOS. Everywhere else (Android's bar style, and the
   // wheel on every platform) routes through the same headless navigator and
-  // lets the screen draw its own bar; see HeadlessTabsLayout and AuraNav.
+  // lets the screen draw its own bar; see HeadlessTabsLayout and ApproxNav.
   return navStyle === 'bar' && BAR_STYLE_IS_NATIVE
     ? <NativeTabsLayout />
     : <HeadlessTabsLayout />;

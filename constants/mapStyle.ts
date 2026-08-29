@@ -11,7 +11,7 @@
  * the map as a badge: an icon, a name, and often a rating. On a map whose
  * entire job is showing *people*, those compete with the markers and win —
  * they are denser, they never move, and they are drawn by the basemap
- * underneath everything Aura puts on top, so no amount of z-index reaches
+ * underneath everything Approx puts on top, so no amount of z-index reaches
  * them. The only way to remove them is to style them out.
  *
  * `poi` covers parks, schools and hospitals as well as businesses. Hiding the

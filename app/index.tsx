@@ -31,7 +31,7 @@ export default function Index() {
   useEffect(() => {
     // The real answer isn't in yet — acting on the default `false` here would
     // send a genuinely signed-in user to the carousel for a flash before the
-    // second, correct pass fixed it. Waiting costs nothing: AuraLoader is
+    // second, correct pass fixed it. Waiting costs nothing: ApproxLoader is
     // already covering the screen for this same stretch.
     if (isLoading || decided.current) return;
     decided.current = true;

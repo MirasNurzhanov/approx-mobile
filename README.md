@@ -56,7 +56,7 @@ website of the same account, iOS additionally needs
 `ios.associatedDomains: ["webcredentials:<domain>"]` and the matching
 `apple-app-site-association` file served from that domain, and Android needs a
 `assetlinks.json` with the app's signing fingerprint. Neither is set up,
-because Aura has no web login to share credentials with yet.
+because Approx has no web login to share credentials with yet.
 
 ## Hobby catalog (interests "Other" flow)
 

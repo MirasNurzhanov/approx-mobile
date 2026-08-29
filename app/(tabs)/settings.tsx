@@ -46,7 +46,7 @@ import {
   usePrivacySettings,
   type LocationSharing,
 } from '@/services/privacy';
-import { AuraNav } from '@/components/AuraNav';
+import { ApproxNav } from '@/components/ApproxNav';
 import { ZoneTutorialOverlay } from '@/components/tutorial/ZoneTutorialOverlay';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -479,7 +479,7 @@ function LegalSection() {
       <Card style={styles.legalCard}>
         <Text style={styles.legalTitle}>Zero tolerance</Text>
         <Text style={styles.legalBody}>
-          Objectionable content and abusive users are not tolerated on Aura.
+          Objectionable content and abusive users are not tolerated on Approx.
           Anything you post can be reported by anyone who sees it, any account
           can be blocked, and reports are reviewed by a person. Content that
           breaks the guidelines is removed and the accounts behind it are
@@ -516,7 +516,7 @@ function LegalSection() {
           icon={IconMail}
           label="Report a safety concern"
           onPress={() => {
-            const url = `mailto:${SAFETY_EMAIL}?subject=${encodeURIComponent('Aura safety report')}`;
+            const url = `mailto:${SAFETY_EMAIL}?subject=${encodeURIComponent('Approx safety report')}`;
             Linking.openURL(url).catch(() =>
               Alert.alert('No mail app', `Write to us at ${SAFETY_EMAIL}`),
             );
@@ -769,7 +769,7 @@ export default function SettingsScreen() {
       // Permission can't be revoked programmatically — point to system settings.
       Alert.alert(
         'Turn off notifications',
-        'Notifications are managed by the system. Turn them off for Aura in system settings.',
+        'Notifications are managed by the system. Turn them off for Approx in system settings.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
@@ -789,7 +789,7 @@ export default function SettingsScreen() {
   }
 
   async function sendFeedback() {
-    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('Aura feedback')}`;
+    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('Approx feedback')}`;
     try {
       await Linking.openURL(url);
     } catch {
@@ -890,7 +890,7 @@ export default function SettingsScreen() {
         <ZoneTutorialOverlay onDismiss={dismissZoneTutorial} onTakeMeThere={takeMeToZone} />
       )}
 
-      <AuraNav highlightSection={showZoneTutorial ? 'settings' : undefined} />
+      <ApproxNav highlightSection={showZoneTutorial ? 'settings' : undefined} />
     </View>
   );
 }

@@ -22,8 +22,8 @@ import { sectionise } from '@/services/interestCategories';
 import { registerProfileRefresh } from '@/services/profileRefresh';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
-import { AuraNav } from '@/components/AuraNav';
-import { AuraMark } from '@/components/ui/AuraMark';
+import { ApproxNav } from '@/components/ApproxNav';
+import { ApproxMark } from '@/components/ui/ApproxMark';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -225,7 +225,7 @@ export default function ProfileScreen() {
     return (
       <View style={[styles.root, styles.center]}>
         <ActivityIndicator color={colors.teal} size="large" />
-        <AuraNav />
+        <ApproxNav />
       </View>
     );
   }
@@ -289,8 +289,8 @@ export default function ProfileScreen() {
                 style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
                 onPress={() => router.push('/market')}
               >
-                <AuraMark size={13} color={colors.purple} />
-                <Text style={styles.pillAura}>{profile.aura_points.toLocaleString()}</Text>
+                <ApproxMark size={13} color={colors.purple} />
+                <Text style={styles.pillApprox}>{profile.aura_points.toLocaleString()}</Text>
                 <IconChevron size={11} color={colors.purple} />
               </Pressable>
             )}
@@ -377,7 +377,7 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      <AuraNav />
+      <ApproxNav />
     </View>
   );
 }
@@ -446,7 +446,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  pillAura: {
+  pillApprox: {
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 13,

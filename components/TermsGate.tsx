@@ -85,14 +85,14 @@ export function TermsGate({ visible, onAccepted, onSignOut }: Props) {
           </Text>
           <Text style={styles.body}>
             Before you carry on, please read and agree to the documents below.
-            They set out what Aura is for, what is not allowed on it, and what
+            They set out what Approx is for, what is not allowed on it, and what
             we do with your data.
           </Text>
 
           <View style={styles.zeroCard}>
             <Text style={styles.zeroTitle}>Zero tolerance</Text>
             <Text style={styles.zeroBody}>
-              Aura has zero tolerance for objectionable content and abusive
+              Approx has zero tolerance for objectionable content and abusive
               users. Harassment, threats, hate speech, sexual content involving
               minors, and impersonation are prohibited. Content that breaks the
               guidelines is removed, and the accounts behind it are suspended or

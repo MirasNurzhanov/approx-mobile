@@ -47,7 +47,7 @@ function loadApi(nativeBuildVersion: string | null | undefined): Api {
   return api;
 }
 
-const HEADER = 'X-Aura-Build';
+const HEADER = 'X-Approx-Build';
 
 describe('the build number comes from the binary', () => {
   it('reports 32 on a build EAS numbered 32', () => {

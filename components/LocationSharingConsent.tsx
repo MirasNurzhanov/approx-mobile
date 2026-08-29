@@ -14,7 +14,7 @@ import { LOCATION_SHARING_LABEL, type LocationSharing } from '@/services/privacy
 // What sharing your location means, said before it starts.
 //
 // The Live / Approximate / Paused buttons are the whole of the control over
-// whether Aura publishes where you are, and Paused is where every account
+// whether Approx publishes where you are, and Paused is where every account
 // begins. This sheet is what stands between Paused and the other two: App
 // Review rejected 5.1.2(i) against a build where being on the map followed
 // from granting a location permission, and the answer is that it now follows
@@ -27,7 +27,7 @@ import { LOCATION_SHARING_LABEL, type LocationSharing } from '@/services/privacy
 //
 // Shown again on the next launch, because visibility does not outlive the run
 // of the app that chose it (services/sharingSession.ts). That is why the copy
-// below says "or close Aura" rather than only naming Paused: the sentence has
+// below says "or close Approx" rather than only naming Paused: the sentence has
 // to describe the whole of what was agreed to, including the end of it.
 
 interface Props {
@@ -39,9 +39,9 @@ interface Props {
 }
 
 const BODY: Record<'live' | 'approximate', string> = {
-  live: 'Your live location will be visible to nearby Aura users until you set it back to Paused or close Aura.',
+  live: 'Your live location will be visible to nearby Approx users until you set it back to Paused or close Approx.',
   approximate:
-    'Your rough area — about 500m across, never your exact position — will be visible to nearby Aura users until you set it back to Paused or close Aura.',
+    'Your rough area — about 500m across, never your exact position — will be visible to nearby Approx users until you set it back to Paused or close Approx.',
 };
 
 /** Travel the drag-to-dismiss threshold is a fraction of. Fixed rather than
@@ -118,8 +118,8 @@ export function LocationSharingConsent({ mode, busy, onCancel, onConfirm }: Prop
             <View style={styles.fact}>
               <IconEye size={16} color={colors.t3} />
               <Text style={styles.factText}>
-                You stay visible with Aura in the background and your phone
-                locked. Closing Aura ends it, and you choose again next time.
+                You stay visible with Approx in the background and your phone
+                locked. Closing Approx ends it, and you choose again next time.
               </Text>
             </View>
             <View style={styles.fact}>

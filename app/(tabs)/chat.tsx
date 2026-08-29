@@ -17,7 +17,7 @@ import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AuraNav } from '@/components/AuraNav';
+import { ApproxNav } from '@/components/ApproxNav';
 import { DraggableTabs, type DraggableTabKey } from '@/components/DraggableTabs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
@@ -631,7 +631,7 @@ function ClubsTab({ myClubs, discoverClubs, clubPlace, loadingClubs, refreshingP
               <View style={{ flex: 1 }}>
                 <Text style={styles.locationNoticeText}>
                   {clubPlace.detail ||
-                    'Aura needs your location to show clubs near you.'}
+                    'Approx needs your location to show clubs near you.'}
                 </Text>
                 <Pressable
                   style={styles.locationNoticeBtn}
@@ -1244,7 +1244,7 @@ export default function ChatScreen() {
         />
       )}
 
-      <AuraNav />
+      <ApproxNav />
     </View>
   );
 }

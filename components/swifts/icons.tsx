@@ -56,7 +56,7 @@ const stroke = {
  * Like.
  *
  * A heart built from two arcs meeting at a mitred point rather than the usual
- * rounded cusp — the same squared-terminal language as the rest of Aura's
+ * rounded cusp — the same squared-terminal language as the rest of Approx's
  * icons, which is what stops it reading as the generic social heart.
  */
 export function SwiftLikeIcon({

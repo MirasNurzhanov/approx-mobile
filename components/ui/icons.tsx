@@ -949,7 +949,7 @@ export function IconMoon({ size = 24, color = colors.t2 }: IconProps) {
 
 // ── Swift composer ──────────────────────────────────────────────────────────
 // Drawn for the capture and edit screens. Same 24px grid, 1.5px stroke and
-// squared terminals as everything above, so the camera chrome reads as Aura's
+// squared terminals as everything above, so the camera chrome reads as Approx's
 // rather than as a stock camera kit dropped into it.
 
 export function IconFlash({ size = 24, color = colors.t2 }: IconProps) {

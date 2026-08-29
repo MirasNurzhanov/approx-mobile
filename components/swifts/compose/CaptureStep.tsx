@@ -229,8 +229,8 @@ export function CaptureStep({ onCaptured, onCancel }: Props) {
         <Text style={styles.gateTitle}>Camera access needed</Text>
         <Text style={styles.gateBody}>
           {blocked
-            ? 'Camera access is turned off for Aura. You can turn it back on in Settings, or choose a video you already have.'
-            : 'Aura needs the camera to record a Swift. Nothing is captured until you press record.'}
+            ? 'Camera access is turned off for Approx. You can turn it back on in Settings, or choose a video you already have.'
+            : 'Approx needs the camera to record a Swift. Nothing is captured until you press record.'}
         </Text>
         <Pressable
           style={styles.gateBtn}

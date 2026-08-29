@@ -26,7 +26,7 @@ export interface Presence {
 /** Coarse buckets. The API never carries a numeric speed or a bearing. */
 export type MotionClass = 'stationary' | 'moving' | 'fast';
 
-export const PRESENCE_HEADER = 'X-Aura-Presence';
+export const PRESENCE_HEADER = 'X-Approx-Presence';
 
 // ─── App state ────────────────────────────────────────────────────────────────
 let appState: AppStateStatus = AppState.currentState;

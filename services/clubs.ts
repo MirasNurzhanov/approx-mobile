@@ -164,7 +164,7 @@ export async function fetchMyLocation(refresh = false): Promise<MyClubLocation> 
       ...UNPLACED,
       detail:
         e?.response?.data?.detail ??
-        'Aura could not check where you are. Try again in a moment.',
+        'Approx could not check where you are. Try again in a moment.',
     };
   }
 }

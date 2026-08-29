@@ -46,6 +46,31 @@ export interface SwiftTrackCredit {
  * nullity would tell a viewer which Swifts are hiding something from them
  * specifically.
  */
+/**
+ * Where a Swift is on its way to being public, as told to its author.
+ *
+ * Not the server's `moderation` column. That column answers a question about
+ * enforcement — has this been taken down — and this answers a question about
+ * progress: can I show this to anybody yet. The mapping happens server-side in
+ * `SwiftSerializer.get_review_state`, so the app never learns the enforcement
+ * vocabulary and a new internal state does not become an App Store release.
+ *
+ * Only the author is ever told anything but `published`. For every other
+ * viewer the server sends `published` unconditionally, because a Swift in any
+ * other state is one `swifts.visibility.live_q` has already made invisible to
+ * them.
+ */
+export type SwiftReviewState =
+  /** The file is still being uploaded or transcoded. */
+  | 'processing'
+  /** Stored, screened by nothing yet, and visible to nobody but the author. */
+  | 'reviewing'
+  /** Live. The only state in which anybody else can watch it. */
+  | 'published'
+  /** Held back for a human to look at. Not an accusation — see
+   *  `components/swifts/SwiftReviewNotice`. */
+  | 'needs_review';
+
 export interface Swift {
   id: number;
   author: SwiftAuthor;
@@ -58,6 +83,8 @@ export interface Swift {
   height: number;
   aspect_ratio: number | null;
   status: 'uploading' | 'processing' | 'ready' | 'failed';
+  /** Author-facing progress state. `published` for every other viewer. */
+  review_state: SwiftReviewState;
 
   // ── Applied at playback, not baked into `video_url` ──────────────────────
   // R2 only stores and serves bytes — it cannot trim, mix or overlay text the

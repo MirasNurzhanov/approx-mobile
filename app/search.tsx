@@ -15,6 +15,7 @@ import { api } from '@/services/api';
 import { Avatar } from '@/components/ui/Avatar';
 import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
+import { GlassSurface } from '@/components/ui/GlassSurface';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { fonts, radius } from '@/constants/theme';
@@ -289,7 +290,7 @@ export default function SearchScreen() {
             <Ionicons name="chevron-back" size={24} color={colors.t1} />
           </Pressable>
 
-          <View style={[styles.inputPill, focused && styles.inputPillFocused]}>
+          <GlassSurface style={[styles.inputPill, focused && styles.inputPillFocused]}>
             <Ionicons name="search-outline" size={16} color={colors.t3} />
             <TextInput
               ref={inputRef}
@@ -311,7 +312,7 @@ export default function SearchScreen() {
                 <Ionicons name="close-outline" size={20} color={colors.t3} />
               </Pressable>
             )}
-          </View>
+          </GlassSurface>
         </View>
       </ScreenHeader>
 
@@ -335,11 +336,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderBottomColor: colors.border,
   },
   backBtn: { padding: 4 },
+  // No `backgroundColor`: the fill is drawn behind the row by `GlassBackdrop`,
+  // and a background here would sit on top of the blur and hide it.
   inputPill: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
     borderRadius: 100,
     borderWidth: 1,
     borderColor: colors.border,

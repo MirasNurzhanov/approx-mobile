@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File } from 'expo-file-system';
 
 import { BASE_URL } from './api';
+import type { SwiftReviewState } from './swifts';
 import { keptDurationMs, MAX_UPLOAD_BYTES, type SwiftDraft } from './swiftDraft';
 
 /**
@@ -115,6 +116,17 @@ export interface PublishedSwift {
   video_url: string;
   thumbnail_url: string;
   status: string;
+  /**
+   * Where the Swift is on its way to being public. With AI video moderation
+   * switched on this is `reviewing` at the moment the 201 comes back — the row
+   * exists, the file is stored, and nobody but the author can watch it yet.
+   *
+   * That is why the composer navigates to the permalink rather than announcing
+   * a successful publish: `/swifts/[id]` is the screen that can show the
+   * creator what state their Swift is actually in, and keep showing them until
+   * it changes.
+   */
+  review_state?: SwiftReviewState;
   location_available: boolean;
 }
 

@@ -10,7 +10,10 @@ import type { SocialSignInResult } from '@/services/socialAuth';
 interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** `acceptTerms` is the sign-in screen's agreement checkbox. The server
+   *  refuses to issue tokens without it for an account that has not already
+   *  agreed to the current Terms, so this is not advisory. */
+  login: (email: string, password: string, acceptTerms?: boolean) => Promise<void>;
   /** Finishes a Google/Apple sign-in whose tokens are already stored.
    *
    * Separate from `login` because the credential work happened in
@@ -68,8 +71,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  async function login(email: string, password: string) {
-    await loginRequest(email, password);
+  async function login(email: string, password: string, acceptTerms = false) {
+    await loginRequest(email, password, acceptTerms);
     markOnboardingSeen();
     setIsAuthenticated(true);
     router.replace('/(tabs)/map');

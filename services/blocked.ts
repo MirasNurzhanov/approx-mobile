@@ -49,15 +49,34 @@ export async function refreshBlocked(): Promise<void> {
   setState({ list: Array.isArray(data) ? data : [] });
 }
 
+/** Where a block was raised from, when it was raised from a piece of content.
+ *
+ * App Review asked that blocking notify the developer of inappropriate content,
+ * so the server files a moderation report on every block — see
+ * `friends.views.BlockUserView`. This is what lets that report say *what* the
+ * person was looking at, which is the difference between an actionable signal
+ * and a row saying somebody blocked somebody.
+ *
+ * Omitted for an ordinary "I don't want to see this person" block from the
+ * chat list, which is not an accusation of anything and is filed as such. */
+export interface BlockContext {
+  /** One of `moderation.reasons.Reason`. Defaults server-side to `other`. */
+  reason?: string;
+  note?: string;
+}
+
 /** Optimistic block; throws after rollback if the request fails. */
-export async function blockUser(user: BlockedUserSummary): Promise<void> {
+export async function blockUser(
+  user: BlockedUserSummary,
+  context: BlockContext = {},
+): Promise<void> {
   const prev = state;
   const list = state.list ?? [];
   if (!list.some((u) => u.id === user.id)) {
     setState({ list: [user, ...list] });
   }
   try {
-    await api.post(`/api/friends/${user.id}/block/`);
+    await api.post(`/api/friends/${user.id}/block/`, context);
   } catch (e: any) {
     // Already blocked server-side = success for our purposes.
     if (e?.response?.status !== 400) {

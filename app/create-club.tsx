@@ -16,6 +16,7 @@ import {
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 
+import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { Ionicons } from '@expo/vector-icons';
@@ -65,10 +66,10 @@ function EmblemPicker({ emblemUri, onPick }: { emblemUri: string | null; onPick:
       {emblemUri ? (
         <Image source={{ uri: emblemUri }} style={styles.emblemImage} />
       ) : (
-        <View style={styles.emblemPlaceholder}>
+        <GlassSurface style={styles.emblemPlaceholder}>
           <Ionicons name="image-outline" size={28} color={colors.t3} />
           <Text style={styles.emblemHint}>Add emblem</Text>
-        </View>
+        </GlassSurface>
       )}
       <View style={styles.emblemBadge}>
         <Ionicons name="camera" size={13} color={colors.bg} />
@@ -455,7 +456,7 @@ export default function CreateClubScreen() {
 
           {/* Interest */}
           <Text style={styles.label}>Interest</Text>
-          <Pressable style={styles.selector} onPress={openInterestPicker}>
+          <GlassIconButton style={styles.selector} onPress={openInterestPicker}>
             {selectedInterest ? (
               <Text style={styles.selectorValue}>
                 {selectedInterest.icon}  {selectedInterest.name}
@@ -464,7 +465,7 @@ export default function CreateClubScreen() {
               <Text style={styles.selectorPlaceholder}>Select an interest…</Text>
             )}
             <Ionicons name="chevron-down" size={16} color={colors.t3} />
-          </Pressable>
+          </GlassIconButton>
 
           {/* Visibility */}
           <Text style={styles.label}>Group visibility <Text style={styles.required}>*</Text></Text>
@@ -535,11 +536,15 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
   emblemWrap: { alignSelf: 'center', marginBottom: 28 },
   emblemImage: { width: 96, height: 96, borderRadius: 48 },
+  // No `backgroundColor` on the two surfaces below: their fill is drawn by
+  // `GlassBackdrop`. The plain text `input` further down keeps its solid one on
+  // purpose — glass behind a field somebody is reading their own typing in
+  // trades legibility for decoration, and the whole point of the material is
+  // that it belongs on chrome rather than on content.
   emblemPlaceholder: {
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     borderStyle: 'dashed',
@@ -587,7 +592,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.m,

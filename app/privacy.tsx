@@ -16,6 +16,7 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { Card } from '@/components/ui/Card';
+import { BackgroundLocationRow } from '@/components/BackgroundLocationRow';
 import { LocationSharingConsent } from '@/components/LocationSharingConsent';
 import {
   LocationVisibilityCard,
@@ -297,6 +298,12 @@ export default function PrivacyScreen() {
             onCheckIn={setPendingMode}
             onCheckOut={() => save({ location_sharing: 'paused' })}
             onPrecision={(mode) => save({ location_sharing: mode })}
+          />
+          {/* The only place in the app that asks for Always. Explicit, opt-in,
+              and attached to the feature that needs it — see the header note in
+              components/BackgroundLocationRow for why it is not on the map. */}
+          <BackgroundLocationRow
+            sharing={settings.location_sharing !== 'paused'}
           />
           <LocationSharingConsent
             mode={pendingMode}

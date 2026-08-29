@@ -28,6 +28,7 @@ import {
 import { AuraLoader } from '@/components/AuraLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LocationLaunchPrompt } from '@/components/LocationLaunchPrompt';
+import { TermsGate } from '@/components/TermsGate';
 import { AuthProvider } from '@/context/AuthContext';
 import { NavStyleProvider } from '@/context/NavStyleContext';
 import { ScrollNavProvider } from '@/context/ScrollNavContext';
@@ -38,6 +39,7 @@ import { registerForPushNotifications } from '@/services/notifications';
 import { refreshPrivacy } from '@/services/privacy';
 import { goInvisible } from '@/services/goInvisible';
 import { endStaleSharingSession } from '@/services/sharingSession';
+import { refreshAcceptance, useTerms } from '@/services/terms';
 import { startNotificationRouting } from '@/services/notificationRouting';
 import '@/services/backgroundLocation';
 
@@ -47,7 +49,7 @@ function AppStatusBar() {
 }
 
 function AppShell() {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, logout } = useAuth();
 
   // Whether this run has landed on an already-active session — resumed from
   // the background, or a stale-session end that failed and left sharing
@@ -56,6 +58,18 @@ function AppShell() {
   // it: see components/LocationLaunchPrompt.
   const [launchPromptVisible, setLaunchPromptVisible] = useState(false);
   const [launchPromptBusy, setLaunchPromptBusy] = useState(false);
+
+  // Whether this account still owes us an agreement to the current Terms.
+  // `null` until the answer is in, so the gate never flashes on and off for
+  // somebody who has already agreed. Accounts that signed up after the gate
+  // landed answer false immediately and never see it; this exists for the
+  // installs that were already signed in when it shipped.
+  const { needsAcceptance } = useTerms();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    refreshAcceptance().catch(() => {});
+  }, [isAuthenticated]);
 
   // Whatever this account's sharing mode was when the app last closed, it was
   // chosen by a run that no longer exists. Ending it here is what makes going
@@ -197,6 +211,14 @@ function AppShell() {
         busy={launchPromptBusy}
         onStayActive={() => setLaunchPromptVisible(false)}
         onGoInvisible={handleGoInvisible}
+      />
+      {/* Last in the tree so it covers everything, including the location
+          prompt above — an account that has not agreed to the Terms should not
+          be answering a question about its own visibility first. */}
+      <TermsGate
+        visible={isAuthenticated && needsAcceptance === true}
+        onAccepted={() => refreshAcceptance().catch(() => {})}
+        onSignOut={logout}
       />
     </>
   );

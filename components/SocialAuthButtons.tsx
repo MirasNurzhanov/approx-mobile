@@ -71,7 +71,17 @@ export function GoogleMark({ size = 20 }: { size?: number }) {
 
 // ── The buttons ──────────────────────────────────────────────────────────────
 
-export default function SocialAuthButtons({ disabled = false }: { disabled?: boolean }) {
+export default function SocialAuthButtons({
+  disabled = false,
+  acceptedTerms = false,
+}: {
+  disabled?: boolean;
+  /** Whether the user has ticked the agreement on the screen above. Passed to
+   *  the server, which refuses to create an account without it. Callers that
+   *  render the checkbox should also pass `disabled` when it is unticked — this
+   *  prop is what makes the *account* legitimate, not what stops the tap. */
+  acceptedTerms?: boolean;
+}) {
   const { completeSocialSignIn } = useAuth();
   const [pending, setPending] = useState<'google' | 'apple' | null>(null);
   // Async, and iOS-only, so it starts false and the button appears once the
@@ -90,8 +100,8 @@ export default function SocialAuthButtons({ disabled = false }: { disabled?: boo
     await runBusy(
       async () => {
         const result = provider === 'google'
-          ? await signInWithGoogle()
-          : await signInWithApple();
+          ? await signInWithGoogle(acceptedTerms)
+          : await signInWithApple(acceptedTerms);
         completeSocialSignIn(result);
       },
       () => setPending(null),

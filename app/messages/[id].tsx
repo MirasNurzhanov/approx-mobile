@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -20,8 +21,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { decodeStoryReply } from '@/services/storyReply';
 import { announce } from '@/hooks/useReduceMotion';
+import { useContentActions } from '@/components/ContentActions';
+import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
+import { IconMore } from '@/components/ui/icons';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -93,7 +97,9 @@ function normalise(raw: RawMessage, fallbackId?: string): Message {
 
 // ─── Chat pieces ──────────────────────────────────────────────────────────────
 
-function MessagesHeader({ username, otherUserPicture, presence, wsReady, top, onBack, onOpenProfile }: {
+function MessagesHeader({
+  username, otherUserPicture, presence, wsReady, top, onBack, onOpenProfile, onMenu,
+}: {
   username?: string;
   otherUserPicture?: string | null;
   presence?: Presence | null;
@@ -101,6 +107,7 @@ function MessagesHeader({ username, otherUserPicture, presence, wsReady, top, on
   top: number;
   onBack: () => void;
   onOpenProfile: () => void;
+  onMenu: () => void;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -139,6 +146,20 @@ function MessagesHeader({ username, otherUserPicture, presence, wsReady, top, on
             <Text style={styles.statusText}>Reconnecting…</Text>
           )}
         </View>
+      </Pressable>
+
+      {/* Report / Block, reachable from the conversation itself. A private
+          message is still user-generated content, and telling somebody to go
+          and find the sender's profile first is the kind of friction that
+          means abuse goes unreported. */}
+      <Pressable
+        onPress={onMenu}
+        hitSlop={12}
+        style={({ pressed }) => [styles.menuBtn, pressed && { opacity: 0.6 }]}
+        accessibilityRole="button"
+        accessibilityLabel={`Report or block ${username ?? 'this person'}`}
+      >
+        <IconMore size={20} color={colors.t1} />
       </Pressable>
     </View>
   );
@@ -211,14 +232,33 @@ function MessagesInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
-    <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
-      <Pressable style={styles.attachBtn} onPress={onCamera} hitSlop={4}>
+    <GlassSurface
+      style={[styles.inputBar, { paddingBottom: bottom + 8 }]}
+      // Heavier than a floating control: this sits over scrolling messages, and
+      // a light wash would let text slide visibly under the composer.
+      opacity={0.86}
+    >
+      <GlassIconButton
+        style={styles.attachBtn}
+        onPress={onCamera}
+        hitSlop={4}
+        tone="surface2"
+        accessibilityRole="button"
+        accessibilityLabel="Take a photo"
+      >
         <Ionicons name="camera-outline" size={20} color={colors.t3} />
-      </Pressable>
+      </GlassIconButton>
 
-      <Pressable style={styles.attachBtn} onPress={onAttach} hitSlop={4}>
+      <GlassIconButton
+        style={styles.attachBtn}
+        onPress={onAttach}
+        hitSlop={4}
+        tone="surface2"
+        accessibilityRole="button"
+        accessibilityLabel="Choose a photo"
+      >
         <Ionicons name="image-outline" size={20} color={colors.t3} />
-      </Pressable>
+      </GlassIconButton>
 
       <TextInput
         style={styles.input}
@@ -230,18 +270,23 @@ function MessagesInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
         maxLength={2000}
       />
 
-      <Pressable
+      {/* Glass only while it is the *inactive* state. Once there is something
+          to send this is the one filled control on the bar, and a filled
+          control that is also translucent stops reading as the primary action
+          — so the active style paints over the backdrop deliberately. */}
+      <GlassIconButton
         style={[styles.sendBtn, canSend && styles.sendBtnActive]}
         onPress={onSend}
         disabled={!canSend}
         hitSlop={8}
+        tone="surface2"
         accessibilityRole="button"
         accessibilityLabel="Send message"
         accessibilityState={{ disabled: !canSend }}
       >
         <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
-      </Pressable>
-    </View>
+      </GlassIconButton>
+    </GlassSurface>
   );
 }
 
@@ -260,6 +305,7 @@ export default function MessagesScreen() {
   const [otherUserPicture, setOtherUserPicture] = useState<string | null>(null);
   const [presence, setPresence] = useState<Presence | undefined>(undefined);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
+  const { present, sheets } = useContentActions();
 
   const currentUserIdRef = useRef<number | null>(null);
   const ws = useRef<WebSocket | null>(null);
@@ -328,6 +374,20 @@ export default function MessagesScreen() {
       socket.onmessage = (event) => {
         try {
           const raw: RawMessage = JSON.parse(event.data);
+
+          // The server refuses a message that breaks the Community Guidelines
+          // (see friends/consumers.py). Without this branch the optimistic
+          // bubble sat "pending" forever and the sender was never told why —
+          // which reads as the app being broken rather than the message being
+          // refused.
+          if ((raw as { type?: string }).type === 'error') {
+            const detail = (raw as { detail?: string }).detail
+              ?? 'That message could not be sent.';
+            setMessages((prev) => prev.filter((m) => !m.pending));
+            Alert.alert('Message not sent', detail);
+            return;
+          }
+
           const incoming = normalise(raw);
           if (!incoming.text && !incoming.image) return;
 
@@ -391,7 +451,15 @@ export default function MessagesScreen() {
     } else {
       api.post<RawMessage>(`/api/friends/messages/${id}/`, { content: trimmed })
         .then((r) => setMessages((prev) => [...prev, normalise(r.data)]))
-        .catch(() => {});
+        .catch((e: any) => {
+          // Same reasoning as the socket branch above: a refusal has to be
+          // visible, and the optimistic bubble has to go.
+          setMessages((prev) => prev.filter((m) => !m.pending));
+          Alert.alert(
+            'Message not sent',
+            e?.response?.data?.detail ?? 'Please try again.',
+          );
+        });
     }
   }
 
@@ -457,6 +525,15 @@ export default function MessagesScreen() {
         top={top}
         onBack={() => router.back()}
         onOpenProfile={() => router.push({ pathname: '/profile/[id]', params: { id, username: username ?? '' } })}
+        onMenu={() => present({
+          target: 'user',
+          targetId: Number(id),
+          subject: `@${username ?? 'this person'}`,
+          authorId: Number(id),
+          authorUsername: username,
+          // Blocking somebody you are in a conversation with should close it.
+          onRemoved: () => router.back(),
+        })}
       />
 
       {/* Messages */}
@@ -495,6 +572,7 @@ export default function MessagesScreen() {
         onAttach={handleAttach}
       />
       {primer}
+      {sheets}
     </KeyboardAvoidingView>
   );
 }
@@ -516,6 +594,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   backBtn: { padding: 4 },
   headerProfile: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  menuBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   headerInfo: { flex: 1, gap: 2 },
   headerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerName: {
@@ -629,6 +708,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // Input bar
+  // No `backgroundColor` on the three below: the fill is drawn behind their
+  // content by `GlassBackdrop`, and a background here would sit on top of the
+  // blur and hide it. See components/ui/GlassSurface.
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -637,7 +719,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
-    backgroundColor: colors.surface,
   },
   attachBtn: {
     width: 38,
@@ -668,7 +749,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface2,
     borderWidth: 1,
     borderColor: colors.border,
   },

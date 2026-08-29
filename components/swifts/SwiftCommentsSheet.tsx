@@ -16,7 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SwiftCommentIcon } from '@/components/swifts/icons';
 import { Avatar } from '@/components/ui/Avatar';
-import { IconClose, IconTrash } from '@/components/ui/icons';
+import { useContentActions } from '@/components/ContentActions';
+import { IconClose, IconMore, IconTrash } from '@/components/ui/icons';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -104,6 +105,7 @@ function CommentsBody({
   const [exhausted, setExhausted] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const { present, sheets } = useContentActions();
   const inputRef = useRef<TextInput | null>(null);
 
   // Deliberately does not set 'loading' itself: the state already starts there,
@@ -162,6 +164,23 @@ function CommentsBody({
     }
   }
 
+  function reportComment(comment: SwiftComment) {
+    present({
+      target: 'comment',
+      targetId: comment.id,
+      subject: `this comment by @${comment.author.username}`,
+      authorId: comment.author.id,
+      authorUsername: comment.author.username,
+      authorAvatar: comment.author.profile_picture ?? undefined,
+      // Blocking from here drops every comment that author has on this thread,
+      // not just the one that was reported. The server will do the same on the
+      // next fetch; this is what makes the thread agree with it now.
+      onRemoved: () => setComments((prev) => prev.filter(
+        (c) => c.author.id !== comment.author.id,
+      )),
+    });
+  }
+
   function confirmDelete(comment: SwiftComment) {
     Alert.alert('Delete this comment?', undefined, [
       { text: 'Cancel', style: 'cancel' },
@@ -199,6 +218,7 @@ function CommentsBody({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
     >
+      {sheets}
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Text style={styles.title} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
           {total > 0 ? `${formatCount(total)} comments` : 'Comments'}
@@ -255,7 +275,13 @@ function CommentsBody({
             paging ? <ActivityIndicator style={styles.footerSpinner} color={colors.t3} /> : null
           }
           renderItem={({ item }) => (
-            <CommentRow comment={item} onDelete={confirmDelete} styles={styles} colors={colors} />
+            <CommentRow
+              comment={item}
+              onDelete={confirmDelete}
+              onReport={reportComment}
+              styles={styles}
+              colors={colors}
+            />
           )}
         />
       )}
@@ -292,10 +318,11 @@ function CommentsBody({
 }
 
 function CommentRow({
-  comment, onDelete, styles, colors,
+  comment, onDelete, onReport, styles, colors,
 }: {
   comment: SwiftComment;
   onDelete: (c: SwiftComment) => void;
+  onReport: (c: SwiftComment) => void;
   styles: ReturnType<typeof makeStyles>;
   colors: ColorPalette;
 }) {
@@ -312,7 +339,7 @@ function CommentRow({
         </Text>
         <Text style={styles.rowText}>{comment.text}</Text>
       </View>
-      {comment.is_mine && (
+      {comment.is_mine ? (
         <Pressable
           onPress={() => onDelete(comment)}
           hitSlop={12}
@@ -320,6 +347,18 @@ function CommentRow({
           accessibilityLabel={`Delete your comment: ${comment.text.slice(0, 40)}`}
         >
           <IconTrash size={16} color={colors.t3} />
+        </Pressable>
+      ) : (
+        // Somebody else's comment: the same Report / Block menu the rest of
+        // the app uses. Your own gets Delete instead — reporting yourself is
+        // not a thing, and the row has one slot.
+        <Pressable
+          onPress={() => onReport(comment)}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={`Report the comment by ${comment.author.username}`}
+        >
+          <IconMore size={16} color={colors.t3} />
         </Pressable>
       )}
     </View>

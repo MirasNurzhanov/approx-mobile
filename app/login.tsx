@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import { runBusy } from '@/services/busy';
 import { lightColors as L } from '@/constants/theme';
+import { TermsAgreement } from '@/components/TermsAgreement';
 import { fonts } from '@/constants/theme';
 
 export default function LoginScreen() {
@@ -25,6 +26,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [focused, setFocused]   = useState<'email' | 'password' | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const passwordRef = useRef<TextInput>(null);
   const insets = useSafeAreaInsets();
 
@@ -36,11 +38,25 @@ export default function LoginScreen() {
   // entirely. Social sign-in (Google/Apple) lives on /register only.
   async function handleLogin() {
     if (!email || !password) return;
+    // Belt and braces with the disabled button below: `onSubmitEditing` on the
+    // password field also reaches here, and a keyboard "go" must not be a way
+    // round the agreement.
+    if (!acceptedTerms) return;
     setSubmitting(true);
     await runBusy(
-      () => login(email, password),
+      () => login(email, password, acceptedTerms),
       () => setSubmitting(false),
-    ).catch(() => Alert.alert('Login failed', 'Invalid email or password'));
+    ).catch((e: any) => {
+      // The server has its own copy of this rule and will refuse a login for
+      // an account that has not agreed. Reaching it means the client-side gate
+      // was bypassed somehow, so say what is actually wrong rather than
+      // claiming the password was bad.
+      if (e?.response?.data?.code === 'terms_required') {
+        Alert.alert('Agreement required', e.response.data.detail);
+        return;
+      }
+      Alert.alert('Login failed', 'Invalid email or password');
+    });
   }
 
   return (
@@ -125,12 +141,43 @@ export default function LoginScreen() {
               onSubmitEditing={handleLogin}
             />
 
+            {/* A checkbox, not links, and above the button rather than below
+                it — the agreement has to be read before the thing it gates.
+
+                This screen was links-only until App Review's wording was read
+                closely: "The EULA or terms of use agreement presented to users
+                before registering **or logging in**." An existing account that
+                authenticated first and met `TermsGate` a moment later is
+                exactly the order they objected to. The agreement now happens
+                before the request leaves the phone, and the server refuses to
+                mint tokens without it either — see
+                `users.views.SuspensionAwareTokenObtainPairSerializer.get_token`,
+                which gates in front of the mint rather than after it.
+
+                `TermsGate` stays, but only as the safety net for sessions that
+                were already open when this build installed and so never pass
+                through this screen. */}
+            <View style={s.terms}>
+              <TermsAgreement
+                accepted={acceptedTerms}
+                onToggle={setAcceptedTerms}
+                disabled={submitting}
+              />
+            </View>
+
             <Pressable
-              style={({ pressed }) => [s.btn, (pressed || submitting) && s.btnDimmed]}
+              style={({ pressed }) => [
+                s.btn,
+                (pressed || submitting || !acceptedTerms) && s.btnDimmed,
+              ]}
               onPress={handleLogin}
-              disabled={submitting}
+              disabled={submitting || !acceptedTerms}
               accessibilityRole="button"
               accessibilityLabel="Sign in"
+              accessibilityState={{ disabled: submitting || !acceptedTerms }}
+              accessibilityHint={
+                acceptedTerms ? undefined : 'Agree to the Terms of Use first'
+              }
             >
               {submitting
                 ? <ActivityIndicator color={L.bg} size="small" />
@@ -146,6 +193,7 @@ export default function LoginScreen() {
               <Text style={s.footerLink}>Register</Text>
             </Pressable>
           </View>
+
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -155,6 +203,8 @@ export default function LoginScreen() {
 const BLOB = 300;
 
 const s = StyleSheet.create({
+  terms: { marginTop: 20, paddingHorizontal: 4 },
+
   root: {
     flex: 1,
     backgroundColor: L.bg,

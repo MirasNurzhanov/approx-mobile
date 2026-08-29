@@ -14,6 +14,7 @@ import { useTheme } from '@/context/ThemeContext';
 import {
   ALL_PERMISSIONS,
   bindForegroundRefresh,
+  canStillPrompt,
   openAppSettings,
   refreshPermissions,
   PERMISSION_COPY,
@@ -36,6 +37,7 @@ const STATE_TEXT: Record<PermissionState, string> = {
   granted: 'Allowed',
   denied: 'Not allowed',
   blocked: 'Blocked in system settings',
+  restricted: 'Restricted by device settings',
   undetermined: 'Not asked yet',
   unsupported: 'Unavailable on this device',
 };
@@ -44,6 +46,7 @@ const makeStateColor = (colors: ColorPalette): Record<PermissionState, string> =
   granted: colors.teal,
   denied: colors.orange,
   blocked: colors.red,
+  restricted: colors.red,
   undetermined: colors.t2,
   unsupported: colors.t3,
 });
@@ -53,6 +56,7 @@ const STATE_GLYPH: Record<PermissionState, string> = {
   granted: '✓',
   denied: '!',
   blocked: '×',
+  restricted: '×',
   undetermined: '–',
   unsupported: '–',
 };
@@ -70,7 +74,9 @@ function PermissionRow({
   const styles = makeStyles(colors);
   const STATE_COLOR = makeStateColor(colors);
   const copy = PERMISSION_COPY[info.key];
-  const askable = info.state === 'undetermined' || info.state === 'denied';
+  // `canStillPrompt` rather than a local comparison, so this row and the
+  // primer sheet can never disagree about whether a dialog is still available.
+  const askable = canStillPrompt(info.state);
   const actionLabel = askable ? 'Allow' : 'Open Settings';
 
   return (
@@ -95,7 +101,11 @@ function PermissionRow({
         {info.caveat && <Text style={styles.caveat}>{info.caveat}</Text>}
       </View>
 
-      {info.state !== 'granted' && info.state !== 'unsupported' && (
+      {info.state !== 'granted' && info.state !== 'unsupported'
+        // Nothing this screen can offer for a restricted permission: Settings
+        // shows the switch greyed out, so a button pointing there would be a
+        // dead end dressed up as an action.
+        && info.state !== 'restricted' && (
         <Pressable
           onPress={() => (askable ? onAsk(info.key) : openAppSettings())}
           hitSlop={8}

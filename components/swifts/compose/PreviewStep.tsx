@@ -4,6 +4,7 @@ import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { IconGlobe, IconLock, IconPeople, IconPin } from '@/components/ui/icons';
+import { GlassSurface } from '@/components/ui/GlassSurface';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -115,20 +116,20 @@ export function PreviewStep({
         )}
 
         <View style={styles.facts}>
-          <View style={styles.fact}>
+          <GlassSurface style={styles.fact} tone="surface2">
             <audience.Glyph size={16} color={colors.t3} />
             <Text style={styles.factText}>{audience.label}</Text>
-          </View>
-          <View style={styles.fact}>
+          </GlassSurface>
+          <GlassSurface style={styles.fact} tone="surface2">
             <Text style={styles.factText}>{seconds}s</Text>
-          </View>
+          </GlassSurface>
           {draft.shareLocation ? (
-            <View style={styles.fact}>
+            <GlassSurface style={styles.fact} tone="surface2">
               <IconPin size={16} color={colors.teal} />
               <Text style={[styles.factText, { color: colors.teal }]} numberOfLines={1}>
                 {draft.placeName || 'Location attached'}
               </Text>
-            </View>
+            </GlassSurface>
           ) : null}
         </View>
 
@@ -140,8 +141,10 @@ export function PreviewStep({
         )}
       </ScrollView>
 
-      {/* Publish / progress */}
-      <View style={styles.footer}>
+      {/* Publish / progress. The bar is chrome and takes the glass; the teal
+          button inside it deliberately does not — it is the primary action on
+          the screen, and a translucent primary action stops reading as one. */}
+      <GlassSurface style={styles.footer} opacity={0.86}>
         {error ? (
           <>
             <Text style={styles.error}>{error}</Text>
@@ -175,7 +178,7 @@ export function PreviewStep({
             <Text style={styles.publishLabel}>Publish Swift</Text>
           </Pressable>
         )}
-      </View>
+      </GlassSurface>
     </View>
   );
 }
@@ -218,6 +221,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontStyle: 'italic',
   },
   facts: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // No `backgroundColor` here or on `footer`: the fill is drawn behind their
+  // content by `GlassBackdrop`, and a background would sit on top of the blur.
   fact: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -225,7 +230,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 14,
-    backgroundColor: colors.surface2,
     maxWidth: '100%',
   },
   factText: {
@@ -252,7 +256,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     gap: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
-    backgroundColor: colors.surface,
   },
   publish: {
     height: 50,

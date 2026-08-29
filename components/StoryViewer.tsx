@@ -28,10 +28,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { STORY_LIKE } from '@/components/storyReactions';
 import { Avatar } from '@/components/ui/Avatar';
 import { Scrim } from '@/components/ui/Scrim';
+import { useContentActions } from '@/components/ContentActions';
 import {
   IconBookmark,
   IconChevron,
   IconClose,
+  IconMore,
   IconPin,
 } from '@/components/ui/icons';
 import { fonts, type } from '@/constants/theme';
@@ -126,6 +128,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   const [togglingStar, setTogglingStar] = useState(false);
   const { starredIds } = useStoryArchive();
   const reduceMotion = useReduceMotion();
+  const { present, sheets } = useContentActions();
 
   function goTo(i: number) {
     if (i >= stories.length) { onClose(); return; }
@@ -183,7 +186,22 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   // Only ever your own story: starring is the author's own act, not a
   // bookmark of someone else's post.
   const canStar = currentUserId != null && story.author.id === currentUserId;
+  const isOwn = canStar;
   const isStarred = starredIds.has(story.id);
+
+  function reportThis() {
+    present({
+      target: 'story',
+      targetId: story.id,
+      subject: `this story by @${story.author.username}`,
+      authorId: story.author.id,
+      authorUsername: story.author.username,
+      authorAvatar: story.author.profile_picture ?? undefined,
+      // Blocking the author of a story you are looking at should not leave you
+      // looking at it.
+      onRemoved: onClose,
+    });
+  }
 
   const isLiked = story.user_reaction === STORY_LIKE.type;
   const likeCount = story.reactions?.[STORY_LIKE.type] ?? 0;
@@ -251,6 +269,10 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
 
   return (
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      {/* Inside this Modal, not outside it: a second Modal rendered from a
+          sibling of this one would be presented *behind* the story viewer on
+          iOS and never be seen. */}
+      {sheets}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.svContainer} {...(panResponder?.panHandlers ?? {})}>
         {/* Background — photo fills the screen; a text-only story gets a soft
@@ -309,6 +331,20 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
               {timeAgo(story.created_at)} · {timeLeft(story.expires_at)}
             </Text>
           </View>
+          {/* Report, on somebody else's story only. Reporting your own is not a
+              thing, and the slot is better spent on the star toggle that
+              replaces it — see `canStar`, which is the same condition. */}
+          {!isOwn && (
+            <Pressable
+              onPress={reportThis}
+              hitSlop={12}
+              style={({ pressed }) => [styles.svGlassBtn, pressed && { opacity: 0.7 }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Report this story by ${story.author.username}`}
+            >
+              <IconMore size={17} color={colors.t1} />
+            </Pressable>
+          )}
           {canStar && (
             <Pressable
               onPress={toggleStar}

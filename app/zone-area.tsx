@@ -71,35 +71,61 @@ const MIN_QUERY_LEN = 2;
 interface ZoneState {
   zone_type?: ZoneType;
   zone_radius?: number;
+  /** Write-only, and never stored server-side: the fix the "are you in this
+   *  place" check should run against. See `saveWithPosition`. */
+  latitude?: number;
+  longitude?: number;
+  accuracy?: number;
   zone_region?: number | null;
   zone_region_detail?: RegionSummary | null;
+  /** Whether the zone re-points itself as its owner moves. See the toggle in
+   *  `PlaceCard` for what the two settings actually mean to a person. */
+  zone_follows_location?: boolean;
+  /** Server-set, read-only: the zone wanted to move and had nowhere to go. */
+  zone_follow_stale?: boolean;
   zone_active?: boolean;
 }
 
 // ─── Position ─────────────────────────────────────────────────────────────────
+/** A device fix, with how wrong the device thinks it is. */
+interface Fix {
+  latitude: number;
+  longitude: number;
+  /** Metres of reported error. The server widens the containment check by
+   *  exactly this, clamped, so a poor fix near a border is not a refusal. */
+  accuracy: number | null;
+}
+
 /** The device's position, or null when location is off.
  *
  * Never *asks* for permission: this screen is reachable from Settings, and a
  * permission prompt fired by opening a settings page is exactly the ambush the
- * priming layer exists to avoid. Without a fix the preview simply says so. */
-async function currentCoords(): Promise<{ latitude: number; longitude: number } | null> {
+ * priming layer exists to avoid. Without a fix the preview simply says so.
+ *
+ * This used to also fire `reportLocation` and hope. The save is validated
+ * server-side, and it used to be validated against the position the *server*
+ * held — written by a different endpoint on a different schedule — so this
+ * pushed a fresh one across and moved on without waiting. That is a race, and
+ * it is the one behind "you are not in Әуезов ауданы" shown to somebody
+ * standing in Әуезов ауданы: the zone PATCH regularly won.
+ *
+ * The fix is not to await it. It is that the save now *carries* the position
+ * it wants checked, so there is nothing to race — see `saveWithPosition`. The report
+ * stays because the map and a following zone both want the server's copy
+ * current, but nothing is validated against it any more.
+ */
+async function currentCoords(): Promise<Fix | null> {
   try {
     const { status } = await Location.getForegroundPermissionsAsync();
     if (status !== 'granted') return null;
     const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    const coords = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
-    // Tell the server where we are before anyone asks it to check.
-    //
-    // This screen traces from the device's live fix, but the save is validated
-    // against the position the *server* holds — written only when the map ticks
-    // or the background task runs. Opening the app straight into Settings →
-    // Zone Size, or walking a few streets first, left those two disagreeing,
-    // and the disagreement surfaced as "you are not in Бостандық Ауданы" to
-    // somebody standing in Бостандық Ауданы.
-    //
-    // Best effort: a failure here is not a reason to refuse to look up a place.
-    // The server's own tolerance covers the rest — see position_tolerance_m.
-    reportLocation(coords).catch(() => {});
+    const coords = {
+      latitude: fix.coords.latitude,
+      longitude: fix.coords.longitude,
+      accuracy: fix.coords.accuracy ?? null,
+    };
+    // Still best effort, and no longer load-bearing.
+    reportLocation(coords, null, coords.accuracy).catch(() => {});
     return coords;
   } catch {
     return null;
@@ -156,7 +182,7 @@ function ZonePreview({ mapRef, themeMode, mode, region, coords, previewCoords, p
   themeMode: 'dark' | 'light';
   mode: ZoneMode;
   region: RegionSummary | null;
-  coords: { latitude: number; longitude: number } | null;
+  coords: Fix | null;
   previewCoords: { latitude: number; longitude: number } | null;
   previewViewport: (target: RegionSummary) => Viewport;
   previewRings: { latitude: number; longitude: number }[][];
@@ -329,7 +355,7 @@ function RegionSearch({ query, results, searching, searchError, coords, saving, 
   results: RegionSummary[] | null;
   searching: boolean;
   searchError: string | null;
-  coords: { latitude: number; longitude: number } | null;
+  coords: Fix | null;
   saving: boolean;
   onQueryChange: (q: string) => void;
   onPick: (region: RegionSummary) => void;
@@ -417,7 +443,7 @@ function RegionSearch({ query, results, searching, searchError, coords, saving, 
   );
 }
 
-function PlaceCard({ region, locating, saving, lookupError, choices, choicesFor, query, results, searching, searchError, coords, onClearRegion, onTrace, onPickRegion, onQueryChange }: {
+function PlaceCard({ region, follows, followStale, locating, saving, lookupError, choices, choicesFor, query, results, searching, searchError, coords, onClearRegion, onTrace, onPickRegion, onPickSearched, onToggleFollow, onQueryChange }: {
   region: RegionSummary | null;
   locating: 'city' | 'district' | null;
   saving: boolean;
@@ -428,10 +454,17 @@ function PlaceCard({ region, locating, saving, lookupError, choices, choicesFor,
   results: RegionSummary[] | null;
   searching: boolean;
   searchError: string | null;
-  coords: { latitude: number; longitude: number } | null;
+  coords: Fix | null;
   onClearRegion: () => void;
   onTrace: (size: 'city' | 'district') => void;
+  follows: boolean;
+  followStale: boolean;
+  /** Picked from the candidates a trace produced — still "where I am", so it
+   *  keeps following. */
   onPickRegion: (region: RegionSummary) => void;
+  /** Found by typing a name. A deliberate choice of *this place*, so it pins. */
+  onPickSearched: (region: RegionSummary) => void;
+  onToggleFollow: (next: boolean) => void;
   onQueryChange: (q: string) => void;
 }) {
   const { colors } = useTheme();
@@ -463,6 +496,48 @@ function PlaceCard({ region, locating, saving, lookupError, choices, choicesFor,
             <Ionicons name="close-circle" size={20} color={colors.t3} />
           </Pressable>
         </View>
+      ) : null}
+
+      {region ? (
+        <Pressable
+          style={styles.followRow}
+          onPress={() => onToggleFollow(!follows)}
+          disabled={saving}
+          accessibilityRole="switch"
+          accessibilityLabel="Move my zone with me"
+          accessibilityHint={
+            'When this is on, your zone changes to whichever '
+            + `${region.kind === 'city' ? 'city' : 'area'} you are in.`
+          }
+          accessibilityState={{ checked: follows, disabled: saving }}
+        >
+          <Ionicons
+            name={follows ? 'checkbox' : 'square-outline'}
+            size={20}
+            color={follows ? colors.teal : colors.t3}
+          />
+          <View style={styles.followText}>
+            <Text style={styles.followLabel}>Move my zone with me</Text>
+            {/* Says what happens, not what the setting is called. The whole
+                confusion this fixes is somebody walking across town and not
+                realising their zone stayed behind — so the off state has to
+                spell out that it does. */}
+            <Text style={styles.followHint}>
+              {follows
+                ? `Your zone becomes whichever ${region.kind === 'city' ? 'city' : 'area'} you move into.`
+                : `Your zone stays on ${region.name} even when you leave it.`}
+            </Text>
+          </View>
+        </Pressable>
+      ) : null}
+
+      {/* Only while following: a zone that is *pinned* somewhere the user is
+          not standing is the setting working as asked, not a problem. */}
+      {region && follows && followStale ? (
+        <Text style={styles.followStale}>
+          Aura could not find an area where you are now, so your zone is still
+          on {region.name}. It will move on its own as soon as it finds one.
+        </Text>
       ) : null}
 
       {/* Two sizes, traced from where you are standing. Side by side
@@ -517,7 +592,7 @@ function PlaceCard({ region, locating, saving, lookupError, choices, choicesFor,
         coords={coords}
         saving={saving}
         onQueryChange={onQueryChange}
-        onPick={onPickRegion}
+        onPick={onPickSearched}
       />
 
       <Text style={styles.hint}>
@@ -541,7 +616,7 @@ function PlaceCard({ region, locating, saving, lookupError, choices, choicesFor,
  */
 function useZonePreview({ mapRef, coords, outline, mode, region, radiusM }: {
   mapRef: React.RefObject<MapView | null>;
-  coords: { latitude: number; longitude: number } | null;
+  coords: Fix | null;
   outline: Region | null;
   mode: ZoneMode;
   region: RegionSummary | null;
@@ -697,9 +772,14 @@ export default function ZoneAreaScreen() {
   const [mode, setMode] = useState<ZoneMode>('radius');
   const [radiusM, setRadiusM] = useState(500);
   const [region, setRegion] = useState<RegionSummary | null>(null);
+  /** Whether the zone re-points itself as the user moves. Defaults off, which
+   *  matches the server column — a zone nobody has opted in stays where it was
+   *  put, so nothing changes under an existing user. */
+  const [followsLocation, setFollowsLocation] = useState(false);
+  const [followStale, setFollowStale] = useState(false);
   const [fetchedOutline, setFetchedOutline] = useState<Region | null>(null);
 
-  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [coords, setCoords] = useState<Fix | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -715,6 +795,34 @@ export default function ZoneAreaScreen() {
   const mapRef = useRef<MapView | null>(null);
 
   // ── Load ───────────────────────────────────────────────────────────────────
+  /** Adopt a zone payload into the screen's state.
+   *
+   * Shared by the initial load and by `commitFollows`, which has to re-read:
+   * turning following on re-points the zone server-side, so the response names
+   * a region this screen has not heard of yet and the card would otherwise go
+   * on displaying the one the user just moved out of. */
+  const adoptZone = useCallback((z: ZoneState) => {
+    // The screen offers two buttons; the server stores three types. Both
+    // polygon types land on the Place tab, and which one it was is
+    // recoverable from the region itself, so nothing is lost collapsing
+    // them here.
+    setMode(z.zone_type !== 'circle' && z.zone_region ? 'region' : 'radius');
+    setRadiusM(z.zone_radius && z.zone_radius > 0 ? z.zone_radius : 500);
+    if (z.zone_region_detail) setRegion(z.zone_region_detail);
+    setFollowsLocation(!!z.zone_follows_location);
+    setFollowStale(!!z.zone_follow_stale);
+  }, []);
+
+  const refreshZone = useCallback(async () => {
+    try {
+      const { data } = await api.get<ZoneState>('/api/users/zone/');
+      adoptZone(data);
+    } catch {
+      // The optimistic state on screen is still what was saved; a failed
+      // re-read is worth nothing to show and nothing to undo.
+    }
+  }, [adoptZone]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -724,21 +832,12 @@ export default function ZoneAreaScreen() {
       ]);
       if (!alive) return;
 
-      if (zoneRes.status === 'fulfilled') {
-        const z = zoneRes.value.data;
-        // The screen offers two buttons; the server stores three types. Both
-        // polygon types land on the Place tab, and which one it was is
-        // recoverable from the region itself, so nothing is lost collapsing
-        // them here.
-        setMode(z.zone_type !== 'circle' && z.zone_region ? 'region' : 'radius');
-        setRadiusM(z.zone_radius && z.zone_radius > 0 ? z.zone_radius : 500);
-        if (z.zone_region_detail) setRegion(z.zone_region_detail);
-      }
+      if (zoneRes.status === 'fulfilled') adoptZone(zoneRes.value.data);
       if (position.status === 'fulfilled' && position.value) setCoords(position.value);
       setLoading(false);
     })();
     return () => { alive = false; };
-  }, []);
+  }, [adoptZone]);
 
   // Matched against the selected region rather than cleared by an effect, so a
   // boundary can never be drawn under a different region's name — switching
@@ -756,21 +855,104 @@ export default function ZoneAreaScreen() {
 
   // ── Save ───────────────────────────────────────────────────────────────────
   // Everything saves as you touch it, matching the zone-music screen next door.
-  async function save(patch: Partial<ZoneState>, revert: () => void) {
+  async function save(
+    patch: Partial<ZoneState>,
+    revert: () => void,
+    /** Return true to say the error is dealt with and no alert is wanted. */
+    onError?: (data: any) => boolean,
+  ) {
     setSaving(true);
     await runBusy(
       () => api.patch('/api/users/zone/', patch),
       () => setSaving(false),
     ).catch((e: any) => {
       revert();
+      const data = e?.response?.data;
+      if (onError?.(data)) return;
       Alert.alert(
         'Could not save',
-        e?.response?.data?.zone_radius?.[0] ??
-        e?.response?.data?.zone_region?.[0] ??
-        e?.response?.data?.detail ??
+        data?.zone_radius?.[0] ??
+        data?.zone_region?.[0] ??
+        data?.detail ??
         'Please try again.',
       );
     });
+  }
+
+  /**
+   * A refusal that names the place the user *is* in, offered as a one-tap fix.
+   *
+   * Without this the error is a dead end: "you do not seem to be inside Әуезов
+   * ауданы" tells somebody their choice was wrong and leaves them to work out
+   * which of a city's districts is right — which, if you do not know your
+   * district's official name, is not something you can work out. The server
+   * resolves it from the same fix it just rejected, so the answer is free and
+   * exact.
+   *
+   * Returns whether it handled the error, so `save` knows to skip its alert.
+   */
+  function offerCorrectPlace(data: any, follows: boolean): boolean {
+    const suggestion = data?.you_are_in;
+    if (data?.code !== 'outside_region' || !suggestion?.id) return false;
+    Alert.alert(
+      'That is not where you are',
+      `${data?.zone_region?.[0] ?? 'You are not in that place.'}
+
+`
+      + `You appear to be in ${suggestion.name}. Use that instead?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Use ${suggestion.name}`,
+          onPress: () => {
+            // Fetched rather than built from the three fields the error
+            // carries: `commitRegion` wants a full summary, and this is the
+            // same cache the preview draws its outline from — so the outline
+            // is already warm by the time the card renders it.
+            getRegion(suggestion.id)
+              .then((full) => { if (full) commitRegion(full, follows); })
+              .catch(() => {});
+          },
+        },
+      ],
+    );
+    return true;
+  }
+
+  /**
+   * Save a zone change, carrying the fix the server should reason from.
+
+   * Used by every path that either names a region or turns following on —
+   * both are answers to "where am I", and both used to be resolved server-side
+   * against a stored position written by a different endpoint on a different
+   * schedule.
+   *
+   * The server tests "are you in this place" against the coordinates in this
+   * request, falling back to its stored copy only for clients too old to send
+   * any — so this is what removes the whole class of "the server's position is
+   * behind mine". A fresh fix is taken here rather than reusing `coords`,
+   * which may be minutes old if the screen has been open: the point is to
+   * check against where the user is *now*.
+   *
+   * With no fix available — location permission off — this sends the change
+   * without one and lets the server fall back. That path can still refuse, and
+   * it should: without a position there is nothing to prove they are anywhere.
+   */
+  async function saveWithPosition(patch: Partial<ZoneState>, revert: () => void) {
+    const fix = (await currentCoords()) ?? coords;
+    if (fix) setCoords(fix);
+    await save(
+      fix
+        ? {
+            ...patch,
+            latitude: fix.latitude,
+            longitude: fix.longitude,
+            ...(fix.accuracy != null ? { accuracy: fix.accuracy } : {}),
+          }
+        : patch,
+      revert,
+      (data) => offerCorrectPlace(data, !!patch.zone_follows_location),
+    );
   }
 
   function commitRadius(next: number) {
@@ -789,30 +971,77 @@ export default function ZoneAreaScreen() {
     }
     const previous = mode;
     setMode(next);
-    save(
-      next === 'region'
-        ? { zone_type: zoneTypeForRegion(region), zone_region: region!.id }
-        : { zone_type: 'circle' },
-      () => setMode(previous),
-    );
+    if (next === 'region') {
+      // `zone_type` only — deliberately **not** `zone_region`. The region is
+      // not changing here; this tab switch is "go back to the place I already
+      // chose", and the server falls back to the stored one when the payload
+      // names none.
+      //
+      // Sending it anyway was how this screen became impossible to use after
+      // moving: it re-submitted the old region, the server checked whether the
+      // user was still inside it, refused, and the tab snapped back to Radius
+      // — so the picker that would have let them choose their new district was
+      // unreachable. The server no longer refuses an unchanged region either;
+      // both halves are fixed, because either one alone leaves the other free
+      // to reintroduce it.
+      save({ zone_type: zoneTypeForRegion(region) }, () => setMode(previous));
+      return;
+    }
+    save({ zone_type: 'circle' }, () => setMode(previous));
   }
 
   /** The one way a region is adopted, whether it was traced or searched for.
    *
    * Both routes land here so the save, the mode switch, the revert-on-failure
    * and the cleared error state cannot drift apart between them. */
-  function commitRegion(next: RegionSummary) {
+  /**
+   * @param follows whether the zone should re-point itself as the user moves.
+   *
+   * Not a setting the user is asked for at this moment — it is read off *how*
+   * they chose the place. Tracing, or picking one of the places found around
+   * them, is an answer to "where am I"; typing a name is an answer to "which
+   * place". The first should follow them and the second should not, and
+   * inferring it here means the common path never has to be configured.
+   */
+  function commitRegion(next: RegionSummary, follows: boolean) {
     const previous = region;
+    const previousFollows = followsLocation;
     setRegion(next);
+    setFollowsLocation(follows);
     setMode('region');
     // Clearing the query box is enough to empty the search results — they are
     // derived from it — so the reducer resetting the rest of the lookup UI
     // alongside it is all that's needed here.
     dispatchSearch({ type: 'regionAdopted' });
-    save({ zone_type: zoneTypeForRegion(next), zone_region: next.id }, () => {
-      setRegion(previous);
-      if (!previous) setMode('radius');
-    });
+    void saveWithPosition(
+      {
+        zone_type: zoneTypeForRegion(next),
+        zone_region: next.id,
+        zone_follows_location: follows,
+      },
+      () => {
+        setRegion(previous);
+        setFollowsLocation(previousFollows);
+        if (!previous) setMode('radius');
+      },
+    );
+  }
+
+  /** The checkbox on the chosen place.
+   *
+   * Turning it on re-points the zone server-side straight away — see
+   * `ZoneView.patch` — so the response carries the region it landed on and
+   * this adopts it rather than leaving the card naming the old one. */
+  function commitFollows(next: boolean) {
+    const previous = followsLocation;
+    setFollowsLocation(next);
+    // Through `saveWithPosition`, not `save`: turning this on asks the server
+    // to move the zone to where the user is, and without a fix in the request
+    // it would resolve that from the stored position — which is the very thing
+    // that is behind when somebody has just moved.
+    saveWithPosition({ zone_follows_location: next }, () => setFollowsLocation(previous))
+      .then(() => refreshZone())
+      .catch(() => {});
   }
 
   function clearRegion() {
@@ -825,6 +1054,7 @@ export default function ZoneAreaScreen() {
     // region mode pointed at the region just cleared would keep the old city
     // on everyone's map while this screen showed nothing chosen.
     setMode('radius');
+    setFollowStale(false);
     save({ zone_type: 'circle' }, () => {
       setRegion(previous);
       setMode('region');
@@ -858,7 +1088,7 @@ export default function ZoneAreaScreen() {
       setCoords(position);
       const lookup = await regionForPoint(position.latitude, position.longitude, level);
       if (lookup.region) {
-        commitRegion(lookup.region);
+        commitRegion(lookup.region, true);
         return;
       }
 
@@ -960,6 +1190,8 @@ export default function ZoneAreaScreen() {
         ) : (
           <PlaceCard
             region={region}
+            follows={followsLocation}
+            followStale={followStale}
             locating={locating}
             saving={saving}
             lookupError={search.lookupError}
@@ -972,7 +1204,11 @@ export default function ZoneAreaScreen() {
             coords={coords}
             onClearRegion={clearRegion}
             onTrace={traceMyPlace}
-            onPickRegion={commitRegion}
+            // Two handlers, one function: a place found *around you* keeps
+            // following, a place found *by name* pins. See `commitRegion`.
+            onPickRegion={(next) => commitRegion(next, true)}
+            onPickSearched={(next) => commitRegion(next, false)}
+            onToggleFollow={commitFollows}
             onQueryChange={(query) => dispatchSearch({ type: 'queryChanged', query })}
           />
         )}
@@ -1059,6 +1295,39 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
   hint: { fontFamily: fonts.body, fontSize: type.caption, lineHeight: 17, color: colors.t3 },
   error: { fontFamily: fonts.body, fontSize: type.caption, color: colors.orange },
+
+  // ── "Move my zone with me" ──
+  followRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  followText: { flex: 1, gap: 2 },
+  followLabel: {
+    fontFamily: fonts.body,
+    fontSize: type.small,
+    fontWeight: '600',
+    color: colors.t1,
+  },
+  followHint: {
+    fontFamily: fonts.body,
+    fontSize: type.caption,
+    lineHeight: 17,
+    color: colors.t3,
+  },
+  /** Not `error` red. Being unable to find an area is an ordinary gap in
+   *  OpenStreetMap's coverage, not something the user did wrong, and the zone
+   *  is still working — orange would say otherwise. */
+  followStale: {
+    fontFamily: fonts.body,
+    fontSize: type.caption,
+    lineHeight: 17,
+    color: colors.t2,
+    backgroundColor: colors.surface2,
+    borderRadius: themeRadius.m,
+    padding: 10,
+  },
 
   chosen: {
     flexDirection: 'row',

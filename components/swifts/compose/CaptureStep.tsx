@@ -25,6 +25,7 @@ import {
   IconFlashOff,
   IconImage,
 } from '@/components/ui/icons';
+import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -270,32 +271,36 @@ export function CaptureStep({ onCaptured, onCancel }: Props) {
 
       {/* Top chrome */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <Pressable
+        <GlassIconButton
           onPress={onCancel}
           hitSlop={12}
           style={styles.chip}
+          tone="dark"
+          opacity={SCRIM}
           accessibilityRole="button"
           accessibilityLabel="Cancel"
         >
           <IconClose size={20} color="#FFFFFF" />
-        </Pressable>
+        </GlassIconButton>
 
         {recording ? (
-          <View style={styles.timer}>
+          <GlassSurface style={styles.timer} tone="dark" opacity={SCRIM}>
             <View style={styles.recDot} />
             <Text style={styles.timerText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
               {formatElapsed(elapsed)}
             </Text>
-          </View>
+          </GlassSurface>
         ) : (
           <View />
         )}
 
         {canFlash ? (
-          <Pressable
+          <GlassIconButton
             onPress={() => setFlash(flashOn ? 'off' : 'on')}
             hitSlop={12}
             style={[styles.chip, flashOn && styles.chipOn]}
+            tone="dark"
+            opacity={SCRIM}
             accessibilityRole="button"
             accessibilityLabel={flashOn ? 'Turn flash off' : 'Turn flash on'}
             accessibilityState={{ selected: flashOn }}
@@ -303,32 +308,38 @@ export function CaptureStep({ onCaptured, onCancel }: Props) {
             {flashOn
               ? <IconFlash size={20} color="#111111" />
               : <IconFlashOff size={20} color="#FFFFFF" />}
-          </Pressable>
+          </GlassIconButton>
         ) : (
           <View style={styles.chipSpacer} />
         )}
       </View>
 
       {micDenied && (
-        <View style={[styles.notice, { top: insets.top + 64 }]}>
+        <GlassSurface
+          style={[styles.notice, { top: insets.top + 64 }]}
+          tone="dark"
+          opacity={0.55}
+        >
           <Text style={styles.noticeText}>
             Recording without sound. You can add a track in the next step.
           </Text>
-        </View>
+        </GlassSurface>
       )}
 
       {/* Bottom chrome */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 28 }]}>
-        <Pressable
+        <GlassIconButton
           onPress={handlePick}
           disabled={recording || busy}
           hitSlop={12}
           style={[styles.sideBtn, (recording || busy) && styles.dimmed]}
+          tone="dark"
+          opacity={SCRIM}
           accessibilityRole="button"
           accessibilityLabel="Choose a video from your library"
         >
           {busy ? <ActivityIndicator color="#FFFFFF" /> : <IconImage size={24} color="#FFFFFF" />}
-        </Pressable>
+        </GlassIconButton>
 
         <Pressable
           onPress={handleRecord}
@@ -347,20 +358,31 @@ export function CaptureStep({ onCaptured, onCancel }: Props) {
           <View style={recording ? styles.shutterStop : styles.shutterIdle} />
         </Pressable>
 
-        <Pressable
+        <GlassIconButton
           onPress={() => setFacing((f) => (f === 'back' ? 'front' : 'back'))}
           disabled={recording}
           hitSlop={12}
           style={[styles.sideBtn, recording && styles.dimmed]}
+          tone="dark"
+          opacity={SCRIM}
           accessibilityRole="button"
           accessibilityLabel="Switch camera"
         >
           <IconCameraFlip size={24} color="#FFFFFF" />
-        </Pressable>
+        </GlassIconButton>
       </View>
     </View>
   );
 }
+
+/** How dark the wash over the camera preview is.
+ *
+ *  The value the hand-written `rgba(0,0,0,0.45)` fills used, kept because it is
+ *  the number that was actually tuned: enough for a white glyph to survive a
+ *  bright frame behind it, light enough that the control does not black out the
+ *  thing it is floating over. `GlassBackdrop`'s usual contrast floor does not
+ *  apply over media — see its `tone` note. */
+const SCRIM = 0.45;
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000000' },
@@ -430,7 +452,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   chipOn: { backgroundColor: '#FFFFFF' },
   chipSpacer: { width: 38, height: 38 },
@@ -442,7 +463,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red },
   timerText: {
@@ -460,7 +480,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: radius.m,
-    backgroundColor: 'rgba(0,0,0,0.6)',
   },
   noticeText: {
     fontFamily: fonts.body,
@@ -485,7 +504,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   dimmed: { opacity: 0.4 },
 

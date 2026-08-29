@@ -15,6 +15,7 @@ import { VolumeSlider } from '@/components/swifts/compose/VolumeSlider';
 import {
   IconScissors, IconText, IconVolume,
 } from '@/components/ui/icons';
+import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -153,15 +154,15 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
             </Text>
           </View>
         )}
-        <View style={styles.stageBadge}>
+        <GlassSurface style={styles.stageBadge} tone="dark" opacity={0.5}>
           <Text style={styles.stageBadgeText} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
             {formatMs(kept)}
           </Text>
-        </View>
+        </GlassSurface>
       </View>
 
       {/* Tabs */}
-      <View style={styles.tabs}>
+      <GlassSurface style={styles.tabs}>
         {([
           ['trim', 'Trim', IconScissors],
           ['sound', 'Sound', IconVolume],
@@ -186,7 +187,7 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
             </Pressable>
           );
         })}
-      </View>
+      </GlassSurface>
 
       <ScrollView style={styles.panel} contentContainerStyle={styles.panelInner}>
         {tab === 'trim' && (
@@ -249,7 +250,7 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
               {(['top', 'middle', 'bottom'] as const).map((position) => {
                 const active = draft.overlayPosition === position;
                 return (
-                  <Pressable
+                  <GlassIconButton
                     key={position}
                     onPress={() => onChange({ overlayPosition: position })}
                     style={[styles.posBtn, active && styles.posBtnActive]}
@@ -259,7 +260,7 @@ export function EditStep({ draft, onChange, onMeasured }: Props) {
                     <Text style={[styles.posLabel, active && styles.posLabelActive]}>
                       {position[0].toUpperCase() + position.slice(1)}
                     </Text>
-                  </Pressable>
+                  </GlassIconButton>
                 );
               })}
             </View>
@@ -306,7 +307,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   stageBadgeText: {
     fontFamily: fonts.body,
@@ -321,7 +321,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
   },
   tab: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: 10 },
   tabActive: { backgroundColor: colors.tealTint },
@@ -366,7 +365,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderRadius: radius.s,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
   },
   posBtnActive: { borderColor: colors.teal, backgroundColor: colors.tealTint },
   posLabel: {

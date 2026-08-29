@@ -29,12 +29,16 @@ import Animated, {
 import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GestureDetector } from 'react-native-gesture-handler';
+
 import { AuraNav } from '@/components/AuraNav';
 import { STORY_LIKE } from '@/components/storyReactions';
 import { StoryViewer } from '@/components/StoryViewer';
 import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
+import { GlassBackdrop, GlassSurface } from '@/components/ui/GlassSurface';
+import { useSheetDrag } from '@/components/ui/useSheetDrag';
 import {
     IconCalendar,
     IconCamera,
@@ -79,11 +83,11 @@ import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { fetchMapNearby, isLocationNotAvailable } from '@/services/discovery';
 import { atSharingPrecision, reportLocation, type Coordinates } from '@/services/location';
 import {
+  backgroundStatus,
   bindForegroundRefresh,
   check as checkPermission,
   openAppSettings,
   refreshPermissions,
-  request as requestPermission,
   SUPPORTS_BACKGROUND_LOCATION,
   usePermissionStore,
   type PermissionState,
@@ -299,6 +303,10 @@ const ZOOM_SETTLE_MS     = 220;
  *  friend broadcasting a track makes the tallest card the sheet holds, and a
  *  travel distance shorter than the card leaves a sliver of it on screen. */
 const SHEET_H   = 560;
+/** Travel for the story composer, which is its own `Modal` rather than one of
+ *  the two sheets `SHEET_H` describes — see `CreateStoryModal`. Taller,
+ *  because it holds a photo well and a keyboard-avoiding text field. */
+const STORY_SHEET_H = 620;
 const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
 // ── Locate control ──
@@ -1097,6 +1105,8 @@ function LocateButton({
       // the thing you tap to find out why, and disabled controls are skipped.
       accessibilityState={{ selected: following, busy: state === 'locating' }}
     >
+      <GlassBackdrop />
+      {following && <View style={[StyleSheet.absoluteFill, styles.locateTint]} />}
       {state === 'locating' ? (
         <ActivityIndicator size="small" color={colors.t2} />
       ) : (
@@ -1127,7 +1137,7 @@ function TopBar({
 
       {/* The count is the only part of the map a screen reader can reach, so
           it carries the plural and the unit rather than a bare number. */}
-      <View
+      <GlassSurface
         style={styles.nearbyBadge}
         accessible
         accessibilityLabel={`${nearby} ${nearby === 1 ? 'person' : 'people'} nearby`}
@@ -1136,7 +1146,7 @@ function TopBar({
         <Text style={styles.nearbyBadgeText} importantForAccessibility="no">
           {nearby} nearby
         </Text>
-      </View>
+      </GlassSurface>
 
       <View style={styles.topSpacer} />
 
@@ -1150,6 +1160,7 @@ function TopBar({
         accessibilityLabel="People nearby, list view"
         accessibilityHint="Opens a readable list of everyone shown on the map"
       >
+        <GlassBackdrop />
         <IconList size={20} color={colors.t2} />
       </Pressable>
 
@@ -1160,6 +1171,7 @@ function TopBar({
         accessibilityRole="button"
         accessibilityLabel="Search for people"
       >
+        <GlassBackdrop />
         <IconSearch size={20} color={colors.t2} />
       </Pressable>
 
@@ -1174,6 +1186,7 @@ function TopBar({
         accessibilityLabel="Zone music"
         accessibilityHint="Choose what plays in your zone and how far it carries"
       >
+        <GlassBackdrop />
         <IconMusic size={20} color={colors.t2} />
       </Pressable>
     </View>
@@ -1203,6 +1216,26 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
+
+  // This sheet is a `Modal` rather than one of the map's two `sheetY` sheets,
+  // so it carries its own offset. Reset whenever it opens: a drag that was
+  // released short of the dismiss threshold leaves the value part-way down,
+  // and without this the next open would start there.
+  const storyY = useSharedValue(0);
+  useEffect(() => {
+    if (visible) storyY.set(0);
+  }, [visible, storyY]);
+  const storyAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: storyY.get() }],
+  }));
+  const drag = useSheetDrag({
+    sheetY: storyY,
+    height: STORY_SHEET_H,
+    onDismiss: onClose,
+    // Not draggable mid-post: the request is already in flight and closing the
+    // sheet under it would leave the spinner's owner unmounted.
+    enabled: !posting,
+  });
 
   async function pickPhoto() {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1244,15 +1277,32 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
       // sharing was paused and this is where that refusal was explained; the
       // story now posts either way, without a pin, and the line above the
       // Post button says so before it happens rather than after.
-      .catch(() => { Alert.alert('Failed to post', 'Please try again.'); });
+      //
+      // What *is* still explained here is a refusal by the content filter. A
+      // story rejected under the Community Guidelines has to say so — "Failed
+      // to post, please try again" would send somebody round the loop retrying
+      // a post that will never be accepted.
+      .catch((e: any) => {
+        if (e?.response?.data?.code === 'objectionable_content') {
+          Alert.alert('This can’t be posted', e.response.data.detail);
+          return;
+        }
+        Alert.alert('Failed to post', 'Please try again.');
+      });
   }
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={styles.createModalBackdrop} onPress={onClose} />
-        <View style={[styles.createModalSheet, { paddingBottom: bottom + 20 }]}>
-          <View style={styles.sheetHandle} />
+        <Animated.View
+          style={[styles.createModalSheet, { paddingBottom: bottom + 20 }, storyAnimStyle]}
+        >
+          <GestureDetector gesture={drag}>
+            <View style={styles.sheetGrab}>
+              <View style={styles.sheetHandle} />
+            </View>
+          </GestureDetector>
           <View style={styles.createModalHeader}>
             <View style={styles.createModalTitleWrap}>
               <Text style={styles.createModalTitle}>Drop a Story</Text>
@@ -1362,7 +1412,7 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
               <Text style={styles.postBtnText}>Post Story</Text>
             )}
           </Pressable>
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -1408,6 +1458,9 @@ function MeetupSheet({
   const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
   const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.get() }] }));
+  // `onDismiss` is the screen's own `closeMeetupSheet`, so a dragged dismiss
+  // and a backdrop tap run the same teardown — see `useSheetDrag`.
+  const drag = useSheetDrag({ sheetY, height: SHEET_H, onDismiss, spring: SPRING_CFG });
 
   function openDirections() {
     const label = encodeURIComponent(meetup.title);
@@ -1423,7 +1476,14 @@ function MeetupSheet({
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
       <Animated.View style={[styles.sheet, { paddingBottom: bottom + 16 }, animStyle]}>
-        <View style={styles.sheetHandle} />
+        {/* The whole grab area, not just the 36x4 bar: a 4pt-tall drag target
+            is unusable, so the detector wraps a padded row and the bar inside
+            it is what you see. */}
+        <GestureDetector gesture={drag}>
+          <View style={styles.sheetGrab}>
+            <View style={styles.sheetHandle} />
+          </View>
+        </GestureDetector>
 
         {/* Head: club emblem + title + expiry */}
         <View style={styles.sheetHead}>
@@ -1492,6 +1552,7 @@ function UserSheet({
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetY.get() }],
   }));
+  const drag = useSheetDrag({ sheetY, height: SHEET_H, onDismiss, spring: SPRING_CFG });
 
   const rel         = user.relationship ?? 'stranger';
   const isFriend    = rel === 'friend';
@@ -1574,7 +1635,11 @@ function UserSheet({
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
       <Animated.View style={[styles.sheet, { paddingBottom: bottom + 16 }, animStyle]}>
-        <View style={styles.sheetHandle} />
+        <GestureDetector gesture={drag}>
+          <View style={styles.sheetGrab}>
+            <View style={styles.sheetHandle} />
+          </View>
+        </GestureDetector>
 
         {/* Identity row: who, how far, and what they are to you — one line of
             each, read left to right. The old sheet stacked this centred over
@@ -2505,9 +2570,10 @@ export default function MapScreen() {
 
   useEffect(() => {
     (async () => {
-      // Primed, not cold. The old code fired the system dialog the instant the
-      // map mounted — this sheet explains first so the one shot iOS gives a
-      // cold "Don't Allow" is not spent on a dialog nobody had context for.
+      // Primed, not cold. The sheet explains first so the one shot iOS gives a
+      // cold "Don't Allow" is not spent on a dialog nobody had context for —
+      // and, since 5.1.1(iv), that sheet has no way to defer the dialog once
+      // it is up. See components/PermissionPrimer.
       const granted = await ensurePermission('location');
       if (!granted) {
         const info = await checkPermission('location');
@@ -2516,11 +2582,27 @@ export default function MapScreen() {
       }
       setPermState('granted');
       await startWatching();
-      // Background gets no primer sheet of its own — straight to the OS
-      // dialog once foreground is already granted and the map is working.
+
+      // **No background request here, and that absence is the fix.**
+      //
+      // This used to chain `requestPermission('locationBackground')` straight
+      // off the foreground grant, so simply opening the map asked for Always.
+      // Nobody had turned anything on; the map does not need it — everything on
+      // this screen works while the app is open — and App Review rejected it
+      // under 5.1.1(iv) as consent the app had gone looking for.
+      //
+      // Background location is still fully supported. It is now asked for from
+      // Privacy & safety, when somebody turns on "Keep sharing while Aura is
+      // closed", which is a feature that genuinely cannot work without it. See
+      // services/permissions.requestBackground.
+      //
+      // What *is* still done here is starting the task for somebody who has
+      // already granted Always on a previous run — that is honouring a choice
+      // already made, not soliciting a new one, and it never shows a dialog.
       if (SUPPORTS_BACKGROUND_LOCATION) {
-        await requestPermission('locationBackground');
-        await startBackgroundLocationUpdates();
+        if ((await backgroundStatus()) === 'granted') {
+          await startBackgroundLocationUpdates();
+        }
       }
     })();
 
@@ -3684,6 +3766,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     letterSpacing: 17 * 0.22,
   },
   topSpacer: { flex: 1 },
+  // ── Glass chrome ──
+  // No `backgroundColor` on any of the three below: the fill is drawn by
+  // `GlassBackdrop` behind the content, and a background here would sit on top
+  // of the blur and hide it. `overflow: hidden` is what keeps the blur inside
+  // the corner radius — without it the blur is a rectangle behind a rounded
+  // button and the corners show as four grey nicks.
   nearbyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3691,7 +3779,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     height: 24,
     paddingHorizontal: 10,
     borderRadius: 100,
-    backgroundColor: colors.surface,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -3705,7 +3793,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: radius.m,
-    backgroundColor: colors.surface,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
@@ -3719,7 +3807,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     width: LOCATE_SIZE,
     height: LOCATE_SIZE,
     borderRadius: radius.m,
-    backgroundColor: colors.surface,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
@@ -3730,8 +3818,14 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     zIndex: 110,
     elevation: 12,
   },
+  /** Following. The tint is a *translucent* layer over the glass rather than a
+   *  replacement fill: an opaque one would cover the blur, so the control
+   *  would be glass when idle and a flat chip when active — the state change
+   *  would read as the button being a different button. */
+  locateTint: {
+    backgroundColor: withAlpha(colors.tealLine, 0.35),
+  },
   locateBtnActive: {
-    backgroundColor: colors.tealTint,
     borderColor: colors.tealLine,
   },
 
@@ -3772,13 +3866,24 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     elevation: 20,
     backgroundColor: colors.surface,
   },
+  /** The draggable strip across the top of a sheet.
+   *
+   *  A 4pt-tall bar is not a drag target — a finger covers it several times
+   *  over — so the gesture is attached to this padded row instead and the bar
+   *  is only what makes it visible. The 16pt that used to be `marginBottom` on
+   *  the handle is `paddingBottom` here, so the spacing below the handle is
+   *  the same as before and is now also part of what you can grab. */
+  sheetGrab: {
+    alignSelf: 'stretch',
+    paddingTop: 4,
+    paddingBottom: 16,
+  },
   sheetHandle: {
     width: 36,
     height: 4,
     backgroundColor: colors.border,
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 16,
   },
   // Identity row: avatar or point, name + meta, relationship pill.
   sheetHead: {

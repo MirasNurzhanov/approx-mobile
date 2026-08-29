@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SwiftCard } from '@/components/swifts/SwiftCard';
 import { SwiftCommentsSheet } from '@/components/swifts/SwiftCommentsSheet';
+import { SwiftReviewNotice } from '@/components/swifts/SwiftReviewNotice';
 import { SwiftLocationSheet } from '@/components/swifts/SwiftLocationSheet';
 import type { RevealState } from '@/components/swifts/SwiftLocationButton';
 import { SwiftEmptyIcon } from '@/components/swifts/icons';
@@ -24,6 +25,7 @@ import {
   type Swift,
   type SwiftLocation,
 } from '@/services/swifts';
+import { useContentActions } from '@/components/ContentActions';
 import { reportSwiftSignal } from '@/services/swiftSignals';
 
 /**
@@ -41,6 +43,12 @@ import { reportSwiftSignal } from '@/services/swiftSignals';
 
 type ScreenState = 'loading' | 'ready' | 'error';
 
+/** How often to ask whether moderation has finished, and how many times. Four
+ *  seconds is faster than a person gives up and slow enough to be free; ten
+ *  ticks is forty seconds, which covers the ordinary case comfortably. */
+const REVIEW_POLL_MS = 4000;
+const MAX_REVIEW_POLLS = 10;
+
 export default function SwiftDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const swiftId = Number(id);
@@ -50,6 +58,7 @@ export default function SwiftDetailScreen() {
   const insets = useSafeAreaInsets();
 
   const [swift, setSwift] = useState<Swift | null>(null);
+  const { present, sheets } = useContentActions();
   const [state, setState] = useState<ScreenState>('loading');
   const [height, setHeight] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -89,12 +98,51 @@ export default function SwiftDetailScreen() {
     }
   }, [state, swift]);
 
+  /**
+   * Re-fetch while the Swift is still on its way to being public.
+   *
+   * The verdict arrives asynchronously — `swifts.ai_moderation` runs the
+   * classifier off the request that created the row — so there is nothing to
+   * wait on synchronously and nothing pushed. Polling this one screen is the
+   * whole client-side cost of that: the creator who is looking at their new
+   * Swift sees it turn from "being reviewed" into a live video without doing
+   * anything, and nobody who is not looking at it polls at all.
+   *
+   * Bounded on purpose. A Swift the classifier could not settle stays
+   * `reviewing` until a sweeper or a moderator moves it, which can be minutes,
+   * and an unbounded 4-second poll on a screen somebody left open is a battery
+   * complaint. After the cap the notice simply stays put — reopening the screen
+   * fetches the current state, which is what somebody coming back to check
+   * would do anyway.
+   */
+  const pollsRef = useRef(0);
+  const reviewState = swift?.review_state ?? 'published';
+  const settling = state === 'ready'
+    && (reviewState === 'reviewing' || reviewState === 'processing');
+
+  useEffect(() => {
+    if (!settling || !Number.isFinite(swiftId)) return undefined;
+    if (pollsRef.current >= MAX_REVIEW_POLLS) return undefined;
+
+    const timer = setTimeout(() => {
+      pollsRef.current += 1;
+      fetchSwift(swiftId).then(setSwift).catch(() => {
+        // A transient failure here is not worth surfacing: the Swift on screen
+        // is still the last good copy, and the next tick tries again.
+      });
+    }, REVIEW_POLL_MS);
+    return () => clearTimeout(timer);
+    // `swift` is in the deps so each completed fetch schedules the next tick.
+  }, [settling, swiftId, swift]);
+
   const handleLayout = (e: LayoutChangeEvent) => setHeight(e.nativeEvent.layout.height);
 
-  const close = () => {
+  // `useCallback` because `handleMore` depends on it — an unmemoised `close`
+  // would change identity every render and take the memoised handler with it.
+  const close = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/swifts');
-  };
+  }, [router]);
 
   // ── Engagement — the same optimistic pattern as SwiftsFeed, over one row
   //    instead of a list. ─────────────────────────────────────────────────────
@@ -175,12 +223,26 @@ export default function SwiftDetailScreen() {
         : prev
     ));
   }, []);
-  const handleMore = useCallback(() => {}, []);
+  // Same menu as the feed's. On a permalink there is no list to prune, so a
+  // block closes the screen instead — leaving a blocked author's Swift on
+  // screen would read as the block not having worked.
+  const handleMore = useCallback((target: Swift) => {
+    present({
+      target: 'swift',
+      targetId: target.id,
+      subject: `@${target.author.username}`,
+      authorId: target.author.id,
+      authorUsername: target.author.username,
+      authorAvatar: target.author.profile_picture ?? undefined,
+      onRemoved: close,
+    });
+  }, [present, close]);
   const handleTogglePause = useCallback(() => setPaused((p) => !p), []);
   const handleToggleMute = useCallback(() => setMuted((m) => !m), []);
 
   return (
     <View style={styles.root} onLayout={handleLayout}>
+      {sheets}
       {state === 'loading' && (
         <View style={styles.center}>
           <ActivityIndicator color="#FFFFFF" size="large" />
@@ -195,6 +257,10 @@ export default function SwiftDetailScreen() {
             <Text style={styles.retry}>Try again</Text>
           </Pressable>
         </View>
+      )}
+
+      {state === 'ready' && swift && swift.is_mine && (
+        <SwiftReviewNotice state={reviewState} top={insets.top + 56} />
       )}
 
       {state === 'ready' && swift && height > 0 && (

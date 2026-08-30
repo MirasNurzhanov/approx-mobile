@@ -129,7 +129,26 @@ function SwiftCardImpl({
     p.loop = false;
     p.muted = true;
     p.timeUpdateEventInterval = TIME_UPDATE_INTERVAL_S;
-    p.currentTime = trimStartS;
+    // Set once, here, rather than in a separate effect: writing `.volume`
+    // from an effect that fires around the same time as other player-property
+    // writes (muted, currentTime on sourceLoad) can race expo-video's native
+    // KVO volume observer into re-notifying itself forever — a real crash
+    // (SIGBUS, stack overflow), not a JS-catchable error. `original_volume`
+    // is fixed for a given Swift, so there is nothing to react to anyway.
+    // A non-finite value is doubly dangerous here: NaN != NaN, so a guard the
+    // observer relies on to stop re-applying an unchanged volume never fires.
+    const vol = swift.original_volume / 100;
+    p.volume = Number.isFinite(vol) ? vol : 1;
+  });
+
+  // Seeking before the source has actually loaded is a native crash on
+  // device (it is not caught on the JS side) — wait for `sourceLoad` rather
+  // than setting `currentTime` in the `useVideoPlayer` setup callback above,
+  // and guard every other seek below with the same flag.
+  const loadedRef = useRef(false);
+  useEventListener(player, 'sourceLoad', () => {
+    loadedRef.current = true;
+    player.currentTime = trimStartS;
   });
 
   // Only the visible card plays. Scrolling away rewinds, so returning to a
@@ -139,16 +158,11 @@ function SwiftCardImpl({
       player.play();
     } else {
       player.pause();
-      if (!isActive) player.currentTime = trimStartS;
+      if (!isActive && loadedRef.current) player.currentTime = trimStartS;
     }
   }, [isActive, pausedByUser, failed, player, trimStartS]);
 
   useEffect(() => { player.muted = muted; }, [muted, player]);
-  // The creator's own mix level — muting the recorded sound is
-  // `original_volume: 0` on the server, applied here rather than baked in.
-  useEffect(() => {
-    player.volume = swift.original_volume / 100;
-  }, [swift.original_volume, player]);
 
   // A source that will not load is a real state and needs a way out — a black
   // rectangle with no explanation is the worst version of this.

@@ -1,7 +1,11 @@
+import { useEffect } from 'react';
+import { GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { IconClose, IconEye, IconEyeOff, IconLock } from '@/components/ui/icons';
+import { useSheetDrag } from '@/components/ui/useSheetDrag';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -10,7 +14,7 @@ import { LOCATION_SHARING_LABEL, type LocationSharing } from '@/services/privacy
 // What sharing your location means, said before it starts.
 //
 // The Live / Approximate / Paused buttons are the whole of the control over
-// whether Aura publishes where you are, and Paused is where every account
+// whether Approx publishes where you are, and Paused is where every account
 // begins. This sheet is what stands between Paused and the other two: App
 // Review rejected 5.1.2(i) against a build where being on the map followed
 // from granting a location permission, and the answer is that it now follows
@@ -23,7 +27,7 @@ import { LOCATION_SHARING_LABEL, type LocationSharing } from '@/services/privacy
 //
 // Shown again on the next launch, because visibility does not outlive the run
 // of the app that chose it (services/sharingSession.ts). That is why the copy
-// below says "or close Aura" rather than only naming Paused: the sentence has
+// below says "or close Approx" rather than only naming Paused: the sentence has
 // to describe the whole of what was agreed to, including the end of it.
 
 interface Props {
@@ -35,10 +39,16 @@ interface Props {
 }
 
 const BODY: Record<'live' | 'approximate', string> = {
-  live: 'Your live location will be visible to nearby Aura users until you set it back to Paused or close Aura.',
+  live: 'Your live location will be visible to nearby Approx users until you set it back to Paused or close Approx.',
   approximate:
-    'Your rough area — about 500m across, never your exact position — will be visible to nearby Aura users until you set it back to Paused or close Aura.',
+    'Your rough area — about 500m across, never your exact position — will be visible to nearby Approx users until you set it back to Paused or close Approx.',
 };
+
+/** Travel the drag-to-dismiss threshold is a fraction of. Fixed rather than
+ *  measured: this sheet sizes to its body text, which differs per mode, and a
+ *  threshold that moved with the copy would make the same gesture succeed for
+ *  one mode and spring back for another. */
+const DRAG_HEIGHT = 380;
 
 export function LocationSharingConsent({ mode, busy, onCancel, onConfirm }: Props) {
   const { colors } = useTheme();
@@ -50,6 +60,23 @@ export function LocationSharingConsent({ mode, busy, onCancel, onConfirm }: Prop
   // instead of an empty sheet with a confirm button on it.
   const body = mode && mode !== 'paused' ? BODY[mode] : null;
 
+  // Pull down to cancel — the same exit the backdrop and the X already run.
+  // Reset on open so a drag that sprang back does not leave the next open
+  // offset. Not draggable while the change is being saved.
+  const sheetY = useSharedValue(0);
+  useEffect(() => {
+    if (body !== null) sheetY.set(0);
+  }, [body, sheetY]);
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: sheetY.get() }],
+  }));
+  const drag = useSheetDrag({
+    sheetY,
+    height: DRAG_HEIGHT,
+    onDismiss: onCancel,
+    enabled: !busy,
+  });
+
   return (
     <Modal
       visible={body !== null}
@@ -59,8 +86,12 @@ export function LocationSharingConsent({ mode, busy, onCancel, onConfirm }: Prop
     >
       <View style={styles.root}>
         <Pressable style={styles.backdrop} onPress={onCancel} />
-        <View style={[styles.sheet, { paddingBottom: bottom + 20 }]}>
-          <View style={styles.handle} />
+        <Animated.View style={[styles.sheet, { paddingBottom: bottom + 20 }, sheetStyle]}>
+          <GestureDetector gesture={drag}>
+            <View style={styles.grab}>
+              <View style={styles.handle} />
+            </View>
+          </GestureDetector>
           <View style={styles.header}>
             <Text style={styles.title}>
               Share your location{mode && mode !== 'paused'
@@ -87,8 +118,8 @@ export function LocationSharingConsent({ mode, busy, onCancel, onConfirm }: Prop
             <View style={styles.fact}>
               <IconEye size={16} color={colors.t3} />
               <Text style={styles.factText}>
-                You stay visible with Aura in the background and your phone
-                locked. Closing Aura ends it, and you choose again next time.
+                You stay visible with Approx in the background and your phone
+                locked. Closing Approx ends it, and you choose again next time.
               </Text>
             </View>
             <View style={styles.fact}>
@@ -133,7 +164,7 @@ export function LocationSharingConsent({ mode, busy, onCancel, onConfirm }: Prop
           >
             <Text style={styles.cancelText}>Stay hidden</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -152,13 +183,19 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingTop: 10,
     backgroundColor: colors.surface,
   },
+  /** The draggable strip; the handle's old `marginBottom` is its padding, so
+   *  the spacing is unchanged and is now part of the grab target. */
+  grab: {
+    alignSelf: 'stretch',
+    paddingTop: 4,
+    paddingBottom: 16,
+  },
   handle: {
     width: 36,
     height: 4,
     backgroundColor: colors.border,
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 16,
   },
   header: {
     flexDirection: 'row',

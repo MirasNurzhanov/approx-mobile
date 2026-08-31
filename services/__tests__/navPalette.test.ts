@@ -59,7 +59,7 @@ describe.each(THEMES)('%s nav palette', (_name, palette) => {
     //
     // Selection therefore has to be carried by something a greyscale or
     // colour-blind reader can still see — the filled pill behind the selected
-    // glyph in `AuraTabBar`, the filled wedge in `Speedometer`, the platform's
+    // glyph in `ApproxTabBar`, the filled wedge in `Speedometer`, the platform's
     // own indicator in the native bar, and the heavier label weight. This is
     // the ratio that makes that fill visible against the bar it sits on.
     expect(contrast(palette.navActive, palette.navBg)).toBeGreaterThanOrEqual(3);

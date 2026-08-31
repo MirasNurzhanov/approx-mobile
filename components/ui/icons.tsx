@@ -198,10 +198,10 @@ export function IconCamera({ size = 24, color = colors.t2 }: IconProps) {
   )
 }
 
-export function IconHeart({ size = 24, color = colors.t2 }: IconProps) {
+export function IconHeart({ size = 24, color = colors.t2, filled = false }: IconProps & { filled?: boolean }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
-      <G stroke={color} {...stroke}>
+      <G stroke={color} {...stroke} fill={filled ? color : 'none'}>
         <Path d="M12 20.5S4.5 15.6 4.5 10.1a4.1 4.1 0 017.5-2.3 4.1 4.1 0 017.5 2.3c0 5.5-7.5 10.4-7.5 10.4z" />
       </G>
     </Svg>
@@ -949,7 +949,7 @@ export function IconMoon({ size = 24, color = colors.t2 }: IconProps) {
 
 // ── Swift composer ──────────────────────────────────────────────────────────
 // Drawn for the capture and edit screens. Same 24px grid, 1.5px stroke and
-// squared terminals as everything above, so the camera chrome reads as Aura's
+// squared terminals as everything above, so the camera chrome reads as Approx's
 // rather than as a stock camera kit dropped into it.
 
 export function IconFlash({ size = 24, color = colors.t2 }: IconProps) {

@@ -13,12 +13,43 @@ import { fonts, radius, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
-// Priming: explain in-app, then let the OS ask.
+// Explain in-app, then let the OS ask. Immediately, and with no way around it.
 //
-// iOS gives an app exactly one shot at each permission dialog. A cold prompt
-// that gets refused is permanent until the user goes digging in Settings, so
-// the system dialog is never the first thing the user sees — this sheet is,
-// and it only appears when the permission has never been asked for.
+// ─── Why there is no "Not Now" ────────────────────────────────────────────────
+//
+// There used to be one, and it is what App Review rejected under 5.1.1(iv):
+// a custom message appeared before the system permission request, and the user
+// could choose "Not Now" and delay the native dialog. Apple treats a
+// pre-permission screen that can defer their dialog as an attempt to manage the
+// permission decision on their behalf, whether or not that was the intent.
+//
+// So this sheet now has exactly one action in the state that precedes a native
+// dialog — **Continue** — and pressing it goes straight to the OS. There is no
+// Not Now, no Skip, no X, no backdrop dismissal, and Android's back button is a
+// no-op while it is up.
+//
+// The user still has complete control: they exercise it in Apple's own dialog,
+// which is the only place Apple wants that choice made. Nothing here touches,
+// pre-empts or reinterprets Allow / Don't Allow / Allow Once.
+//
+// ─── The one state that keeps a Cancel ────────────────────────────────────────
+//
+// When a permission is `blocked` — refused permanently, `canAskAgain` false —
+// there is no native dialog left to precede. iOS will not show one again, so
+// the sheet is not a pre-permission screen at all: it is a signpost to Settings.
+// Apple asks for exactly two actions there, Open Settings and Cancel, and that
+// is what it has. `restricted` (parental controls, MDM) is the same shape and
+// takes the same treatment.
+//
+// This distinction is the whole of the rule. A sheet in front of Apple's dialog
+// may not offer a way out; a sheet that has no dialog behind it must.
+//
+// ─── Not to be confused with ──────────────────────────────────────────────────
+//
+// `components/TermsAgreement` and `components/LocationSharingConsent` are
+// consent screens that do *not* precede a native dialog, and both must be
+// declinable. Making those undismissible, or making this one dismissible, are
+// both rejections.
 //
 // Usage:
 //   const { ensure, primer } = usePermissionPrimer();
@@ -28,8 +59,9 @@ import { useTheme } from '@/context/ThemeContext';
 type Pending = {
   key: PermissionKey;
   resolve: (granted: boolean) => void;
-  /** Already refused before — offer Settings rather than a dead button. */
-  blocked: boolean;
+  /** No native dialog is available any more — offer Settings instead of a
+   *  Continue button that would do nothing. */
+  needsSettings: boolean;
 };
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
@@ -99,7 +131,7 @@ export function usePermissionPrimer() {
   useEffect(() => { pendingRef.current = pending; });
 
   // Kept despite react-doctor/react-compiler-no-manual-memoization: `ensure`
-  // is this hook's whole public surface, consumed across six other files that
+  // is this hook's whole public surface, consumed across seven other files that
   // rely on its identity staying stable — `settle`/`onContinue` memoized to
   // match, since `onContinue` depends on `settle`.
   const settle = useCallback((granted: boolean) => {
@@ -108,9 +140,12 @@ export function usePermissionPrimer() {
   }, []);
 
   /**
-   * Resolves true when the permission is usable. Shows the explanation sheet
-   * first when the permission has never been asked for, and a "open Settings"
-   * sheet when it was permanently refused. Never prompts twice.
+   * Resolves true when the permission is usable.
+   *
+   * Shows the explanation sheet when a native dialog is still available, and a
+   * "open Settings" sheet when it is not. Never prompts twice, and never
+   * resolves without either the OS having been asked or the user having been
+   * sent somewhere they can change it.
    */
   const ensure = useCallback(async (key: PermissionKey): Promise<boolean> => {
     const info: PermissionInfo = await check(key);
@@ -119,31 +154,47 @@ export function usePermissionPrimer() {
     if (info.state === 'unsupported') return false;
 
     return new Promise<boolean>((resolve) => {
-      setPending({ key, resolve, blocked: info.state === 'blocked' });
+      setPending({
+        key,
+        resolve,
+        // `denied` on iOS means the dialog was refused and will not come back;
+        // on Android it means "ask again is still allowed". `check()` already
+        // resolves that difference into `blocked` vs `denied`, so this reads
+        // the resolved answer rather than re-deriving it.
+        needsSettings: info.state === 'blocked' || info.state === 'restricted',
+      });
     });
   }, []);
 
   const onContinue = useCallback(async () => {
     const current = pendingRef.current;
     if (!current) return;
-    if (current.blocked) {
+    if (current.needsSettings) {
       openAppSettings();
       settle(false);
       return;
     }
+    // Straight to Apple's dialog. Nothing between this line and the OS.
     const info = await request(current.key);
     settle(info.state === 'granted');
   }, [settle]);
 
   const copy = pending ? PERMISSION_COPY[pending.key] : null;
+  const needsSettings = pending?.needsSettings ?? false;
 
   const primer = (
     <Modal
       visible={!!pending}
       transparent
       animationType="fade"
-      onRequestClose={() => settle(false)}
+      // A no-op in the pre-permission state: Android's back button must not
+      // defer the system dialog either, which is the same rule the missing
+      // "Not Now" enforces. In the Settings state there is no dialog to defer,
+      // so back behaves like Cancel.
+      onRequestClose={() => { if (needsSettings) settle(false); }}
     >
+      {/* Not a Pressable. A tappable backdrop is a dismissal, and dismissing
+          this sheet is dismissing Apple's dialog before it is shown. */}
       <View style={styles.backdrop}>
         <View
           style={styles.sheet}
@@ -154,33 +205,38 @@ export function usePermissionPrimer() {
             {copy?.title}
           </Text>
           <Text style={styles.body}>
-            {pending?.blocked ? copy?.denied : copy?.primer}
+            {needsSettings ? copy?.denied : copy?.primer}
           </Text>
 
           <Pressable
             onPress={onContinue}
             style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
             accessibilityRole="button"
-            accessibilityLabel={pending?.blocked ? 'Open system settings' : 'Continue'}
+            accessibilityLabel={needsSettings ? 'Open system settings' : 'Continue'}
             accessibilityHint={
-              pending?.blocked
+              needsSettings
                 ? 'Opens the system settings app so you can turn this permission on'
-                : 'Shows the system permission request'
+                : 'Shows the system permission request, where you can allow or deny'
             }
           >
             <Text style={styles.primaryText}>
-              {pending?.blocked ? 'Open Settings' : 'Continue'}
+              {needsSettings ? 'Open Settings' : 'Continue'}
             </Text>
           </Pressable>
 
-          <Pressable
-            onPress={() => settle(false)}
-            style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Not now"
-          >
-            <Text style={styles.secondaryText}>Not now</Text>
-          </Pressable>
+          {/* Only in the Settings state. See the header note: a Cancel here
+              when a native dialog is still available is the 5.1.1(iv)
+              rejection. */}
+          {needsSettings ? (
+            <Pressable
+              onPress={() => settle(false)}
+              style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+            >
+              <Text style={styles.secondaryText}>Cancel</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Modal>

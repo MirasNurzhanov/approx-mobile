@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Whether this *device* has been introduced to Aura.
+// Whether this *device* has been introduced to Approx.
 //
 // Per device, not per account, and that is the whole point of it: the carousel
 // explains what the app is, which is a thing you need told once and never

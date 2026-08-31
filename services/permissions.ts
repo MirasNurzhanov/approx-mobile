@@ -16,12 +16,13 @@ import { useSyncExternalStore } from 'react';
 //     from Settings while we are suspended — so the store re-checks on
 //     foreground rather than trusting what it saw at launch.
 
-// Android deliberately ships without ACCESS_BACKGROUND_LOCATION: app.json sets
-// expo-location's `isAndroidBackgroundLocationEnabled: false`, so the OS has no
-// permission to grant. Asking anyway would show a dialog that can only fail, and
-// Settings would list a row that can never turn green. iOS is untouched — it
-// still declares the background mode and still requests it.
-export const SUPPORTS_BACKGROUND_LOCATION = Platform.OS !== 'android';
+// Both platforms declare ACCESS_BACKGROUND_LOCATION now: app.json sets
+// expo-location's `isAndroidBackgroundLocationEnabled: true` (with
+// `isAndroidForegroundServiceEnabled` alongside it, since Android will not keep
+// updates flowing while backgrounded without a foreground service). Location
+// sharing is otherwise account-scoped, not app-lifecycle-scoped — it should
+// stop only on sign-out or the user choosing Paused, not on backgrounding.
+export const SUPPORTS_BACKGROUND_LOCATION = true;
 
 export type PermissionKey =
   | 'camera'
@@ -36,6 +37,19 @@ export type PermissionState =
   | 'denied'
   /** Refused permanently — only the OS settings screen can change it. */
   | 'blocked'
+  /**
+   * Withheld by something outside the user's control — Screen Time,
+   * parental controls, or an MDM profile. Distinct from `blocked` because the
+   * remedy is different and often not the user's to apply: Settings will show
+   * the switch greyed out rather than flippable.
+   *
+   * expo-location does not surface iOS's `restricted` authorization status
+   * directly, so this is only reached when the platform reports it explicitly.
+   * When it cannot be told apart from a permanent refusal it reads as
+   * `blocked`, which points at the same screen and is the safe direction to be
+   * wrong in.
+   */
+  | 'restricted'
   /** Never asked. This is the only state where priming is worth showing. */
   | 'undetermined'
   /** Not available on this platform/build. */
@@ -63,7 +77,7 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   camera: {
     title: 'Camera',
     primer:
-      'Aura needs the camera to post a story or send a photo in chat. Photos are only sent when you choose to share one.',
+      'Approx needs the camera to post a story or send a photo in chat. Photos are only sent when you choose to share one.',
     purpose: 'Take stories and photos in chat.',
     denied:
       'Stories and photos in chat need camera access before you can capture one.',
@@ -71,18 +85,18 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   location: {
     title: 'Location',
     primer:
-      'Aura shows people with shared interests near you right now. Without location the map has nothing to show. You control how precise it is, and can pause it any time.',
+      'Approx shows people with shared interests near you right now. Without location the map has nothing to show. You control how precise it is, and can pause it any time.',
     purpose: 'Find people nearby and place you on the map.',
     denied:
       'The map can’t show anyone nearby without location access.',
   },
   locationBackground: {
-    title: 'Background location',
+    title: 'Keep sharing while Approx is closed',
     primer:
-      'Aura can keep finding people and music zones while the app is closed. This is optional — everything works while the app is open without it.',
-    purpose: 'Keep finding nearby people and zones while the app is closed.',
+      'iOS will ask whether Approx may use your location Always. That is what keeps your place on the map current while Approx is closed and your phone is locked — only while you are sharing, and only until you turn this off, choose Paused, or close Approx.',
+    purpose: 'Keep your place on the map current while Approx is closed.',
     denied:
-      'Aura will only find people while the app is open.',
+      'Approx will only update your location while the app is open. You can change this in Settings → Approx → Location.',
   },
   notifications: {
     title: 'Notifications',
@@ -98,7 +112,21 @@ export const PERMISSION_COPY: Record<PermissionKey, {
 function toState(status: string, canAskAgain: boolean): PermissionState {
   if (status === 'granted') return 'granted';
   if (status === 'undetermined') return 'undetermined';
+  // Only reached when the platform names it. See the `restricted` note on
+  // PermissionState for why this is defensive rather than load-bearing.
+  if (status === 'restricted') return 'restricted';
   return canAskAgain ? 'denied' : 'blocked';
+}
+
+/** Whether the OS will still show a dialog for this state.
+ *
+ * The single question `PermissionPrimer` branches on, and the reason it lives
+ * here rather than in the component: "may this sheet offer a way out" is the
+ * same question, and getting it wrong in either direction is an App Store
+ * rejection. See the header note in components/PermissionPrimer.
+ */
+export function canStillPrompt(state: PermissionState): boolean {
+  return state === 'undetermined' || state === 'denied';
 }
 
 async function readCamera(): Promise<PermissionInfo> {
@@ -191,6 +219,84 @@ export async function request(key: PermissionKey): Promise<PermissionInfo> {
 
 export function openAppSettings(): void {
   Linking.openSettings().catch(() => {});
+}
+
+// ─── Background location ──────────────────────────────────────────────────────
+//
+// Kept apart from the generic `request` because the iOS flow genuinely is
+// different, and because *when* it is asked for is the thing App Review
+// rejected the app over.
+//
+// The rule, stated once: **nothing requests background location because a
+// screen mounted.** It is requested when somebody turns on a feature that
+// cannot work without it — keeping their location current while Approx is closed
+// — and at no other time. `app/(tabs)/map.tsx` used to chain it off the
+// foreground grant on mount, which is a request nobody asked for.
+//
+// The iOS sequence this has to respect:
+//
+//   1. Background cannot be asked for at all until foreground is granted. iOS
+//      simply refuses, and expo-location reports it as denied — which would
+//      look to us like the user said no.
+//   2. With foreground granted as "While Using the App", asking for background
+//      shows Apple's *upgrade* prompt ("Change to Always Allow?"). That is the
+//      legitimate path and it is the one this takes.
+//   3. iOS offers that upgrade prompt a limited number of times. Once it stops,
+//      the only remaining route is Settings, and pretending otherwise leaves a
+//      button that does nothing.
+
+export type BackgroundOutcome =
+  /** Always / background is granted. */
+  | 'granted'
+  /** Foreground is not granted, so iOS will not even consider background. */
+  | 'needs_foreground'
+  /** Asked, and the user chose to stay on While Using the App. */
+  | 'declined'
+  /** No dialog left. Settings is the only route. */
+  | 'needs_settings'
+  | 'unsupported';
+
+/**
+ * Read the background state without prompting.
+ *
+ * Answers `granted` when Always is already in force — which is what stops this
+ * from asking a second time. iOS treats a repeat request as a no-op anyway, but
+ * a UI that offers to turn on something already on is its own bug.
+ */
+export async function backgroundStatus(): Promise<BackgroundOutcome> {
+  if (!SUPPORTS_BACKGROUND_LOCATION) return 'unsupported';
+  const foreground = await Location.getForegroundPermissionsAsync();
+  if (!foreground.granted) return 'needs_foreground';
+
+  const background = await Location.getBackgroundPermissionsAsync();
+  if (background.granted) return 'granted';
+  return background.canAskAgain ? 'declined' : 'needs_settings';
+}
+
+/**
+ * Ask for background location, through iOS's own upgrade flow.
+ *
+ * Call this only from an explicit user action that turns on continuous
+ * location — never speculatively. The caller is expected to have shown its own
+ * explanation first; `PERMISSION_COPY.locationBackground` is that text, so the
+ * explanation and the request cannot drift apart.
+ *
+ * Returns what actually happened, so the caller can tell "they said no" from
+ * "iOS would not ask" and show the right thing. Both are ordinary outcomes and
+ * neither is an error.
+ */
+export async function requestBackground(): Promise<BackgroundOutcome> {
+  const before = await backgroundStatus();
+  // Already on, or nothing to ask. Asking again would be noise at best.
+  if (before !== 'declined') return before;
+
+  try {
+    await Location.requestBackgroundPermissionsAsync();
+  } catch {
+    // Fall through — re-reading below gives the real state either way.
+  }
+  await refreshPermissions(['locationBackground']);
+  return backgroundStatus();
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────

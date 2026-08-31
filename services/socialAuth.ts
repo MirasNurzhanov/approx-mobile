@@ -5,7 +5,7 @@
  * person on the device and hands back an **identity token** — a JWT the
  * provider signed. That token goes to `/api/users/social/`, which re-verifies
  * the signature against Google's or Apple's published keys and answers with
- * ordinary Aura tokens. Nothing here decides who anybody is; the phone only
+ * ordinary Approx tokens. Nothing here decides who anybody is; the phone only
  * carries the provider's word to a server that can check it.
  *
  * Neither library works in Expo Go — both are native code — so both are gated
@@ -28,6 +28,10 @@ export interface SocialSignInResult {
   created: boolean;
   /** The account still owes us a date of birth — see app/social-birthday.tsx. */
   needsDateOfBirth: boolean;
+  /** The account has not agreed to the current Terms. Same shape and same
+   *  reason as `needsDateOfBirth`: an existing account that predates the
+   *  agreement signs in fine and meets the gate on the next screen. */
+  needsTerms: boolean;
 }
 
 /** The user backed out of the provider's sheet. Not an error to report. */
@@ -130,7 +134,7 @@ export async function isAppleAvailable() {
 // ── The exchange ─────────────────────────────────────────────────────────────
 
 /**
- * Trade a provider identity token for an Aura session, and store it.
+ * Trade a provider identity token for an Approx session, and store it.
  *
  * Mirrors services/auth.ts loginRequest, including the `resumeSession()` — a
  * previous sign-out latches the api client shut, and a social sign-in has to
@@ -140,6 +144,7 @@ async function exchange(
   provider: SocialProvider,
   idToken: string,
   fullName: string,
+  acceptedTerms: boolean,
 ): Promise<SocialSignInResult> {
   let data;
   try {
@@ -147,6 +152,11 @@ async function exchange(
       provider,
       id_token: idToken,
       full_name: fullName,
+      // The server refuses to *create* an account without this, and records
+      // the version it was agreed to. An existing account signing in without
+      // it is let through and comes back with `needsTerms` instead — see
+      // users/views.py SocialLoginView.
+      accept_terms: acceptedTerms,
     }));
   } catch (err) {
     if (axios.isAxiosError(err) && err.response?.data) {
@@ -157,7 +167,7 @@ async function exchange(
       );
     }
     throw new SocialSignInError(
-      'Could not reach Aura. Check your connection and try again.',
+      'Could not reach Approx. Check your connection and try again.',
       'network',
     );
   }
@@ -169,6 +179,7 @@ async function exchange(
   return {
     created: !!data.created,
     needsDateOfBirth: !!data.needs_date_of_birth,
+    needsTerms: !!data.needs_terms,
   };
 }
 
@@ -255,9 +266,11 @@ async function getGoogleIdToken(): Promise<ProviderToken> {
   return { idToken, fullName: user.name ?? '' };
 }
 
-export async function signInWithGoogle(): Promise<SocialSignInResult> {
+export async function signInWithGoogle(
+  acceptedTerms = false,
+): Promise<SocialSignInResult> {
   const { idToken, fullName } = await getGoogleIdToken();
-  return exchange('google', idToken, fullName);
+  return exchange('google', idToken, fullName, acceptedTerms);
 }
 
 // ── Apple ────────────────────────────────────────────────────────────────────
@@ -298,9 +311,11 @@ async function getAppleIdToken(): Promise<ProviderToken> {
   return { idToken: credential.identityToken, fullName };
 }
 
-export async function signInWithApple(): Promise<SocialSignInResult> {
+export async function signInWithApple(
+  acceptedTerms = false,
+): Promise<SocialSignInResult> {
   const { idToken, fullName } = await getAppleIdToken();
-  return exchange('apple', idToken, fullName);
+  return exchange('apple', idToken, fullName, acceptedTerms);
 }
 
 // ── Linking ──────────────────────────────────────────────────────────────────
@@ -312,7 +327,7 @@ export async function signInWithApple(): Promise<SocialSignInResult> {
 // session's Bearer token, and `exchange()`'s POST deliberately does not — it
 // runs before any session exists.
 
-/** Whoever asked already has an Aura session, so the failure here is "your
+/** Whoever asked already has an Approx session, so the failure here is "your
  *  account couldn't be connected", never "sign-in failed" — the sign-in
  *  already happened; this is what it's attached to. */
 async function link(provider: SocialProvider, idToken: string): Promise<SocialProvider[]> {
@@ -331,7 +346,7 @@ async function link(provider: SocialProvider, idToken: string): Promise<SocialPr
       );
     }
     throw new SocialSignInError(
-      'Could not reach Aura. Check your connection and try again.',
+      'Could not reach Approx. Check your connection and try again.',
       'network',
     );
   }

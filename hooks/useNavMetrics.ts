@@ -15,7 +15,7 @@ import { useNavStyle } from '@/context/NavStyleContext';
 /**
  * Bar style's height above the safe-area inset, whichever bar is actually
  * drawn — the real native one where `BAR_STYLE_IS_NATIVE` (iOS), this app's
- * own floating capsule (`components/nav/AuraTabBar`) everywhere else.
+ * own floating capsule (`components/nav/ApproxTabBar`) everywhere else.
  */
 function barHeightAboveInset(): number {
   return BAR_STYLE_IS_NATIVE ? NATIVE_TAB_BAR_H : NAV_BAR_H + NAV_BAR_GAP;
@@ -27,7 +27,7 @@ function barHeightAboveInset(): number {
  *
  * `fromRight` and `width` describe the control's horizontal footprint. They
  * only matter for the wheel, whose height varies across the screen; every bar
- * — native or `AuraTabBar` — spans the full width and clears the same amount
+ * — native or `ApproxTabBar` — spans the full width and clears the same amount
  * everywhere.
  */
 export function useNavClearance(fromRight: number, width: number): number {
@@ -46,7 +46,7 @@ export function useNavClearance(fromRight: number, width: number): number {
 export function useNavAlignedRight(controlWidth: number, edgeInset: number): number {
   const { navStyle } = useNavStyle();
   if (navStyle === 'wheel') return edgeInset;
-  // AuraTabBar always floats in from the edges, same as the native bar does
+  // ApproxTabBar always floats in from the edges, same as the native bar does
   // from iOS 26 on — see tabAlignedRightInset.
   const floating = !BAR_STYLE_IS_NATIVE || isIOS26OrNewer;
   return tabAlignedRightInset(controlWidth, NAV_SECTIONS.length, floating);

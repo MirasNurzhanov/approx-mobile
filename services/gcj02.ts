@@ -1,6 +1,6 @@
 // Display-only coordinate shift for mainland China basemaps.
 //
-// Everything Aura stores, sends, and reasons about is WGS-84 — raw GPS, OSM
+// Everything Approx stores, sends, and reasons about is WGS-84 — raw GPS, OSM
 // geometry, every containment test. That does not change, and nothing in this
 // file is allowed to leak into it.
 //

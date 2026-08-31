@@ -32,6 +32,8 @@ const ALLOWED_WRITERS: Record<string, string> = {
     'the same card, same consent sheet',
   'services/signOut.ts':
     'sets paused on the way out — the safe direction, and never a visible mode',
+  'services/goInvisible.ts':
+    'the launch prompt\'s Go Invisible button — sets paused only, same reasoning as signOut.ts',
 };
 
 /** The card that *renders* the check in / check out control.

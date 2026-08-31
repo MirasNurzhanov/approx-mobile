@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
-import { AuraMark } from '@/components/ui/AuraMark';
+import { ApproxMark } from '@/components/ui/ApproxMark';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -93,11 +93,11 @@ export default function MarketScreen() {
   const styles = makeStyles(colors);
   const router = useRouter();
   const { top } = useSafeAreaInsets();
-  const [auraPoints, setAuraPoints] = useState<number | null>(null);
+  const [auraPoints, setApproxPoints] = useState<number | null>(null);
 
   useEffect(() => {
     api.get<{ aura_points?: number }>('/api/users/profile/')
-      .then((r) => setAuraPoints(r.data.aura_points ?? 0))
+      .then((r) => setApproxPoints(r.data.aura_points ?? 0))
       .catch(() => {});
   }, []);
 
@@ -114,7 +114,7 @@ export default function MarketScreen() {
         </Pressable>
 
         <View style={styles.auraOrb}>
-          <AuraMark size={13} color={colors.purple} />
+          <ApproxMark size={13} color={colors.purple} />
           <Text style={styles.auraOrbValue}>
             {auraPoints != null ? auraPoints.toLocaleString() : '—'}
           </Text>
@@ -132,7 +132,7 @@ export default function MarketScreen() {
         <Text style={styles.comingSoonTitle}>Coming Soon 🔒</Text>
 
         <Text style={styles.subtitle}>
-          Spend your Aura Points on frames, banners and zone upgrades
+          Spend your Approx Points on frames, banners and zone upgrades
         </Text>
       </View>
     </View>

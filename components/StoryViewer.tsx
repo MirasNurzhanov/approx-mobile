@@ -19,23 +19,27 @@ import Animated, {
   cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
+  withSequence,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { REACTIONS } from '@/components/storyReactions';
+import { STORY_LIKE } from '@/components/storyReactions';
 import { Avatar } from '@/components/ui/Avatar';
 import { Scrim } from '@/components/ui/Scrim';
+import { useContentActions } from '@/components/ContentActions';
 import {
   IconBookmark,
   IconChevron,
   IconClose,
+  IconMore,
   IconPin,
 } from '@/components/ui/icons';
-import { fonts, radius, type } from '@/constants/theme';
+import { fonts, type } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import {
@@ -123,6 +127,8 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   const [replySent, setReplySent] = useState(false);
   const [togglingStar, setTogglingStar] = useState(false);
   const { starredIds } = useStoryArchive();
+  const reduceMotion = useReduceMotion();
+  const { present, sheets } = useContentActions();
 
   function goTo(i: number) {
     if (i >= stories.length) { onClose(); return; }
@@ -180,7 +186,25 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   // Only ever your own story: starring is the author's own act, not a
   // bookmark of someone else's post.
   const canStar = currentUserId != null && story.author.id === currentUserId;
+  const isOwn = canStar;
   const isStarred = starredIds.has(story.id);
+
+  function reportThis() {
+    present({
+      target: 'story',
+      targetId: story.id,
+      subject: `this story by @${story.author.username}`,
+      authorId: story.author.id,
+      authorUsername: story.author.username,
+      authorAvatar: story.author.profile_picture ?? undefined,
+      // Blocking the author of a story you are looking at should not leave you
+      // looking at it.
+      onRemoved: onClose,
+    });
+  }
+
+  const isLiked = story.user_reaction === STORY_LIKE.type;
+  const likeCount = story.reactions?.[STORY_LIKE.type] ?? 0;
 
   async function toggleStar() {
     if (togglingStar) return;
@@ -194,6 +218,28 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     // Reached on both paths: the `catch` alerts and stops there. Not a
     // `finally` — React Compiler bails on any component containing one.
     setTogglingStar(false);
+  }
+
+  // ── Liking ────────────────────────────────────────────────────────────────
+  // The heart kicks once when it fills. Deliberately the only motion down here:
+  // the photo is the content, and a second animated thing in the same corner
+  // would be competing with it rather than confirming a tap.
+  const heartPop = useSharedValue(0);
+  const heartStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + heartPop.get() * 0.32 }],
+  }));
+
+  function handleLike() {
+    if (!onReact) return;
+    // Only on the way *in*. Un-liking is usually a mis-tap being undone, and
+    // celebrating it would be the interface misreading the moment.
+    if (!isLiked && !reduceMotion) {
+      heartPop.set(withSequence(
+        withTiming(1, { duration: 130 }),
+        withTiming(0, { duration: 240 }),
+      ));
+    }
+    onReact(story.id, STORY_LIKE.type);
   }
 
   async function sendReply() {
@@ -223,6 +269,10 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
 
   return (
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      {/* Inside this Modal, not outside it: a second Modal rendered from a
+          sibling of this one would be presented *behind* the story viewer on
+          iOS and never be seen. */}
+      {sheets}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.svContainer} {...(panResponder?.panHandlers ?? {})}>
         {/* Background — photo fills the screen; a text-only story gets a soft
@@ -255,10 +305,12 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
             enough that the gradient has faded to nothing before it reaches
             the middle of the photo. */}
         {hasPhoto && <Scrim edge="top" height={top + 130} opacity={0.6} />}
-        {/* Tall enough for a full 280-character story: ~7 lines at this size,
-            stacked above the reactions and the reply bar. Too short and the
-            first line of a long story sits on raw photo. */}
-        <Scrim edge="bottom" height={bottom + (replyTo ? 360 : 310)} opacity={0.72} />
+        {/* Sized to what is actually under it. With the chrome down to one row
+            a captioned story needs ~7 lines for a full 280 characters plus the
+            bar; a story with no caption needs the bar and nothing else — which
+            is a real case now that captions are optional, and used to darken a
+            third of the photo for no reason. */}
+        <Scrim edge="bottom" height={bottom + (hasText ? 290 : 130)} opacity={0.72} />
 
         {/* Progress bars, flush to the top edge where a story's are expected
             to be. They used to sit in a rounded translucent box of their own. */}
@@ -279,6 +331,20 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
               {timeAgo(story.created_at)} · {timeLeft(story.expires_at)}
             </Text>
           </View>
+          {/* Report, on somebody else's story only. Reporting your own is not a
+              thing, and the slot is better spent on the star toggle that
+              replaces it — see `canStar`, which is the same condition. */}
+          {!isOwn && (
+            <Pressable
+              onPress={reportThis}
+              hitSlop={12}
+              style={({ pressed }) => [styles.svGlassBtn, pressed && { opacity: 0.7 }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Report this story by ${story.author.username}`}
+            >
+              <IconMore size={17} color={colors.t1} />
+            </Pressable>
+          )}
           {canStar && (
             <Pressable
               onPress={toggleStar}
@@ -307,9 +373,11 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
         </View>
 
         {/* Story text. Legible now because the bottom scrim runs underneath
-            it — before, this block had no background of any kind. */}
+            it — before, this block had no background of any kind. Sits clear
+            of the action bar, which is one height now whether or not there is
+            a reply field in it. */}
         {hasText && (
-          <View style={[styles.svTextBlock, { bottom: bottom + (replyTo ? 150 : 92) }]} pointerEvents="none">
+          <View style={[styles.svTextBlock, { bottom: bottom + 72 }]} pointerEvents="none">
             {story.place_name ? (
               <View style={styles.svPlaceRow}>
                 <IconPin size={11} color={colors.t1} />
@@ -320,78 +388,80 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
           </View>
         )}
 
-        {/* Reply to a friend's story — the comment lands in your chat */}
-        {replyTo && (
-          <View style={[styles.svReplyRow, { bottom: bottom + 90 }]}>
+        {/* Sent confirmation */}
+        {replySent && replyTo && (
+          <View style={[styles.svSentToast, { bottom: bottom + 78 }]} pointerEvents="none">
+            <Text style={styles.svSentToastText}>Sent to @{replyTo.username}</Text>
+          </View>
+        )}
+
+        {/* One bar, not two. The reply field and the reaction used to be
+            stacked rows — around 100pt of chrome over the bottom of every
+            photo, and the reaction sat in a glass pill heavy enough to read as
+            the main event on screen. They belong on one line: reply on the
+            left where a keyboard is going, the heart on the right where a
+            thumb already is. */}
+        <View style={[styles.svActionBar, { bottom: bottom + 14 }]}>
+          {replyTo && (
             <TextInput
               style={styles.svReplyInput}
               value={replyText}
               onChangeText={setReplyText}
               placeholder={`Reply to ${replyTo.username}…`}
-              placeholderTextColor={colors.t3}
+              placeholderTextColor="rgba(255,255,255,0.6)"
               maxLength={500}
               onFocus={() => setReplyFocused(true)}
               onBlur={() => setReplyFocused(false)}
               onSubmitEditing={sendReply}
               returnKeyType="send"
             />
+          )}
+
+          {/* Only once there is something to send. The field already submits
+              from the keyboard, so an always-present button was a permanent
+              control for an occasional act. */}
+          {replyTo && replyText.trim().length > 0 && (
             <Pressable
-              style={({ pressed }) => [
-                styles.svReplySend,
-                replyText.trim().length > 0 && styles.svReplySendActive,
-                pressed && { opacity: 0.8 },
-              ]}
+              style={({ pressed }) => [styles.svReplySend, pressed && { opacity: 0.8 }]}
               onPress={sendReply}
-              disabled={replyText.trim().length === 0 || sendingReply}
+              disabled={sendingReply}
+              accessibilityRole="button"
+              accessibilityLabel={`Send reply to ${replyTo.username}`}
             >
               {sendingReply ? (
                 <ActivityIndicator size="small" color={colors.bg} />
               ) : (
-                <IconChevron size={16} color={replyText.trim() ? colors.bg : colors.t3} />
+                <IconChevron size={16} color={colors.bg} />
               )}
             </Pressable>
-          </View>
-        )}
+          )}
 
-        {/* Sent confirmation */}
-        {replySent && replyTo && (
-          <View style={[styles.svSentToast, { bottom: bottom + 150 }]} pointerEvents="none">
-            <Text style={styles.svSentToastText}>Sent to @{replyTo.username}</Text>
-          </View>
-        )}
-
-        {/* Reaction. A compact pill that sizes to its content, rather than a
-            stretched box filling the width — that read as the heaviest thing
-            on screen, competing with the story itself. */}
-        <View style={[styles.svReactions, { bottom: bottom + 18 }]}>
-          {REACTIONS.map(({ type, Icon }) => {
-            const count = story.reactions?.[type] ?? 0;
-            const isActive = story.user_reaction === type;
-            return (
-              <Pressable
-                key={type}
-                style={({ pressed }) => [
-                  styles.svReactionBtn,
-                  isActive && styles.svReactionBtnActive,
-                  pressed && onReact && styles.svReactionBtnPressed,
-                ]}
-                onPress={onReact ? () => onReact(story.id, type) : undefined}
-                disabled={!onReact}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  count > 0 ? `${type}, ${count} ${count === 1 ? 'reaction' : 'reactions'}` : type
-                }
-                accessibilityState={{ selected: isActive, disabled: !onReact }}
-              >
-                <Icon size={19} color={isActive ? colors.teal : colors.t1} />
-                {count > 0 && (
-                  <Text style={[styles.svReactionCount, isActive && styles.svReactionCountActive]}>
-                    {count}
-                  </Text>
-                )}
-              </Pressable>
-            );
-          })}
+          {/* No pill behind it. The scrim is the background down here, and a
+              glass capsule around a single icon was chrome drawing attention
+              to itself — the shadow is what keeps it legible over a bright
+              photo instead. */}
+          <Pressable
+            onPress={handleLike}
+            disabled={!onReact}
+            hitSlop={10}
+            style={({ pressed }) => [styles.svHeartBtn, pressed && onReact && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel={
+              likeCount > 0
+                ? `${isLiked ? 'Unlike' : 'Like'}, ${likeCount} ${likeCount === 1 ? 'like' : 'likes'}`
+                : (isLiked ? 'Unlike' : 'Like')
+            }
+            accessibilityState={{ selected: isLiked, disabled: !onReact }}
+          >
+            <Animated.View style={heartStyle}>
+              <STORY_LIKE.Icon size={27} filled={isLiked} color={isLiked ? colors.red : '#FFFFFF'} />
+            </Animated.View>
+            {likeCount > 0 && (
+              <Text style={[styles.svHeartCount, isLiked && styles.svHeartCountActive]}>
+                {likeCount}
+              </Text>
+            )}
+          </Pressable>
         </View>
       </View>
       </KeyboardAvoidingView>
@@ -486,40 +556,56 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
   },
 
-  // ── Reply ──
-  svReplyRow: {
+  // ── Action bar: reply on the left, heart on the right ──
+  svActionBar: {
     position: 'absolute',
     left: 0,
     right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     paddingHorizontal: 16,
-    paddingTop: 10,
   },
   svReplyInput: {
     flex: 1,
-    height: 42,
+    height: 44,
     borderRadius: 100,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.25)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 16,
+    borderColor: 'rgba(255,255,255,0.45)',
+    // No fill. An outlined capsule over the scrim reads as a field to type in
+    // without putting another opaque slab over the photo.
+    paddingHorizontal: 18,
     fontFamily: fonts.body,
     fontSize: 14,
     color: '#FFFFFF',
   },
+  /** Only mounted once there is text, so it is always the active state. */
   svReplySend: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: colors.teal,
   },
-  svReplySendActive: { backgroundColor: colors.teal, borderColor: colors.teal },
+
+  /** The heart. `marginLeft: 'auto'` is what pins it right on a story with no
+   *  reply field, where it is the only thing in the bar. */
+  svHeartBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    marginLeft: 'auto',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  svHeartCount: {
+    fontFamily: fonts.body,
+    fontSize: type.micro,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  svHeartCountActive: { color: colors.red },
 
   svSentToast: {
     position: 'absolute',
@@ -538,38 +624,4 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.t1,
   },
 
-  // ── Reactions ──
-  // No container panel — the bottom scrim is the background. The row centres
-  // so four pills of differing widths (counts appear and disappear) stay
-  // balanced instead of drifting left.
-  svReactions: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  svReactionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    // 44pt tall including padding: these are the primary controls on the
-    // screen and were previously the only ones near the touch-target floor.
-    minHeight: 44,
-    paddingHorizontal: 16,
-    borderRadius: radius.l,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
-  svReactionBtnActive: { backgroundColor: colors.tealTint, borderColor: colors.tealLine },
-  svReactionBtnPressed: { opacity: 0.6 },
-  svReactionCount: {
-    fontFamily: fonts.body,
-    color: '#FFFFFF',
-    fontSize: type.small,
-    fontWeight: '600',
-  },
-  svReactionCountActive: { color: colors.teal },
 });

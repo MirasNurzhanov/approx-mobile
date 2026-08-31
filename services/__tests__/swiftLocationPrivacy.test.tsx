@@ -92,10 +92,23 @@ jest.mock('react-native-reanimated', () => {
   const { View } = require('react-native');
   return {
     __esModule: true,
-    default: { View: (p: Record<string, unknown>) => React.createElement(View, p) },
+    default: {
+      View: (p: Record<string, unknown>) => React.createElement(View, p),
+      // `react-native-gesture-handler` calls this at *import* time, from
+      // `GestureDetector/Wrap`, to build its own animated wrapper. Anything in
+      // this tree that reaches a `GestureDetector` — ContentActions pulls in
+      // ReportSheet, which drags to dismiss — therefore fails to load without
+      // it, with a `createAnimatedComponent is not a function` that names
+      // neither file. Kept on the mock rather than dropping the reanimated
+      // mock entirely, which is what the suite relies on to render animated
+      // views as plain ones.
+      createAnimatedComponent: (C: unknown) => C,
+    },
+    createAnimatedComponent: (C: unknown) => C,
     useSharedValue: () => ({ get: () => 0, set: () => {}, value: 0 }),
     useAnimatedStyle: () => ({}),
     withTiming: (v: unknown) => v,
+    withSpring: (v: unknown) => v,
     withSequence: (...v: unknown[]) => v[0],
   };
 });
@@ -124,6 +137,12 @@ function makeSwift(id: number, overrides: Partial<Swift> = {}): Swift {
     height: 1920,
     aspect_ratio: 0.5625,
     status: 'ready',
+    review_state: 'published',
+    trim_start_ms: 0,
+    trim_end_ms: null,
+    original_volume: 100,
+    overlay_text: '',
+    overlay_position: 'middle',
     track: null,
     audio_title: '',
     audio_artist: '',

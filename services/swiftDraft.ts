@@ -1,24 +1,26 @@
-import { api } from './api';
-import type { SwiftTrack } from './swiftTracks';
-import type { CloudinaryVideo } from './swiftUpload';
-
 /**
- * A Swift being made: what the composer holds between steps, and what it
- * finally sends.
+ * A Swift being made: what the composer holds between steps.
  *
  * The shape follows one decision, made in `swifts/media.py` on the backend and
  * worth restating here because it is why this file looks the way it does:
- * **nothing on the phone re-encodes video.** The editor manipulates
- * parameters; the finished file is a Cloudinary delivery transformation built
- * from them. So a draft is a source URI plus a handful of numbers, and
- * publishing is one upload of the untouched recording followed by one JSON
- * POST.
+ * **nothing on the phone re-encodes video, and nothing on the server does
+ * either any more.** R2 is a plain object store — it cannot decode, mix or
+ * re-encode video the way Cloudinary's delivery transformations used to, so a
+ * draft's parameters are applied at *playback* time instead of baked into a
+ * rendered file:
+ *
+ *   * trim and the original-audio volume are applied by the player, the same
+ *     way the editor already previewed them — see `components/swifts/SwiftCard`;
+ *   * the text overlay is drawn as a layer over the video by the client,
+ *     both while editing and while watching — never burned into pixels;
+ *   * a music bed can no longer be mixed in at all — see `services/swiftUpload`
+ *     — so this draft carries no track.
  *
  * What that buys: editing is instant and free, a trim is reversible after
  * publishing, and no video-processing native module has to exist. What it
- * costs: the composer's preview is an approximation — the local player applies
- * the trim and the volumes, but the text overlay is drawn as a React view over
- * the video rather than being in it. The preview step says so.
+ * drops, for now: a poster frame. Extracting one from a timestamp was also
+ * Cloudinary's job, and there is no client-side capture wired up to replace
+ * it yet — a Swift publishes with no thumbnail until there is.
  */
 
 export type SwiftSource = 'camera' | 'library';
@@ -36,19 +38,10 @@ export interface SwiftDraft {
   trimStartMs: number;
   /** Null means "to the end of the source". */
   trimEndMs: number | null;
-  /** Frame used as the poster, in ms from the start of the *source*. */
-  coverMs: number | null;
-  /** 0–100. Zero is the mute; there is no separate boolean, so the two
-   *  cannot disagree. */
+  /** 0–100. Zero is the mute. Applied as the player's volume, not baked in. */
   originalVolume: number;
-  musicVolume: number;
   overlayText: string;
   overlayPosition: 'top' | 'middle' | 'bottom';
-
-  // ── Music ──────────────────────────────────────────────────────────────────
-  track: SwiftTrack | null;
-  /** Where in the song the Swift starts. */
-  trackOffsetMs: number;
 
   // ── Details ────────────────────────────────────────────────────────────────
   caption: string;
@@ -72,14 +65,9 @@ export const EMPTY_DRAFT: SwiftDraft = {
 
   trimStartMs: 0,
   trimEndMs: null,
-  coverMs: null,
   originalVolume: 100,
-  musicVolume: 70,
   overlayText: '',
   overlayPosition: 'middle',
-
-  track: null,
-  trackOffsetMs: 0,
 
   caption: '',
   visibility: 'public',
@@ -102,6 +90,7 @@ export const MIN_SWIFT_MS = 1_000;
 export const MAX_SWIFT_MS = 60_000;
 export const MAX_CAPTION = 300;
 export const MAX_OVERLAY = 80;
+export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 /** The kept length of a draft, honouring the trim. */
 export function keptDurationMs(draft: SwiftDraft): number {
@@ -146,70 +135,4 @@ export function validateDraft(draft: SwiftDraft): DraftProblem[] {
     });
   }
   return problems;
-}
-
-// ── Publishing ───────────────────────────────────────────────────────────────
-export interface PublishedSwift {
-  id: number;
-  video_url: string;
-  thumbnail_url: string;
-  status: string;
-  location_available: boolean;
-}
-
-/**
- * Turn an uploaded asset plus a draft into a Swift.
- *
- * The coordinates here are a *proposal*. `swifts.views._position_for` runs
- * them through the creator's own location-sharing mode and may snap them to a
- * ~500m grid or drop them entirely — a paused creator's Swift carries no
- * location whatever this sends, which is the point.
- */
-export async function publishSwift(
-  draft: SwiftDraft,
-  asset: CloudinaryVideo,
-): Promise<PublishedSwift> {
-  const usesOriginal = draft.originalVolume > 0;
-  const body: Record<string, unknown> = {
-    video_url: asset.secure_url,
-    media_id: asset.public_id,
-    duration_ms: keptDurationMs(draft),
-    width: asset.width ?? draft.width,
-    height: asset.height ?? draft.height,
-    status: 'ready',
-
-    caption: draft.caption.trim(),
-
-    trim_start_ms: Math.round(draft.trimStartMs),
-    trim_end_ms: draft.trimEndMs === null ? null : Math.round(draft.trimEndMs),
-    cover_ms: draft.coverMs === null ? null : Math.round(draft.coverMs),
-    original_volume: Math.round(draft.originalVolume),
-    music_volume: Math.round(draft.musicVolume),
-    overlay_text: draft.overlayText.trim(),
-    overlay_position: draft.overlayPosition,
-
-    uses_original_audio: usesOriginal,
-    visibility: draft.visibility,
-    allow_comments: draft.allowComments,
-    allow_reposts: draft.allowReposts,
-  };
-
-  if (draft.track) {
-    body.track = draft.track.id;
-    // The flat fields are the attribution snapshot: they are what a viewer
-    // reads, and they survive the track being withdrawn from the catalogue.
-    body.audio_title = draft.track.title;
-    body.audio_artist = draft.track.artist;
-    body.audio_artwork_url = draft.track.artwork_url;
-  }
-
-  if (draft.shareLocation && draft.latitude !== null && draft.longitude !== null) {
-    body.latitude = draft.latitude;
-    body.longitude = draft.longitude;
-    body.place_name = draft.placeName;
-    body.location_shared = true;
-  }
-
-  const { data } = await api.post<PublishedSwift>('/api/swifts/', body);
-  return data;
 }

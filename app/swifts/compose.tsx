@@ -6,7 +6,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CaptureStep } from '@/components/swifts/compose/CaptureStep';
 import { DetailsStep } from '@/components/swifts/compose/DetailsStep';
 import { EditStep } from '@/components/swifts/compose/EditStep';
-import { MusicStep } from '@/components/swifts/compose/MusicStep';
 import { PreviewStep } from '@/components/swifts/compose/PreviewStep';
 import type { CapturedVideo } from '@/components/swifts/compose/CaptureStep';
 import { IconBack, IconClose } from '@/components/ui/icons';
@@ -16,42 +15,41 @@ import { useTheme } from '@/context/ThemeContext';
 import {
   EMPTY_DRAFT,
   MAX_SWIFT_MS,
-  publishSwift,
   validateDraft,
   type SwiftDraft,
 } from '@/services/swiftDraft';
 import {
   UploadCancelled,
   discardTempFile,
-  uploadSwiftVideo,
+  publishSwift,
   type UploadProgress,
-  type UploadSignature,
 } from '@/services/swiftUpload';
 
 /**
  * Making a Swift, start to finish.
  *
- * **One route with an internal step machine**, not five routes. Backing out of
- * the music picker has to land on the editor with the recording and every
- * adjustment intact, and a navigation stack would either lose that state or
- * need a global store to carry it. A `useState` in one component is the whole
- * mechanism, and `draft` is the only thing that has to survive a step change.
+ * **One route with an internal step machine**, not four routes. Backing out
+ * of the editor has to land back on capture with nothing lost, and a
+ * navigation stack would either lose that state or need a global store to
+ * carry it. A `useState` in one component is the whole mechanism, and `draft`
+ * is the only thing that has to survive a step change.
  *
- * The compositing decision is documented on the backend, in `swifts/media.py`,
- * and it is what makes this screen possible without a video-processing native
- * module: nothing here re-encodes. The editor writes parameters, the upload
- * sends the untouched recording, and Cloudinary renders the finished video
- * from a transformation URL built server-side.
+ * The compositing decision is documented on the backend, in `swifts/media.py`:
+ * nothing here re-encodes, and — since the R2 migration retired the
+ * Cloudinary pipeline that used to render a trim/volume/text composite from
+ * uploaded parameters — nothing on the server does either. The editor's
+ * parameters are applied by the player, both here and in the feed, and the
+ * publish step is one multipart POST of the untouched recording plus those
+ * parameters. See `services/swiftUpload`.
  */
 
-type Step = 'capture' | 'edit' | 'music' | 'details' | 'preview';
+type Step = 'capture' | 'edit' | 'details' | 'preview';
 
-const ORDER: Step[] = ['capture', 'edit', 'music', 'details', 'preview'];
+const ORDER: Step[] = ['capture', 'edit', 'details', 'preview'];
 
 const TITLES: Record<Step, string> = {
   capture: 'New Swift',
   edit: 'Edit',
-  music: 'Add music',
   details: 'Details',
   preview: 'Preview',
 };
@@ -67,9 +65,6 @@ export default function SwiftComposerScreen() {
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Held across a retry so a second attempt does not re-sign. A signature is
-  // good for an hour; a flaky connection is not a reason to spend a round trip.
-  const signatureRef = useRef<UploadSignature | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   // The recording currently on disk. Deleted once it has been published or
   // deliberately discarded, so a creator who records six takes is not left
@@ -188,34 +183,31 @@ export default function SwiftComposerScreen() {
     abortRef.current = controller;
 
     try {
-      const { asset, signature } = await uploadSwiftVideo({
-        uri: draft.uri,
+      const published = await publishSwift(draft, {
         signal: controller.signal,
-        signature: signatureRef.current,
         onProgress: setProgress,
       });
-      signatureRef.current = signature;
-
-      setProgress({ stage: 'saving', ratio: 1, attempt: 1 });
-      await publishSwift(draft, asset);
 
       setProgress({ stage: 'done', ratio: 1, attempt: 1 });
-      // The recording has served its purpose; the CDN has the copy that matters.
+      // The recording has served its purpose; R2 has the copy that matters.
       discardTempFile(tempUriRef.current);
       tempUriRef.current = null;
 
-      router.replace('/(tabs)/swifts');
+      // Not the main feed: the ranked feed excludes the viewer's own Swifts
+      // (recs/candidates.py — same rule every For You feed follows), so
+      // landing there right after publishing would show everything *except*
+      // what was just posted. The permalink is the one place that can.
+      router.replace({ pathname: '/swifts/[id]', params: { id: published.id } });
     } catch (e: any) {
       if (e instanceof UploadCancelled) {
         setProgress(null);
         return;
       }
       setProgress({ stage: 'error', ratio: 0, attempt: 1 });
-      setError(
-        e?.response?.data?.detail
-        ?? e?.message
-        ?? 'Could not publish that Swift.',
-      );
+      // `.message` on an `UploadError` is already the user-facing wording;
+      // `.detail` is the raw server reason, logged rather than shown — see
+      // services/swiftUpload.
+      setError(e?.message ?? 'Could not publish that Swift.');
     } finally {
       abortRef.current = null;
     }
@@ -277,7 +269,7 @@ export default function SwiftComposerScreen() {
               style={[styles.headerAction, !!blockingProblem && styles.headerActionOff]}
               maxFontSizeMultiplier={MAX_SCALE_FIXED}
             >
-              {step === 'music' && !draft.track ? 'Skip' : 'Next'}
+              Next
             </Text>
           </Pressable>
         ) : (
@@ -308,7 +300,6 @@ export default function SwiftComposerScreen() {
           }
         />
       )}
-      {step === 'music' && <MusicStep draft={draft} onChange={patch} />}
       {step === 'details' && <DetailsStep draft={draft} onChange={patch} />}
       {step === 'preview' && (
         <PreviewStep

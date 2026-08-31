@@ -2,14 +2,14 @@ import Svg, { Circle, Path } from 'react-native-svg'
 
 import { useTheme } from '@/context/ThemeContext'
 
-interface AuraMarkProps {
+interface ApproxMarkProps {
   size?: number
   color?: string
 }
 
 // Brand mark from the design icon library (#i-aura):
 // 24px grid, 1.5px stroke, squared terminals, filled core.
-export function AuraMark({ size = 32, color }: AuraMarkProps) {
+export function ApproxMark({ size = 32, color }: ApproxMarkProps) {
   const { colors } = useTheme()
   const c = color ?? colors.teal
   return (

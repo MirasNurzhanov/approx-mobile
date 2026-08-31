@@ -24,7 +24,7 @@ Notifications.setNotificationHandler({
 // One 'default' channel meant every notification was the same notification.
 //
 // Names and descriptions are user-facing: this is the list someone reads in
-// Settings → Apps → Aura → Notifications.
+// Settings → Apps → Approx → Notifications.
 //
 // A channel's importance is fixed at creation — Android ignores later changes
 // to one that already exists, and only the user can move it after that. Which

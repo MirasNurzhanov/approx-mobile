@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AuraMark } from '@/components/ui/AuraMark';
+import { ApproxMark } from '@/components/ui/ApproxMark';
 import { fonts, radius } from '@/constants/theme';
 
 const LIGHT = {
@@ -72,8 +72,8 @@ export default function WelcomeScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.hero}>
-        <AuraMark size={80} color={LIGHT.teal} />
-        <Text style={styles.wordmark}>AURA</Text>
+        <ApproxMark size={80} color={LIGHT.teal} />
+        <Text style={styles.wordmark}>APPROX</Text>
       </View>
 
       <View style={styles.buttons}>

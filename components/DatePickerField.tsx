@@ -209,6 +209,8 @@ const dp = StyleSheet.create({
   },
   sheet: {
     width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
     backgroundColor: L.surface,
     borderRadius: radius.l,
     borderWidth: 1,

@@ -23,6 +23,7 @@ import { useAuth } from '@/context/AuthContext';
 import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
 import { hasSeenZoneTutorial, markZoneTutorialSeen } from '@/services/tutorial';
+import { openDocument, refreshDocuments, useTerms } from '@/services/terms';
 import {
   isAppleAvailable,
   isGoogleAvailable,
@@ -45,7 +46,7 @@ import {
   usePrivacySettings,
   type LocationSharing,
 } from '@/services/privacy';
-import { AuraNav } from '@/components/AuraNav';
+import { ApproxNav } from '@/components/ApproxNav';
 import { ZoneTutorialOverlay } from '@/components/tutorial/ZoneTutorialOverlay';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -82,7 +83,12 @@ interface SelfZone {
   zone_region_detail?: { name: string } | null;
 }
 
-const FEEDBACK_EMAIL = 'support@aura-app.com';
+const FEEDBACK_EMAIL = 'nurdauletaskar551@gmail.com';
+// Same inbox today, a different label on purpose: App Review asks for
+// published contact information for safety concerns specifically, and a row
+// called "Send feedback" is not that. Splitting the constant means routing it
+// somewhere else later is a one-line change.
+const SAFETY_EMAIL = 'nurdauletaskar551@gmail.com';
 
 // ─── Location visibility ──────────────────────────────────────────────────────
 // The status readout, the precision choice and the check in / check out button
@@ -454,6 +460,81 @@ function ConnectedAccountsSection({ connectedProviders, appleReady, linking, onC
   );
 }
 
+function LegalSection() {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const { documents } = useTerms();
+
+  useEffect(() => {
+    refreshDocuments().catch(() => {});
+  }, []);
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>LEGAL &amp; SAFETY</Text>
+
+      {/* The zero-tolerance statement, in the app rather than only in the
+          linked document. App Review looks for it, and so does anybody
+          wondering whether reporting something here achieves anything. */}
+      <Card style={styles.legalCard}>
+        <Text style={styles.legalTitle}>Zero tolerance</Text>
+        <Text style={styles.legalBody}>
+          Objectionable content and abusive users are not tolerated on Approx.
+          Anything you post can be reported by anyone who sees it, any account
+          can be blocked, and reports are reviewed by a person. Content that
+          breaks the guidelines is removed and the accounts behind it are
+          suspended or banned.
+        </Text>
+      </Card>
+
+      <Card style={styles.rowsCard}>
+        <SettingsRow
+          icon={IconShield}
+          label="Community Guidelines"
+          onPress={() => openDocument(documents.guidelines_url)}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+        <SettingsRow
+          icon={IconList}
+          label="Terms of Use"
+          onPress={() => openDocument(documents.terms_url)}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+        <SettingsRow
+          icon={IconLock}
+          label="Privacy Policy"
+          onPress={() => openDocument(documents.privacy_url)}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+        <SettingsRow
+          icon={IconBlocked}
+          label="Blocked users"
+          onPress={() => router.push('/blocked-users')}
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+        <SettingsRow
+          icon={IconMail}
+          label="Report a safety concern"
+          onPress={() => {
+            const url = `mailto:${SAFETY_EMAIL}?subject=${encodeURIComponent('Approx safety report')}`;
+            Linking.openURL(url).catch(() =>
+              Alert.alert('No mail app', `Write to us at ${SAFETY_EMAIL}`),
+            );
+          }}
+          last
+          right={<IconChevron size={16} color={colors.t3} />}
+        />
+      </Card>
+
+      <Text style={styles.legalFootnote}>
+        You agreed to these on {'—'} version {documents.version}. Use
+        &ldquo;Report&rdquo; on any post, comment, story or profile to flag it
+        for review.
+      </Text>
+    </View>
+  );
+}
+
 function SupportSection({ version, onSendFeedback }: {
   version: string;
   onSendFeedback: () => void;
@@ -688,7 +769,7 @@ export default function SettingsScreen() {
       // Permission can't be revoked programmatically — point to system settings.
       Alert.alert(
         'Turn off notifications',
-        'Notifications are managed by the system. Turn them off for Aura in system settings.',
+        'Notifications are managed by the system. Turn them off for Approx in system settings.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
@@ -708,7 +789,7 @@ export default function SettingsScreen() {
   }
 
   async function sendFeedback() {
-    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('Aura feedback')}`;
+    const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent('Approx feedback')}`;
     try {
       await Linking.openURL(url);
     } catch {
@@ -792,6 +873,8 @@ export default function SettingsScreen() {
           onConnect={connectProvider}
         />
 
+        <LegalSection />
+
         <SupportSection version={version} onSendFeedback={sendFeedback} />
 
         <AccountActions
@@ -807,7 +890,7 @@ export default function SettingsScreen() {
         <ZoneTutorialOverlay onDismiss={dismissZoneTutorial} onTakeMeThere={takeMeToZone} />
       )}
 
-      <AuraNav highlightSection={showZoneTutorial ? 'settings' : undefined} />
+      <ApproxNav highlightSection={showZoneTutorial ? 'settings' : undefined} />
     </View>
   );
 }
@@ -877,6 +960,28 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   settingsRight: { flexDirection: 'row', alignItems: 'center' },
   rowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rowTrailingText: { fontFamily: fonts.body, fontSize: 13, color: colors.t3 },
+  legalCard: { marginBottom: 10, gap: 6 },
+  legalTitle: {
+    fontFamily: fonts.display,
+    fontWeight: '700',
+    fontSize: 15,
+    color: colors.t1,
+  },
+  legalBody: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.t2,
+  },
+  legalFootnote: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.t3,
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+
   rowValue: {
     fontFamily: fonts.body,
     fontSize: 13,

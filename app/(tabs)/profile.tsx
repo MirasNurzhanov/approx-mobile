@@ -22,8 +22,8 @@ import { sectionise } from '@/services/interestCategories';
 import { registerProfileRefresh } from '@/services/profileRefresh';
 import { ProfileLinks } from '@/components/ProfileLinks';
 import type { ProfileLink } from '@/services/links';
-import { AuraNav } from '@/components/AuraNav';
-import { AuraMark } from '@/components/ui/AuraMark';
+import { ApproxNav } from '@/components/ApproxNav';
+import { ApproxMark } from '@/components/ui/ApproxMark';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -38,6 +38,7 @@ import {
   type IconComponent,
   type IconProps,
 } from '@/components/ui/icons';
+import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { iconForInterest } from '@/components/ui/interestIcons';
 import { useNavContentPadding } from '@/hooks/useNavMetrics';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
@@ -75,14 +76,16 @@ function ActionRow({ icon: Icon, label, onPress }: {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
-    <Pressable
+    <GlassIconButton
       style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
     >
       <Icon size={20} color={colors.t1} />
       <Text style={styles.actionLabel}>{label}</Text>
       <IconChevron size={16} color={colors.t3} />
-    </Pressable>
+    </GlassIconButton>
   );
 }
 
@@ -222,7 +225,7 @@ export default function ProfileScreen() {
     return (
       <View style={[styles.root, styles.center]}>
         <ActivityIndicator color={colors.teal} size="large" />
-        <AuraNav />
+        <ApproxNav />
       </View>
     );
   }
@@ -259,9 +262,9 @@ export default function ProfileScreen() {
                 <ActivityIndicator color="#fff" size="small" />
               </View>
             ) : null}
-            <View style={styles.editBadge}>
+            <GlassSurface style={styles.editBadge} tone="surface2">
               <IconCamera size={13} color={colors.t1} />
-            </View>
+            </GlassSurface>
           </Pressable>
 
           <Text style={styles.username}>{profile?.username ?? '—'}</Text>
@@ -286,8 +289,8 @@ export default function ProfileScreen() {
                 style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
                 onPress={() => router.push('/market')}
               >
-                <AuraMark size={13} color={colors.purple} />
-                <Text style={styles.pillAura}>{profile.aura_points.toLocaleString()}</Text>
+                <ApproxMark size={13} color={colors.purple} />
+                <Text style={styles.pillApprox}>{profile.aura_points.toLocaleString()}</Text>
                 <IconChevron size={11} color={colors.purple} />
               </Pressable>
             )}
@@ -336,10 +339,10 @@ export default function ProfileScreen() {
                   {group.items.map((tag) => {
                     const Icon = iconForInterest(tag.name);
                     return (
-                      <View key={tag.name} style={styles.chip}>
+                      <GlassSurface key={tag.name} style={styles.chip}>
                         <Icon size={14} color={colors.t2} />
                         <Text style={styles.chipText}>{tag.name}</Text>
-                      </View>
+                      </GlassSurface>
                     );
                   })}
                 </View>
@@ -374,7 +377,7 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      <AuraNav />
+      <ApproxNav />
     </View>
   );
 }
@@ -402,7 +405,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: colors.surface2,
     borderWidth: 2,
     borderColor: colors.bg,
     alignItems: 'center',
@@ -444,7 +446,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  pillAura: {
+  pillApprox: {
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 13,
@@ -511,11 +513,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // No `backgroundColor` on the three surfaces below — their fill is drawn by
+  // `GlassBackdrop`, and a background here would sit on top of the blur.
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.surface,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -537,7 +540,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     gap: 14,
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: colors.surface,
     borderRadius: radius.m,
   },
   actionLabel: {

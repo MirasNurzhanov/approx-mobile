@@ -4,7 +4,7 @@ import { api } from './api';
 //
 // Nothing here talks to Apple. The catalogue needs a developer token signed
 // with a private key that would be public the moment it shipped inside this
-// app, so every call goes through Aura's own server, which holds the key and
+// app, so every call goes through Approx's own server, which holds the key and
 // forwards the search (see users/applemusic.py).
 //
 // What a zone plays is Apple's 30-second preview, not the full song. That is

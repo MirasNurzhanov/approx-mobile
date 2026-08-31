@@ -1,10 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +13,7 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
-import { blockUser } from '@/services/blocked';
+import { useContentActions } from '@/components/ContentActions';
 import { sectionise } from '@/services/interestCategories';
 import { type ClubRole } from '@/services/clubs';
 import { Ionicons } from '@expo/vector-icons';
@@ -330,6 +328,7 @@ export default function UserProfileScreen() {
   const [relationship,  setRelationship]  = useState<Relationship>('stranger');
   const [loading,       setLoading]       = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const { present, sheets } = useContentActions();
 
   useEffect(() => {
     const numId = Number(id);
@@ -399,48 +398,30 @@ export default function UserProfileScreen() {
     router.push({ pathname: '/messages/[id]', params: { id: id!, username: profile?.username ?? usernameParam ?? 'Chat' } });
   }
 
+  // Report and Block, through the same menu every other surface uses.
+  //
+  // What was here before is worth recording, because it is exactly what App
+  // Review found: "Report User" posted to `/api/users/report/<id>/`, a route
+  // that did not exist, swallowed the resulting 404 in a bare `catch {}`, and
+  // then showed "Thank you — our team will review this account" unconditionally.
+  // Nobody was ever reported and every reporter was told they had been.
+  //
+  // The shared sheet cannot do that: `services/reporting` throws on every
+  // non-2xx, and the confirmation state is only reachable after the server has
+  // accepted the report.
   function openMenu() {
     const username = profile?.username ?? 'this user';
-    const options = ['Block User', 'Report User', 'Cancel'];
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: 2, destructiveButtonIndex: 0 },
-        (index) => {
-          if (index === 0) confirmBlock(username);
-          if (index === 1) confirmReport(username);
-        },
-      );
-    } else {
-      Alert.alert(username, undefined, [
-        { text: 'Block User',  style: 'destructive', onPress: () => confirmBlock(username) },
-        { text: 'Report User', onPress: () => confirmReport(username) },
-        { text: 'Cancel',      style: 'cancel' },
-      ]);
-    }
-  }
-
-  function confirmBlock(username: string) {
-    Alert.alert(`Block ${username}?`, 'They will no longer be able to see you or contact you.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Block', style: 'destructive', onPress: async () => {
-        try {
-          await blockUser({ id: Number(id), username, profile_picture: profile?.profile_picture });
-          router.back();
-        } catch (e: any) {
-          Alert.alert('Error', e?.response?.data?.detail ?? 'Could not block user.');
-        }
-      }},
-    ]);
-  }
-
-  function confirmReport(username: string) {
-    Alert.alert(`Report ${username}?`, 'Our team will review this account.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Report', style: 'destructive', onPress: async () => {
-        try { await api.post(`/api/users/report/${id}/`); } catch {}
-        Alert.alert('Reported', 'Thank you — our team will review this account.');
-      }},
-    ]);
+    present({
+      target: 'user',
+      targetId: Number(id),
+      subject: `@${username}`,
+      authorId: Number(id),
+      authorUsername: username,
+      authorAvatar: profile?.profile_picture,
+      // Leaving somebody's profile open after blocking them reads as the block
+      // not having worked.
+      onRemoved: () => router.back(),
+    });
   }
 
   if (loading) {
@@ -484,6 +465,7 @@ export default function UserProfileScreen() {
 
   return (
     <View style={styles.root}>
+      {sheets}
       <ProfileHeader
         username={profile.username}
         relationship={rel}

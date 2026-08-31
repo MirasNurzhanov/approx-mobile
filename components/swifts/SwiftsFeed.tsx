@@ -33,6 +33,7 @@ import {
   type Swift,
   type SwiftLocation,
 } from '@/services/swifts';
+import { useContentActions } from '@/components/ContentActions';
 import { flushSwiftSignals, reportSwiftSignal } from '@/services/swiftSignals';
 
 /**
@@ -87,6 +88,7 @@ export function SwiftsFeed() {
   const { bottom: safeBottom } = useSafeAreaInsets();
 
   const [swifts, setSwifts] = useState<Swift[]>([]);
+  const { present, sheets } = useContentActions();
   const [state, setState] = useState<FeedState>('loading');
   const [activeIndex, setActiveIndex] = useState(0);
   const [pausedId, setPausedId] = useState<number | null>(null);
@@ -400,7 +402,25 @@ export function SwiftsFeed() {
     });
     setCommentsFor(swift);
   }, []);
-  const handleMore = useCallback(() => {}, []);
+  // The overflow button used to be wired to a no-op — it rendered, it was
+  // tappable, and it did nothing, which is what App Review found under 1.2.
+  const handleMore = useCallback((swift: Swift) => {
+    present({
+      target: 'swift',
+      targetId: swift.id,
+      subject: `@${swift.author.username}`,
+      authorId: swift.author.id,
+      authorUsername: swift.author.username,
+      authorAvatar: swift.author.profile_picture ?? undefined,
+      // Blocking is enforced server-side and the next page would drop this
+      // author anyway. Dropping every one of their rows here as well is what
+      // makes the block visible in the feed the user is currently looking at,
+      // rather than whenever it next refetches.
+      onRemoved: () => setSwifts((prev) => prev.filter(
+        (s) => s.author.id !== swift.author.id,
+      )),
+    });
+  }, [present]);
   const handleToggleMute = useCallback(() => setMuted((m) => !m), []);
   // Takes the id instead of closing over the row. Written inline in `renderItem`
   // this was a new function per card per render, which defeated `memo(SwiftCard)`
@@ -453,6 +473,7 @@ export function SwiftsFeed() {
 
   return (
     <View style={styles.root} onLayout={handleLayout}>
+      {sheets}
       {height > 0 && (
         <FlatList
           data={swifts}

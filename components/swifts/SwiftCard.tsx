@@ -117,10 +117,38 @@ function SwiftCardImpl({
   // The conditional source. `null` keeps the player idle — see the note above.
   const source = preload && !failed ? swift.video_url : null;
 
+  // R2 serves the raw upload; nothing trims it server-side any more (see
+  // services/swifts.ts). `loop` is off and the trim is looped by hand below,
+  // the same way the composer's own editor previews it — a plain `loop: true`
+  // would only return to the start of the *source*, which is wrong the moment
+  // trim_end_ms is short of the end of the file.
+  const trimStartS = swift.trim_start_ms / 1000;
+  const trimEndS = (swift.trim_end_ms ?? swift.duration_ms) / 1000;
+
   const player = useVideoPlayer(source, (p) => {
-    p.loop = true;
+    p.loop = false;
     p.muted = true;
     p.timeUpdateEventInterval = TIME_UPDATE_INTERVAL_S;
+    // Set once, here, rather than in a separate effect: writing `.volume`
+    // from an effect that fires around the same time as other player-property
+    // writes (muted, currentTime on sourceLoad) can race expo-video's native
+    // KVO volume observer into re-notifying itself forever — a real crash
+    // (SIGBUS, stack overflow), not a JS-catchable error. `original_volume`
+    // is fixed for a given Swift, so there is nothing to react to anyway.
+    // A non-finite value is doubly dangerous here: NaN != NaN, so a guard the
+    // observer relies on to stop re-applying an unchanged volume never fires.
+    const vol = swift.original_volume / 100;
+    p.volume = Number.isFinite(vol) ? vol : 1;
+  });
+
+  // Seeking before the source has actually loaded is a native crash on
+  // device (it is not caught on the JS side) — wait for `sourceLoad` rather
+  // than setting `currentTime` in the `useVideoPlayer` setup callback above,
+  // and guard every other seek below with the same flag.
+  const loadedRef = useRef(false);
+  useEventListener(player, 'sourceLoad', () => {
+    loadedRef.current = true;
+    player.currentTime = trimStartS;
   });
 
   // Only the visible card plays. Scrolling away rewinds, so returning to a
@@ -130,9 +158,9 @@ function SwiftCardImpl({
       player.play();
     } else {
       player.pause();
-      if (!isActive) player.currentTime = 0;
+      if (!isActive && loadedRef.current) player.currentTime = trimStartS;
     }
-  }, [isActive, pausedByUser, failed, player]);
+  }, [isActive, pausedByUser, failed, player, trimStartS]);
 
   useEffect(() => { player.muted = muted; }, [muted, player]);
 
@@ -162,10 +190,28 @@ function SwiftCardImpl({
     currentOffsetFromLive: null,
   });
 
-  // `player.duration` is 0 until the video loads; fall back to the value the
-  // API already gave us so the bar is never divided by zero.
-  const durationS = player.duration > 0 ? player.duration : swift.duration_ms / 1000;
-  const progress = durationS > 0 ? currentTime / durationS : 0;
+  // Loop the kept range by hand rather than `player.loop`, which only returns
+  // to the start of the *source* — wrong the moment trim_end_ms is short of
+  // the end of the file.
+  const loopSeeking = useRef(false);
+  useEffect(() => {
+    if (loopSeeking.current) return;
+    const nowMs = currentTime * 1000;
+    if (nowMs >= trimEndS * 1000 - 40 || nowMs < trimStartS * 1000 - 40) {
+      loopSeeking.current = true;
+      player.currentTime = trimStartS;
+      // A short guard: the seek itself produces a time update, and reacting to
+      // that one would seek again forever.
+      setTimeout(() => { loopSeeking.current = false; }, 120);
+    }
+  }, [currentTime, trimEndS, trimStartS, player]);
+
+  // `player.duration` is the whole source; the bar tracks the kept range only.
+  // Falls back to the API's duration when the player has not measured the
+  // source yet, so the bar is never divided by zero.
+  const sourceDurationS = player.duration > 0 ? player.duration : swift.duration_ms / 1000;
+  const durationS = Math.max(0, (swift.trim_end_ms ? trimEndS : sourceDurationS) - trimStartS);
+  const progress = durationS > 0 ? (currentTime - trimStartS) / durationS : 0;
 
   // ── Gestures ────────────────────────────────────────────────────────────────
   // Read only from the double-tap handler, which cannot fire before this
@@ -255,6 +301,21 @@ function SwiftCardImpl({
           />
         ) : null}
       </Pressable>
+
+      {/* Drawn over the video rather than baked into it — see the note at the
+          top of the file and services/swifts.ts. */}
+      {swift.overlay_text.trim().length > 0 && (
+        <View
+          style={[
+            styles.overlayWrap,
+            swift.overlay_position === 'top' && styles.overlayTop,
+            swift.overlay_position === 'bottom' && styles.overlayBottom,
+          ]}
+          pointerEvents="none"
+        >
+          <Text style={styles.overlayText} numberOfLines={2}>{swift.overlay_text}</Text>
+        </View>
+      )}
 
       <Scrim edge="top" height={140} opacity={0.5} />
       <Scrim edge="bottom" height={Math.max(220, navClearance + 160)} />
@@ -347,6 +408,25 @@ export const SwiftCard = memo(SwiftCardImpl);
 const styles = StyleSheet.create({
   card: { width: '100%', backgroundColor: '#000000' },
   fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+
+  overlayWrap: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  overlayTop: { justifyContent: 'flex-start', paddingTop: 48 },
+  overlayBottom: { justifyContent: 'flex-end', paddingBottom: 48 },
+  overlayText: {
+    fontFamily: fonts.display,
+    fontWeight: '700',
+    fontSize: 26,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.7)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
 
   centreOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,

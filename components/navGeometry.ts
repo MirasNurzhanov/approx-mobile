@@ -45,7 +45,7 @@ export function navArcClearance(fromRight: number, width: number): number {
   return d >= NAV_ARC_R_OUT ? 0 : Math.sqrt(NAV_ARC_R_OUT * NAV_ARC_R_OUT - d * d);
 }
 
-// ─── Bar (components/nav/AuraTabBar) ──────────────────────────────────────────
+// ─── Bar (components/nav/ApproxTabBar) ──────────────────────────────────────────
 //
 // iOS draws this only on `/market`, the one screen outside the tab group —
 // inside it, iOS's bar style is the real native tab bar, which reports its
@@ -91,11 +91,11 @@ export const NATIVE_TAB_BAR_H = Platform.select({ ios: 68, android: 84, default:
  * *last* tab item — Settings — instead of hard against the screen edge.
  *
  * `floating` is true wherever the bar floats in from both edges rather than
- * spanning them — iOS 26's own tab bar, and Android's AuraTabBar, which
+ * spanning them — iOS 26's own tab bar, and Android's ApproxTabBar, which
  * always floats — so its items sit across a narrower strip than the screen.
  * Every other case spans edge to edge. `NAV_BAR_INSET` stands in for both:
  * Apple's floating margin is within a couple of points of it, and it is
- * AuraTabBar's actual margin.
+ * ApproxTabBar's actual margin.
  */
 export function tabAlignedRightInset(controlWidth: number, tabCount: number, floating: boolean): number {
   const barEdge = floating ? NAV_BAR_INSET : 0;

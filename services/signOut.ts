@@ -11,6 +11,7 @@ import { resetNotificationPrefs } from './notificationPrefs';
 import { resetPrivacy } from './privacy';
 import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
+import { resetTerms } from './terms';
 import { resetRegionCache } from './zoneArea';
 
 // Signing out, properly.
@@ -194,6 +195,10 @@ export async function performSignOut(): Promise<void> {
   // starting in "driving" — with nearby prompts quietly suppressed for someone
   // who is sitting still.
   resetOwnMotion();
+  // Whether the *previous* account had agreed to the Terms says nothing about
+  // the next one. Leaving a `false` here would walk a new sign-in straight
+  // past the gate.
+  resetTerms();
 }
 
 /**

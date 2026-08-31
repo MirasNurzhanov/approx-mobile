@@ -1,4 +1,4 @@
-// Generates every variant of the Aura app icon, in both themes.
+// Generates every variant of the Approx app icon, in both themes.
 //
 //   node scripts/generate-app-icons.js
 //

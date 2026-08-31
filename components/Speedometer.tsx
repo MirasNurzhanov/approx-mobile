@@ -142,7 +142,7 @@ interface SpeedometerProps {
 /**
  * The wheel nav — the app's original bottom navigation, now an opt-in
  * alternative to the tab bar (Settings → Preferences → Wheel navigation bar).
- * Screens render `components/AuraNav` rather than this directly.
+ * Screens render `components/ApproxNav` rather than this directly.
  */
 export function Speedometer({ highlightSection, standalone }: SpeedometerProps = {}) {
   const pathname          = usePathname();

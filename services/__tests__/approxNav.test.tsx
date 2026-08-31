@@ -3,14 +3,14 @@
 // Bar style is a real native tab bar only where `BAR_STYLE_IS_NATIVE` says so
 // (iOS) — the navigator owns it there
 // (`app/(tabs)/_layout` → NativeTabs → UITabBarController), so a screen inside
-// the tab group must draw nothing. Screens still call `AuraNav`
+// the tab group must draw nothing. Screens still call `ApproxNav`
 // unconditionally, which makes "renders nothing" a behaviour worth pinning:
 // get it wrong and every tab screen stacks a second bar on top of the real
 // one, and nothing else in the suite would notice.
 //
 // `react-native-screens`' Android Material 3 bar cannot have its own press
 // ripple turned off or its selected-tab indicator resized, so Android's bar
-// style is never native — every screen there draws `AuraTabBar` itself, the
+// style is never native — every screen there draws `ApproxTabBar` itself, the
 // same as `/market` does on iOS (the one screen the root stack pushes above
 // the tab navigator, where there is no native bar to inherit from either).
 //
@@ -21,7 +21,7 @@
 
 import { act, create } from 'react-test-renderer';
 
-import { AuraNav } from '../../components/AuraNav';
+import { ApproxNav } from '../../components/ApproxNav';
 
 const mockNav = { navStyle: 'bar' as 'bar' | 'wheel', ready: true };
 const mockPlatform = { BAR_STYLE_IS_NATIVE: true };
@@ -36,7 +36,7 @@ jest.mock('../../constants/platform', () => ({
     return mockPlatform.BAR_STYLE_IS_NATIVE;
   },
 }));
-jest.mock('../../components/nav/AuraTabBar', () => ({ AuraTabBar: () => mockBar() }));
+jest.mock('../../components/nav/ApproxTabBar', () => ({ ApproxTabBar: () => mockBar() }));
 jest.mock('../../components/Speedometer', () => ({ Speedometer: () => mockWheel() }));
 
 function render(element: React.ReactElement): void {
@@ -55,13 +55,13 @@ beforeEach(() => {
 
 describe('bar style — native (iOS)', () => {
   it('draws nothing inside the tab navigator — the navigator owns the bar', () => {
-    render(<AuraNav />);
+    render(<ApproxNav />);
     expect(mockBar).not.toHaveBeenCalled();
     expect(mockWheel).not.toHaveBeenCalled();
   });
 
   it('draws one on /market, which sits above the navigator', () => {
-    render(<AuraNav standalone />);
+    render(<ApproxNav standalone />);
     expect(mockBar).toHaveBeenCalled();
     expect(mockWheel).not.toHaveBeenCalled();
   });
@@ -72,14 +72,14 @@ describe('bar style — custom (Android)', () => {
     mockPlatform.BAR_STYLE_IS_NATIVE = false;
   });
 
-  it('draws AuraTabBar inside the tab navigator too — there is no native bar to inherit', () => {
-    render(<AuraNav />);
+  it('draws ApproxTabBar inside the tab navigator too — there is no native bar to inherit', () => {
+    render(<ApproxNav />);
     expect(mockBar).toHaveBeenCalled();
     expect(mockWheel).not.toHaveBeenCalled();
   });
 
   it('draws one on /market the same way', () => {
-    render(<AuraNav standalone />);
+    render(<ApproxNav standalone />);
     expect(mockBar).toHaveBeenCalled();
     expect(mockWheel).not.toHaveBeenCalled();
   });
@@ -91,19 +91,19 @@ describe('wheel style', () => {
   });
 
   it('draws the arc inside the tab navigator', () => {
-    render(<AuraNav />);
+    render(<ApproxNav />);
     expect(mockWheel).toHaveBeenCalled();
     expect(mockBar).not.toHaveBeenCalled();
   });
 
   it('draws the arc on /market too', () => {
-    render(<AuraNav standalone />);
+    render(<ApproxNav standalone />);
     expect(mockWheel).toHaveBeenCalled();
   });
 
   it('draws the arc on Android too — the wheel does not care which platform it is on', () => {
     mockPlatform.BAR_STYLE_IS_NATIVE = false;
-    render(<AuraNav />);
+    render(<ApproxNav />);
     expect(mockWheel).toHaveBeenCalled();
     expect(mockBar).not.toHaveBeenCalled();
   });
@@ -112,8 +112,8 @@ describe('wheel style', () => {
 describe('before the stored choice is known', () => {
   it('draws nothing rather than guessing', () => {
     mockNav.ready = false;
-    render(<AuraNav />);
-    render(<AuraNav standalone />);
+    render(<ApproxNav />);
+    render(<ApproxNav standalone />);
     expect(mockBar).not.toHaveBeenCalled();
     expect(mockWheel).not.toHaveBeenCalled();
   });

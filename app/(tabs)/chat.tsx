@@ -17,10 +17,11 @@ import { Image } from 'expo-image';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AuraNav } from '@/components/AuraNav';
+import { ApproxNav } from '@/components/ApproxNav';
 import { DraggableTabs, type DraggableTabKey } from '@/components/DraggableTabs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
+import { GlassSurface } from '@/components/ui/GlassSurface';
 import { IconClose, IconSearch } from '@/components/ui/icons';
 import { api } from '@/services/api';
 import { blockUser, refreshBlocked, useBlockedUsers } from '@/services/blocked';
@@ -333,7 +334,7 @@ function SearchField({
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
-    <View style={styles.searchWrap}>
+    <GlassSurface style={styles.searchWrap}>
       <IconSearch size={16} color={colors.t3} />
       <TextInput
         style={styles.searchInput}
@@ -356,7 +357,7 @@ function SearchField({
           <IconClose size={16} color={colors.t3} />
         </Pressable>
       )}
-    </View>
+    </GlassSurface>
   );
 }
 
@@ -630,7 +631,7 @@ function ClubsTab({ myClubs, discoverClubs, clubPlace, loadingClubs, refreshingP
               <View style={{ flex: 1 }}>
                 <Text style={styles.locationNoticeText}>
                   {clubPlace.detail ||
-                    'Aura needs your location to show clubs near you.'}
+                    'Approx needs your location to show clubs near you.'}
                 </Text>
                 <Pressable
                   style={styles.locationNoticeBtn}
@@ -1243,7 +1244,7 @@ export default function ChatScreen() {
         />
       )}
 
-      <AuraNav />
+      <ApproxNav />
     </View>
   );
 }
@@ -1262,6 +1263,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // Search
+  // No `backgroundColor`: the fill is drawn behind the row by `GlassBackdrop`,
+  // and a background here would sit on top of the blur and hide it.
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1270,7 +1273,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     marginBottom: 10,
     paddingHorizontal: 14,
     height: 44,
-    backgroundColor: colors.surface,
     borderRadius: radius.m,
     borderWidth: 1,
     borderColor: colors.border,

@@ -17,9 +17,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import DatePickerField from '@/components/DatePickerField';
 import SocialAuthButtons from '@/components/SocialAuthButtons';
+import { TermsAgreement } from '@/components/TermsAgreement';
 import { loginRequest } from '@/services/auth';
 import { runBusy } from '@/services/busy';
 import { BASE_URL } from '@/services/api';
+import { ACCEPT_TERMS_PAYLOAD } from '@/services/terms';
 import { fonts, lightColors as L, radius } from '@/constants/theme';
 
 const BLOB = 300;
@@ -80,9 +82,18 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors,          setErrors]          = useState<FieldErrors>({});
   const [submitting,      setSubmitting]      = useState(false);
+  // Agreement to the Terms, Community Guidelines and Privacy Policy. Gates
+  // every door on this screen — the email form below and the Google/Apple
+  // buttons underneath it. App Review checks both, and wiring only one is the
+  // usual way this comes back rejected.
+  const [acceptedTerms,   setAcceptedTerms]   = useState(false);
 
   async function handleRegister() {
     setErrors({});
+    if (!acceptedTerms) {
+      setErrors({ accept_terms: ['Please agree to the Terms of Use to continue.'] });
+      return;
+    }
     if (password !== confirmPassword) {
       setErrors({ confirm_password: ['Passwords do not match'] });
       return;
@@ -99,6 +110,9 @@ export default function RegisterScreen() {
         date_of_birth: dob,
         password,
         password2: confirmPassword,
+        // The server records *which version* was in force; the client only
+        // says yes. See users/terms.py.
+        ...ACCEPT_TERMS_PAYLOAD,
       });
       await loginRequest(email, password);
       router.replace('/interests-setup');
@@ -202,12 +216,30 @@ export default function RegisterScreen() {
           />
         </View>
 
+        <View style={rs.terms}>
+          <TermsAgreement
+            accepted={acceptedTerms}
+            onToggle={setAcceptedTerms}
+            disabled={submitting}
+          />
+          {fe('accept_terms') ? (
+            <Text style={rs.termsError}>{fe('accept_terms')}</Text>
+          ) : null}
+        </View>
+
         <Pressable
           onPress={handleRegister}
-          disabled={submitting}
-          style={({ pressed }) => [rs.btn, (pressed || submitting) && rs.btnDimmed]}
+          disabled={submitting || !acceptedTerms}
+          style={({ pressed }) => [
+            rs.btn,
+            (pressed || submitting || !acceptedTerms) && rs.btnDimmed,
+          ]}
           accessibilityRole="button"
           accessibilityLabel="Create Account"
+          accessibilityState={{ disabled: submitting || !acceptedTerms }}
+          accessibilityHint={
+            acceptedTerms ? undefined : 'Agree to the Terms of Use first'
+          }
         >
           {submitting
             ? <ActivityIndicator color={L.bg} size="small" />
@@ -216,7 +248,13 @@ export default function RegisterScreen() {
         </Pressable>
 
         <View style={rs.social}>
-          <SocialAuthButtons disabled={submitting} />
+          {/* Same gate as the button above. A sign-up that skipped the
+              agreement by going through Google would be the whole point of the
+              checkbox undone. */}
+          <SocialAuthButtons
+            disabled={submitting || !acceptedTerms}
+            acceptedTerms={acceptedTerms}
+          />
         </View>
 
         <View style={rs.signinRow}>
@@ -232,6 +270,15 @@ export default function RegisterScreen() {
 
 const rs = StyleSheet.create({
   root: { flex: 1, backgroundColor: L.bg },
+
+  terms: { marginTop: 20, marginBottom: 4 },
+  termsError: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: '#C0392B',
+    marginTop: 6,
+    paddingLeft: 32,
+  },
 
   blobTL: {
     position: 'absolute',

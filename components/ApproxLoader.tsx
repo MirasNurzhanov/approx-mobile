@@ -116,7 +116,7 @@ function Ring({ styles, index, color }: {
   return <Animated.View style={[styles.ring, { borderColor: color }, style]} />;
 }
 
-export function AuraLoader() {
+export function ApproxLoader() {
   const { colors } = useTheme();
   // Kept despite react-doctor/react-compiler-no-manual-memoization: dropping it
   // is not a no-op here. Compiling this file with and without the wrapper shows
@@ -146,7 +146,7 @@ export function AuraLoader() {
         <Core styles={styles} />
       </View>
 
-      <Text style={styles.wordmark}>AURA</Text>
+      <Text style={styles.wordmark}>APPROX</Text>
     </View>
   );
 }

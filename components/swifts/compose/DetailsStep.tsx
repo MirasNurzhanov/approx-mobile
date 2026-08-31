@@ -14,6 +14,7 @@ import {
   type PickedLocation,
 } from '@/components/swifts/compose/LocationPickerSheet';
 import { IconGlobe, IconLock, IconPeople, IconPin } from '@/components/ui/icons';
+import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -48,7 +49,7 @@ interface Props {
 }
 
 const AUDIENCES = [
-  { key: 'public' as const, label: 'Everyone', Glyph: IconGlobe, hint: 'Anyone on Aura can watch.' },
+  { key: 'public' as const, label: 'Everyone', Glyph: IconGlobe, hint: 'Anyone on Approx can watch.' },
   { key: 'friends' as const, label: 'Friends', Glyph: IconPeople, hint: 'Only people you are friends with.' },
   { key: 'private' as const, label: 'Only me', Glyph: IconLock, hint: 'Saved to your profile, shown to nobody.' },
 ];
@@ -112,7 +113,7 @@ export function DetailsStep({ draft, onChange }: Props) {
         {AUDIENCES.map(({ key, label, Glyph, hint }) => {
           const active = draft.visibility === key;
           return (
-            <Pressable
+            <GlassIconButton
               key={key}
               onPress={() => onChange({ visibility: key })}
               style={[styles.option, active && styles.optionActive]}
@@ -127,7 +128,7 @@ export function DetailsStep({ draft, onChange }: Props) {
                 </Text>
                 <Text style={styles.optionHint}>{hint}</Text>
               </View>
-            </Pressable>
+            </GlassIconButton>
           );
         })}
       </View>
@@ -187,14 +188,14 @@ export function DetailsStep({ draft, onChange }: Props) {
         </Text>
         <Text style={styles.footnote}>
           A Swift stays up until you delete it, so a place attached here lasts
-          too — unlike the map, which pauses when you close Aura.
+          too — unlike the map, which pauses when you close Approx.
         </Text>
       </View>
 
       {/* Interaction */}
       <View style={styles.block}>
         <Text style={styles.blockLabel}>Interaction</Text>
-        <View style={styles.switchRow}>
+        <GlassSurface style={styles.switchRow}>
           <View style={styles.optionText}>
             <Text style={styles.optionLabel}>Allow comments</Text>
           </View>
@@ -204,8 +205,8 @@ export function DetailsStep({ draft, onChange }: Props) {
             trackColor={{ true: colors.teal, false: colors.border }}
             accessibilityLabel="Allow comments"
           />
-        </View>
-        <View style={styles.switchRow}>
+        </GlassSurface>
+        <GlassSurface style={styles.switchRow}>
           <View style={styles.optionText}>
             <Text style={styles.optionLabel}>Allow reposts</Text>
           </View>
@@ -215,7 +216,7 @@ export function DetailsStep({ draft, onChange }: Props) {
             trackColor={{ true: colors.teal, false: colors.border }}
             accessibilityLabel="Allow reposts"
           />
-        </View>
+        </GlassSurface>
       </View>
       <LocationPickerSheet
         visible={picking}
@@ -271,7 +272,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderRadius: radius.m,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
   },
   optionActive: { borderColor: colors.teal, backgroundColor: colors.tealTint },
   optionText: { flex: 1, gap: 2 },
@@ -297,7 +297,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderRadius: radius.m,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
   },
   blockHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   optionalTag: {

@@ -58,7 +58,7 @@ function SectionGlyph({
   );
 }
 
-interface AuraTabBarProps {
+interface ApproxTabBarProps {
   /** Name of a NAV_SECTIONS entry (e.g. 'settings') to spotlight — every other
    *  item dims and this one pulses coral. Same contract the wheel honours, so
    *  the zone tutorial can point at Settings without caring which nav is on. */
@@ -66,7 +66,7 @@ interface AuraTabBarProps {
   /** True on any screen outside the tab navigator — today just `/market`.
    *  See NavTrigger. Every screen inside the navigator draws this on Android,
    *  where it *is* the bar style — see constants/platform's
-   *  `BAR_STYLE_IS_NATIVE` and components/AuraNav. */
+   *  `BAR_STYLE_IS_NATIVE` and components/ApproxNav. */
   standalone?: boolean;
 }
 
@@ -91,7 +91,7 @@ interface AuraTabBarProps {
  * up *is* the feedback, and it lands the instant the route changes rather
  * than racing a separate animation to say the same thing.
  */
-export function AuraTabBar({ highlightSection, standalone }: AuraTabBarProps = {}) {
+export function ApproxTabBar({ highlightSection, standalone }: ApproxTabBarProps = {}) {
   const pathname = usePathname();
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { collapsed } = useScrollNav();

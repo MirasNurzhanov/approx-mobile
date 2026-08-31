@@ -9,8 +9,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, AppState } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   SpaceGrotesk_400Regular,
@@ -25,8 +25,10 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 
-import { AuraLoader } from '@/components/AuraLoader';
+import { ApproxLoader } from '@/components/ApproxLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { LocationLaunchPrompt } from '@/components/LocationLaunchPrompt';
+import { TermsGate } from '@/components/TermsGate';
 import { AuthProvider } from '@/context/AuthContext';
 import { NavStyleProvider } from '@/context/NavStyleContext';
 import { ScrollNavProvider } from '@/context/ScrollNavContext';
@@ -35,7 +37,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
 import { refreshPrivacy } from '@/services/privacy';
+import { goInvisible } from '@/services/goInvisible';
 import { endStaleSharingSession } from '@/services/sharingSession';
+import { refreshAcceptance, useTerms } from '@/services/terms';
 import { startNotificationRouting } from '@/services/notificationRouting';
 import '@/services/backgroundLocation';
 
@@ -45,7 +49,27 @@ function AppStatusBar() {
 }
 
 function AppShell() {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, logout } = useAuth();
+
+  // Whether this run has landed on an already-active session — resumed from
+  // the background, or a stale-session end that failed and left sharing
+  // standing (see services/sharingSession.ts). Neither case gets ended
+  // automatically, by design, so this is the visible confirmation in front of
+  // it: see components/LocationLaunchPrompt.
+  const [launchPromptVisible, setLaunchPromptVisible] = useState(false);
+  const [launchPromptBusy, setLaunchPromptBusy] = useState(false);
+
+  // Whether this account still owes us an agreement to the current Terms.
+  // `null` until the answer is in, so the gate never flashes on and off for
+  // somebody who has already agreed. Accounts that signed up after the gate
+  // landed answer false immediately and never see it; this exists for the
+  // installs that were already signed in when it shipped.
+  const { needsAcceptance } = useTerms();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    refreshAcceptance().catch(() => {});
+  }, [isAuthenticated]);
 
   // Whatever this account's sharing mode was when the app last closed, it was
   // chosen by a run that no longer exists. Ending it here is what makes going
@@ -60,8 +84,27 @@ function AppShell() {
     // Re-read afterwards, not before: a screen that mounted first may already
     // have pulled a sharing mode that this call has just ended, and the store
     // would otherwise keep showing the user as visible when they are not.
-    endStaleSharingSession().then(() => { refreshPrivacy().catch(() => {}); });
+    endStaleSharingSession()
+      .then(() => refreshPrivacy())
+      .then((settings) => {
+        if (settings && settings.location_sharing !== 'paused') {
+          setLaunchPromptVisible(true);
+        }
+      })
+      .catch(() => {});
   }, [isAuthenticated]);
+
+  async function handleGoInvisible() {
+    setLaunchPromptBusy(true);
+    try {
+      await goInvisible();
+      setLaunchPromptVisible(false);
+    } catch {
+      Alert.alert('Could not update', 'Please try again from Privacy & safety.');
+    } finally {
+      setLaunchPromptBusy(false);
+    }
+  }
 
   useEffect(() => {
     console.log('[Push] isAuthenticated:', isAuthenticated);
@@ -92,75 +135,92 @@ function AppShell() {
   }, [isAuthenticated]);
 
   if (isLoading) {
-    return <AuraLoader />;
+    return <ApproxLoader />;
   }
 
   return (
-    <Stack>
-      <Stack.Screen name="index"           options={{ headerShown: false }} />
-      <Stack.Screen name="welcome"         options={{ headerShown: false }} />
-      <Stack.Screen name="login"           options={{ headerShown: false }} />
-      {/* `gestureEnabled: false` for the same reason `social-birthday` below
-          sets it: `welcome` pushes `/login`, and signing in *replaces* only
-          the login screen, so `welcome` is still underneath the tab group.
-          The iOS back-swipe was therefore popping a signed-in user out of the
-          app and onto the sign-up screen they are already past. Swiping right
-          from the tabs opens the composer instead — see `compose` below and
-          the edge strip in `(tabs)/map`. */}
-      <Stack.Screen name="(tabs)"          options={{ headerShown: false, gestureEnabled: false }} />
-      {/* Slides in from the left because that is the direction the swipe that
-          opens it travels — the sheet follows the finger rather than arriving
-          from the opposite edge.
-          The back gesture is off, and its absence is deliberate. Coming from
-          the left, the gesture that should dismiss this travels *left*, and
-          react-native-screens on SDK 54 only offers `gestureDirection`
-          'horizontal' | 'vertical' — no inverted variant — so the one it would
-          give us drags the screen further the way it came. A gesture that
-          works backwards is worse than none; the close button is the
-          affordance, and it sits under the thumb at the top of the screen. */}
-      <Stack.Screen
-        name="compose"
-        options={{
-          headerShown: false,
-          animation: 'slide_from_left',
-          gestureEnabled: false,
-        }}
+    <>
+      <Stack>
+        <Stack.Screen name="index"           options={{ headerShown: false }} />
+        <Stack.Screen name="welcome"         options={{ headerShown: false }} />
+        <Stack.Screen name="login"           options={{ headerShown: false }} />
+        {/* `gestureEnabled: false` for the same reason `social-birthday` below
+            sets it: `welcome` pushes `/login`, and signing in *replaces* only
+            the login screen, so `welcome` is still underneath the tab group.
+            The iOS back-swipe was therefore popping a signed-in user out of the
+            app and onto the sign-up screen they are already past. Swiping right
+            from the tabs opens the composer instead — see `compose` below and
+            the edge strip in `(tabs)/map`. */}
+        <Stack.Screen name="(tabs)"          options={{ headerShown: false, gestureEnabled: false }} />
+        {/* Slides in from the left because that is the direction the swipe that
+            opens it travels — the sheet follows the finger rather than arriving
+            from the opposite edge.
+            The back gesture is off, and its absence is deliberate. Coming from
+            the left, the gesture that should dismiss this travels *left*, and
+            react-native-screens on SDK 54 only offers `gestureDirection`
+            'horizontal' | 'vertical' — no inverted variant — so the one it would
+            give us drags the screen further the way it came. A gesture that
+            works backwards is worse than none; the close button is the
+            affordance, and it sits under the thumb at the top of the screen. */}
+        <Stack.Screen
+          name="compose"
+          options={{
+            headerShown: false,
+            animation: 'slide_from_left',
+            gestureEnabled: false,
+          }}
+        />
+        <Stack.Screen name="messages/[id]"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="notifications"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="swifts/compose"  options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="swifts/[id]"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="zone"            options={{ headerShown: false, animation: 'slide_from_right' }} />
+        {/* Both draw their own header; without an entry here the navigator adds
+            a second, native one above it. */}
+        <Stack.Screen name="zone-area"       options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="zone-apple-music" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="zone-trim"       options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="profile/[id]"    options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="edit-profile"    options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="search"          options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="starred-stories" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="blocked-users"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="privacy"         options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="connections"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="permissions"     options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="notification-settings" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="nearby"          options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="onboarding"      options={{ headerShown: false }} />
+        <Stack.Screen name="register"        options={{ headerShown: false }} />
+        {/* Google/Apple sign-ups land here for the one thing neither provider
+            shares. `gestureEnabled: false` because it is the age gate — swiping
+            back out of it would land on a login screen the user is already past. */}
+        <Stack.Screen name="social-birthday" options={{ headerShown: false, gestureEnabled: false }} />
+        <Stack.Screen name="interests-setup"         options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding-profession"   options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="onboarding-nationality"  options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="clubs/[id]"      options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="create-club"     options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="market"          options={{ headerShown: false, animation: 'slide_from_right' }} />
+      </Stack>
+      <LocationLaunchPrompt
+        visible={launchPromptVisible}
+        busy={launchPromptBusy}
+        onStayActive={() => setLaunchPromptVisible(false)}
+        onGoInvisible={handleGoInvisible}
       />
-      <Stack.Screen name="messages/[id]"   options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="notifications"   options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="swifts/compose"  options={{ headerShown: false, animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="zone"            options={{ headerShown: false, animation: 'slide_from_right' }} />
-      {/* Both draw their own header; without an entry here the navigator adds
-          a second, native one above it. */}
-      <Stack.Screen name="zone-area"       options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="zone-apple-music" options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="zone-trim"       options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="profile/[id]"    options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="edit-profile"    options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="search"          options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="starred-stories" options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="blocked-users"   options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="privacy"         options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="connections"     options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="permissions"     options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="notification-settings" options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="nearby"          options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="onboarding"      options={{ headerShown: false }} />
-      <Stack.Screen name="register"        options={{ headerShown: false }} />
-      {/* Google/Apple sign-ups land here for the one thing neither provider
-          shares. `gestureEnabled: false` because it is the age gate — swiping
-          back out of it would land on a login screen the user is already past. */}
-      <Stack.Screen name="social-birthday" options={{ headerShown: false, gestureEnabled: false }} />
-      <Stack.Screen name="interests-setup"         options={{ headerShown: false }} />
-      <Stack.Screen name="onboarding-profession"   options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="onboarding-nationality"  options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="interests"       options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="clubs/[id]"      options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="clubs/[id]/chat" options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="create-club"     options={{ headerShown: false, animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="market"          options={{ headerShown: false, animation: 'slide_from_right' }} />
-    </Stack>
+      {/* Last in the tree so it covers everything, including the location
+          prompt above — an account that has not agreed to the Terms should not
+          be answering a question about its own visibility first. */}
+      <TermsGate
+        visible={isAuthenticated && needsAcceptance === true}
+        onAccepted={() => refreshAcceptance().catch(() => {})}
+        onSignOut={logout}
+      />
+    </>
   );
 }
 

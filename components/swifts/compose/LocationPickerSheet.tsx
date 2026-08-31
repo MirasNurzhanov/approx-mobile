@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import MapView, { PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import * as Location from 'expo-location';
+
+import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { IconClose, IconLocate, IconPin, IconTrash } from '@/components/ui/icons';
@@ -120,6 +122,7 @@ function PickerBody({
   );
   const [placeName, setPlaceName] = useState(initial?.placeName ?? '');
   const [locating, setLocating] = useState(false);
+  const { ensure: ensurePermission, primer } = usePermissionPrimer();
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
 
@@ -127,22 +130,42 @@ function PickerBody({
   // only because the creator opened a location picker. The composer never
   // holds a fix speculatively.
   useEffect(() => {
-    if (!initial) void goToCurrentPosition();
+    // Silent on mount, and that is the point. This used to call
+    // `requestForegroundPermissionsAsync()` here, so merely *opening* the
+    // location picker fired iOS's dialog cold — a permission request the user
+    // had not asked for, which is the shape of the 5.1.1(iv) rejection.
+    //
+    // Now the sheet opens on a pannable map either way, and the position is
+    // only fetched for somebody who has already granted access. Asking is what
+    // the "Use my current location" button below is for.
+    if (!initial) void goToCurrentPosition({ prompt: false });
     // Mount only: `initial` is the opening value by construction, and this
     // component is remounted for each opening.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function goToCurrentPosition() {
+  /**
+   * Centre the map on the user.
+   *
+   * `prompt` decides whether this may ask for permission. False on mount — see
+   * above — and true from the button, which is an explicit request for exactly
+   * this and therefore the right moment to ask. `ensurePermission` shows the
+   * explanation sheet and then the OS dialog with nothing in between.
+   */
+  async function goToCurrentPosition({ prompt = true }: { prompt?: boolean } = {}) {
     setLocating(true);
     setError(null);
     try {
       const existing = await Location.getForegroundPermissionsAsync();
       const granted = existing.granted
         ? true
-        : (await Location.requestForegroundPermissionsAsync()).granted;
+        : (prompt ? await ensurePermission('location') : false);
       if (!granted) {
-        setError('Aura needs location access to find where you are. You can still pan the map.');
+        setError(
+          prompt
+            ? 'Approx needs location access to find where you are. You can still pan the map.'
+            : null,
+        );
         return;
       }
 
@@ -194,6 +217,7 @@ function PickerBody({
 
   return (
     <View style={styles.root}>
+        {primer}
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <Pressable
             onPress={onCancel}
@@ -250,7 +274,7 @@ function PickerBody({
 
           <Pressable
             style={[styles.locateBtn, { bottom: 16 }]}
-            onPress={goToCurrentPosition}
+            onPress={() => goToCurrentPosition()}
             disabled={locating}
             accessibilityRole="button"
             accessibilityLabel="Use my current location"

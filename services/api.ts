@@ -1,12 +1,70 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import * as Application from 'expo-application';
 import { router } from 'expo-router';
 
 export const BASE_URL = 'https://project-x-production-3261.up.railway.app';
 
 /** Kept here rather than imported from ./presence: that module imports this
  * one, and the interceptor below needs the name at module scope. */
-const PRESENCE_HEADER = 'X-Aura-Presence';
+const PRESENCE_HEADER = 'X-Approx-Presence';
+
+export const CLIENT_BUILD_HEADER = 'X-Approx-Build';
+
+/**
+ * Which build of the app this is, read from the binary rather than written
+ * down here.
+ *
+ * `Application.nativeBuildVersion` is iOS's `CFBundleVersion` and Android's
+ * `versionCode` — the number the store actually shipped. This project uses EAS
+ * remote version management (`appVersionSource: "remote"` with
+ * `autoIncrement`), so that number is assigned at build time and a constant in
+ * this file could only ever be a guess that drifts. Build 33 will report 33
+ * with no source change.
+ *
+ * It is what tells the server that this client understands a rule the previous
+ * one did not — today, the Terms agreement on the sign-in screen, which build
+ * 31 has never heard of. See `users/terms.py:terms_enforced_for`.
+ *
+ * ## Why `null` is a real answer
+ *
+ * Returns null when the value is absent or is not a plain positive integer:
+ * Expo Go, web, a simulator run before the field is populated, or a
+ * `CFBundleVersion` in dotted form. **It is never defaulted to a number.**
+ * Guessing forward would claim compliance the bundle cannot deliver; guessing
+ * backward would invent a build that does not exist. The caller omits the
+ * header entirely instead, and the server's legacy path — which already
+ * distinguishes "did not say" from any number — handles it.
+ *
+ * Read on each call rather than memoised at module scope: it is a cached
+ * native constant, so the read is free, and a module-scope capture would make
+ * the value impossible to exercise in tests without resetting the registry.
+ */
+export function clientBuild(): number | null {
+  const raw = Application.nativeBuildVersion;
+  // Strict: EAS assigns integers on both platforms. Anything else — a dotted
+  // CFBundleVersion someone sets by hand, an empty string, null — is a build
+  // this mechanism cannot speak for, and saying nothing is the honest answer.
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Headers every request carries, whichever client sent it.
+ *
+ * The `api` instance below applies these through its interceptor. This export
+ * is for the calls that deliberately use bare `axios` because they run
+ * *before* a session exists — sign-in — so those get the same treatment
+ * without each call site knowing the header name.
+ *
+ * Returns an empty object when the build is unknown. An absent header is the
+ * signal, not a placeholder value.
+ */
+export function clientHeaders(): Record<string, string> {
+  const build = clientBuild();
+  return build === null ? {} : { [CLIENT_BUILD_HEADER]: String(build) };
+}
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -70,6 +128,12 @@ api.interceptors.request.use(async (config) => {
   // Required lazily — services/presence imports this module, and pulling it in
   // at the top would be a cycle. An explicit header already set by the caller
   // (the going-to-background beacon) is left alone.
+  // Every authenticated request identifies its build. Set here rather than per
+  // call site, for the same reason presence is done below. Omitted rather than
+  // guessed when the binary does not report one — see `clientBuild`.
+  const build = clientBuild();
+  if (build !== null) config.headers[CLIENT_BUILD_HEADER] = String(build);
+
   if (config.headers[PRESENCE_HEADER] === undefined) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { isForeground } = require('./presence') as typeof import('./presence');

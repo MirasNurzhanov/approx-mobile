@@ -14,6 +14,7 @@ import { useTheme } from '@/context/ThemeContext';
 import {
   ALL_PERMISSIONS,
   bindForegroundRefresh,
+  canStillPrompt,
   openAppSettings,
   refreshPermissions,
   PERMISSION_COPY,
@@ -36,6 +37,7 @@ const STATE_TEXT: Record<PermissionState, string> = {
   granted: 'Allowed',
   denied: 'Not allowed',
   blocked: 'Blocked in system settings',
+  restricted: 'Restricted by device settings',
   undetermined: 'Not asked yet',
   unsupported: 'Unavailable on this device',
 };
@@ -44,6 +46,7 @@ const makeStateColor = (colors: ColorPalette): Record<PermissionState, string> =
   granted: colors.teal,
   denied: colors.orange,
   blocked: colors.red,
+  restricted: colors.red,
   undetermined: colors.t2,
   unsupported: colors.t3,
 });
@@ -53,6 +56,7 @@ const STATE_GLYPH: Record<PermissionState, string> = {
   granted: '✓',
   denied: '!',
   blocked: '×',
+  restricted: '×',
   undetermined: '–',
   unsupported: '–',
 };
@@ -70,7 +74,9 @@ function PermissionRow({
   const styles = makeStyles(colors);
   const STATE_COLOR = makeStateColor(colors);
   const copy = PERMISSION_COPY[info.key];
-  const askable = info.state === 'undetermined' || info.state === 'denied';
+  // `canStillPrompt` rather than a local comparison, so this row and the
+  // primer sheet can never disagree about whether a dialog is still available.
+  const askable = canStillPrompt(info.state);
   const actionLabel = askable ? 'Allow' : 'Open Settings';
 
   return (
@@ -95,7 +101,11 @@ function PermissionRow({
         {info.caveat && <Text style={styles.caveat}>{info.caveat}</Text>}
       </View>
 
-      {info.state !== 'granted' && info.state !== 'unsupported' && (
+      {info.state !== 'granted' && info.state !== 'unsupported'
+        // Nothing this screen can offer for a restricted permission: Settings
+        // shows the switch greyed out, so a button pointing there would be a
+        // dead end dressed up as an action.
+        && info.state !== 'restricted' && (
         <Pressable
           onPress={() => (askable ? onAsk(info.key) : openAppSettings())}
           hitSlop={8}
@@ -153,14 +163,14 @@ export default function PermissionsScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
-      <ScreenHeader title="Permissions" subtitle="What Aura can access, and why" />
+      <ScreenHeader title="Permissions" subtitle="What Approx can access, and why" />
 
       <ScrollView
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
         {/* The distinction this screen is most likely to be misread on, said
-            first and unconditionally. Letting Aura read your location is not
+            first and unconditionally. Letting Approx read your location is not
             the same as other people being able to see it — that takes choosing
             Live or Approximate in Privacy & safety. It is not implied by
             anything on this page, and none of these switches can turn it on. */}
@@ -170,12 +180,12 @@ export default function PermissionsScreen() {
           </Text>
           <Text style={styles.noticeBody}>
             {paused
-              ? 'Location permission lets Aura show you who is nearby. You are only shown to other people once you choose Live or Approximate in Privacy & safety — never automatically, and never just because this permission is granted.'
-              : 'People nearby can see you, including with Aura in the background, until you choose Paused in Privacy & safety or close Aura.'}
+              ? 'Location permission lets Approx show you who is nearby. You are only shown to other people once you choose Live or Approximate in Privacy & safety — never automatically, and never just because this permission is granted.'
+              : 'People nearby can see you, including with Approx in the background, until you choose Paused in Privacy & safety or close Approx.'}
           </Text>
         </Card>
 
-        {/* An OS permission being granted is not the same as Aura using it.
+        {/* An OS permission being granted is not the same as Approx using it.
             Someone who paused sharing should see that here, not conclude the
             permission is broken. */}
         {(paused || approximate) && (
@@ -185,7 +195,7 @@ export default function PermissionsScreen() {
             </Text>
             <Text style={styles.noticeBody}>
               {paused
-                ? 'Aura has location permission but is not using it — you are off the map until you resume.'
+                ? 'Approx has location permission but is not using it — you are off the map until you resume.'
                 : 'Your position is rounded to about 500m before it leaves your phone.'}
             </Text>
             <Pressable
@@ -215,7 +225,7 @@ export default function PermissionsScreen() {
         </Card>
 
         <Text style={styles.footnote}>
-          Aura never asks for the photo library. Picking an existing photo uses the system picker,
+          Approx never asks for the photo library. Picking an existing photo uses the system picker,
           which hands over only the image you choose.
         </Text>
 
@@ -223,7 +233,7 @@ export default function PermissionsScreen() {
           onPress={openAppSettings}
           style={({ pressed }) => [styles.settingsBtn, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Open Aura in system settings"
+          accessibilityLabel="Open Approx in system settings"
         >
           <Text style={styles.settingsBtnText}>Open system settings</Text>
         </Pressable>

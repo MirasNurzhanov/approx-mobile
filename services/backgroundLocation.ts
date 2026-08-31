@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
@@ -138,17 +137,6 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     return;
   }
 
-  // Android has no ACCESS_BACKGROUND_LOCATION to grant, so the permission
-  // check below could only ever refuse. See SUPPORTS_BACKGROUND_LOCATION.
-  //
-  // Unregister rather than just returning: a build from before background
-  // location was disabled may have left this task registered, and
-  // expo-task-manager restores registrations across an app update.
-  if (Platform.OS === 'android') {
-    await stopBackgroundLocationUpdates();
-    return;
-  }
-
   // Paused should stop the phone tracking us at all, not just stop the
   // uploads: background tracking exists to keep a *published* position
   // current, and a background-location indicator burning on the status bar of
@@ -180,7 +168,7 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     distanceInterval: 50,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
-      notificationTitle: 'Aura',
+      notificationTitle: 'Approx',
       notificationBody: 'You are sharing your location — keeping your place on the map up to date',
       notificationColor: '#00b4a6',
     },

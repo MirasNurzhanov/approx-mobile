@@ -26,11 +26,12 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
-import { uploadImageToCloudinary } from '@/services/cloudinary';
 import { clubsApi } from '@/services/clubs';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
+import { useContentActions } from '@/components/ContentActions';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
+import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -440,7 +441,7 @@ function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
 }
 
 /** One message: a meetup proposal card, or an ordinary bubble. */
-function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerIsOwner, actioningId, onApprove, onReject, onDelete }: {
+function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerIsOwner, actioningId, onApprove, onReject, onDelete, onReport }: {
   item: ClubMessage;
   isMine: boolean;
   hydratedItem: ClubMessage;
@@ -450,6 +451,7 @@ function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerI
   onApprove: (id: number) => void;
   onReject: (id: number) => void;
   onDelete: (id: number) => void;
+  onReport: (m: ClubMessage) => void;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -473,7 +475,22 @@ function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerI
   }
 
   return (
-    <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
+    // Long-press to report, on other people's messages only. A club hands its
+    // whole history to anyone who joins, so club chat is semi-public UGC and
+    // takes the same reporting route a story or a comment does. A long-press
+    // rather than a visible button: a chat bubble with a permanent report
+    // affordance on it reads as an accusation waiting to happen.
+    <Pressable
+      onLongPress={isMine ? undefined : () => onReport(item)}
+      delayLongPress={400}
+      accessibilityRole={isMine ? undefined : 'button'}
+      accessibilityLabel={
+        isMine
+          ? undefined
+          : `Message from ${hydratedItem.sender_username ?? 'a member'}. Long press to report or block.`
+      }
+      style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}
+    >
       {!isMine && (
         <View style={styles.avatarSlot}>
           {showSenderHeader && (
@@ -496,7 +513,7 @@ function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerI
           </Text>
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -513,16 +530,30 @@ function ClubChatInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
-    <View style={[styles.inputBar, { paddingBottom: bottom + 8 }]}>
-      <Pressable style={styles.attachBtn} onPress={onCamera} hitSlop={4}>
+    <GlassSurface
+      style={[styles.inputBar, { paddingBottom: bottom + 8 }]}
+      // Heavier than a floating control: this sits over scrolling messages, and
+      // a light wash would let text slide visibly under the composer.
+      opacity={0.86}
+    >
+      <GlassIconButton
+        style={styles.attachBtn} onPress={onCamera} hitSlop={4} tone="surface2"
+        accessibilityRole="button" accessibilityLabel="Take a photo"
+      >
         <Ionicons name="camera-outline" size={20} color={colors.t3} />
-      </Pressable>
-      <Pressable style={styles.attachBtn} onPress={onAttach} hitSlop={4}>
+      </GlassIconButton>
+      <GlassIconButton
+        style={styles.attachBtn} onPress={onAttach} hitSlop={4} tone="surface2"
+        accessibilityRole="button" accessibilityLabel="Choose a photo"
+      >
         <Ionicons name="image-outline" size={20} color={colors.t3} />
-      </Pressable>
-      <Pressable style={styles.attachBtn} onPress={onProposal} hitSlop={4}>
+      </GlassIconButton>
+      <GlassIconButton
+        style={styles.attachBtn} onPress={onProposal} hitSlop={4} tone="surface2"
+        accessibilityRole="button" accessibilityLabel="Propose a meetup"
+      >
         <Ionicons name="calendar-outline" size={20} color={colors.t3} />
-      </Pressable>
+      </GlassIconButton>
       <TextInput
         style={styles.input}
         value={text}
@@ -532,18 +563,22 @@ function ClubChatInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
         multiline
         maxLength={2000}
       />
-      <Pressable
+      {/* Glass only while inactive — once there is something to send this is
+          the one filled control on the bar, and a translucent primary action
+          stops reading as one. */}
+      <GlassIconButton
         style={[styles.sendBtn, canSend && styles.sendBtnActive]}
         onPress={onSend}
         disabled={!canSend}
         hitSlop={8}
+        tone="surface2"
         accessibilityRole="button"
         accessibilityLabel="Send message"
         accessibilityState={{ disabled: !canSend }}
       >
         <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
-      </Pressable>
-    </View>
+      </GlassIconButton>
+    </GlassSurface>
   );
 }
 
@@ -816,6 +851,18 @@ function useClubChat(
       socket.onmessage = (event) => {
         try {
           const raw: RawMsg = JSON.parse(event.data);
+
+          // A refusal from the content filter (see clubs/consumers.py). Drop
+          // the optimistic bubble and say why — otherwise it hangs "pending"
+          // forever and looks like a stalled network.
+          if ((raw as { type?: string }).type === 'error') {
+            const detail = (raw as { detail?: string }).detail
+              ?? 'That message could not be sent.';
+            setMessages((prev) => prev.filter((m) => !m.pending));
+            Alert.alert('Message not sent', detail);
+            return;
+          }
+
           const incoming = hydrate(normalise(raw));
           // Allow proposals through even without text/image
           if (!incoming.text && !incoming.image && incoming.message_type !== 'meetup_proposal') return;
@@ -892,7 +939,16 @@ function useClubChat(
           const confirmed = normalise(r.data);
           setMessages((prev) => prev.map((m) => m.id === tempId ? confirmed : m));
         })
-        .catch(() => {});
+        .catch((e: any) => {
+          // A message refused by the content filter is never coming back, so
+          // the optimistic bubble has to go and the sender has to be told.
+          // Leaving it pending was indistinguishable from a network stall.
+          setMessages((prev) => prev.filter((m) => m.id !== tempId));
+          Alert.alert(
+            'Message not sent',
+            e?.response?.data?.detail ?? 'Please try again.',
+          );
+        });
     }
   }
 
@@ -903,11 +959,15 @@ function useClubChat(
       sender_id: currentUserIdRef.current ?? -1,
       created_at: new Date().toISOString(), pending: true,
     }]);
-    // Straight to Cloudinary, then only the URL to Django — the server
-    // broadcasts it to the club socket group like any other message.
-    uploadImageToCloudinary(asset.uri, asset.mimeType ?? 'image/jpeg')
-      .then((imageUrl) => api.post(`/api/clubs/${clubId}/messages/`, { image_url: imageUrl }))
-      .catch(() => {});
+    const form = new FormData();
+    form.append('image', {
+      uri: asset.uri,
+      name: asset.uri.split('/').pop() ?? 'photo.jpg',
+      type: asset.mimeType ?? 'image/jpeg',
+    } as any);
+    api.post(`/api/clubs/${clubId}/messages/`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).catch(() => {});
   }
 
   async function handleAttach() {
@@ -941,7 +1001,13 @@ function useClubChat(
  * socket like anyone else's. So it lives here rather than among the messaging
  * state it would otherwise be interleaved with.
  */
-function useMeetupProposal(clubId: number) {
+function useMeetupProposal(
+  clubId: number,
+  // Passed in rather than calling `usePermissionPrimer` again: two instances of
+  // that hook in one screen means two Modals racing to present, and only one of
+  // them is rendered. The screen owns the primer; this hook borrows its `ensure`.
+  ensurePermission: (key: 'location') => Promise<boolean>,
+) {
   const [modalView, setModalView] = useState<'proposal' | 'map' | null>(null);
   const [propTitle, setPropTitle] = useState('');
   const [propDesc, setPropDesc] = useState('');
@@ -964,9 +1030,11 @@ function useMeetupProposal(clubId: number) {
   async function handleCurrentLocation() {
     setGettingLocation(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Allow location access to use your current position.');
+      // Through the primer, not raw. A bare `requestForegroundPermissionsAsync`
+      // here fired iOS's dialog with no explanation in front of it — the same
+      // cold prompt the map used to make, and the same 5.1.1(iv) problem. The
+      // sheet explains, and Continue goes straight to Apple's dialog.
+      if (!(await ensurePermission('location'))) {
         // Mirrored here because the reset below is no longer in a `finally`:
         // this early return would otherwise leave the button spinning forever.
         setGettingLocation(false);
@@ -1060,13 +1128,25 @@ export default function ClubChatScreen() {
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
+  const { present, sheets } = useContentActions();
+
+  function reportClubMessage(message: ClubMessage) {
+    present({
+      target: 'club_message',
+      targetId: message.id,
+      subject: `this message from @${message.sender_username ?? 'a member'}`,
+      authorId: message.sender_id,
+      authorUsername: message.sender_username,
+      authorAvatar: message.sender_avatar,
+    });
+  }
 
   const clubId = Number(id);
   const [viewerIsOwner, setViewerIsOwner] = useState(false);
 
   const [actioningEventId, setActioningEventId] = useState<number | null>(null);
 
-  const proposal = useMeetupProposal(clubId);
+  const proposal = useMeetupProposal(clubId, ensurePermission);
   const chat = useClubChat(clubId, router, ensurePermission);
   const {
     messages, setMessages, text, setText, loading, wsReady, loadingMore,
@@ -1185,6 +1265,7 @@ export default function ClubChatScreen() {
                 onApprove={handleApprove}
                 onReject={handleReject}
                 onDelete={handleDelete}
+                onReport={reportClubMessage}
               />
             );
           }}
@@ -1202,6 +1283,7 @@ export default function ClubChatScreen() {
         onProposal={proposal.open}
       />
       {primer}
+      {sheets}
 
       <MeetupProposalModal {...proposal.modalProps} top={top} bottom={bottom} />
     </KeyboardAvoidingView>
@@ -1269,9 +1351,11 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   bubbleImage: { width: 210, height: 210, borderRadius: radius.m },
 
   // Input bar
+  // No `backgroundColor` here or on `sendBtn`: the fill is drawn behind their
+  // content by `GlassBackdrop`, and a background would sit on top of the blur.
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingTop: 10, gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
   },
   attachBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   input: {
@@ -1284,7 +1368,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   sendBtn: {
     width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border,
+    borderWidth: 1, borderColor: colors.border,
   },
   sendBtnActive: { backgroundColor: colors.teal, borderColor: colors.teal },
 

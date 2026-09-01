@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Switch, Text, View } from 'react-native';
 
+import { runBusy } from '@/services/busy';
 import { Card } from '@/components/ui/Card';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -67,49 +68,59 @@ export function BackgroundLocationRow({ sharing }: Props) {
 
   async function turnOn() {
     setBusy(true);
-    // `requestBackground` is a no-op when Always is already granted, and goes
-    // through iOS's upgrade prompt when it is not. It never asks twice.
-    const outcome = await requestBackground();
-    setStatus(outcome);
+    // `runBusy` rather than a trailing `setBusy(false)`. Every *branch* below
+    // does fall through to the end — which is what the note here used to
+    // check — but `requestBackground()` is unguarded, and a rejection from it
+    // skipped the reset entirely and left the switch dead for the session.
+    // It is a module-level try/finally: written inline, a `finally` would
+    // make React Compiler bail on this whole component.
+    await runBusy(async () => {
+      // `requestBackground` is a no-op when Always is already granted, and goes
+      // through iOS's upgrade prompt when it is not. It never asks twice.
+      const outcome = await requestBackground();
+      setStatus(outcome);
 
-    if (outcome === 'granted') {
-      await startBackgroundLocationUpdates().catch(() => {});
-    } else if (outcome === 'needs_foreground') {
-      Alert.alert(
-        'Location access first',
-        'Approx needs ordinary location access before iOS will consider keeping '
-        + 'it running in the background. Turn on Location in Settings → '
-        + 'Permissions, then come back.',
-      );
-    } else if (outcome === 'needs_settings') {
-      Alert.alert(
-        'Set this in Settings',
-        'iOS will not ask again from inside the app. Open Settings → Approx → '
-        + 'Location and choose "Always".',
-        [
-          { text: 'Not now', style: 'cancel' },
-          { text: 'Open Settings', onPress: openAppSettings },
-        ],
-      );
-    }
-    // Not a `finally` — React Compiler bails on any component containing one,
-    // and every branch above falls through to here.
-    setBusy(false);
+      if (outcome === 'granted') {
+        await startBackgroundLocationUpdates().catch(() => {});
+      } else if (outcome === 'needs_foreground') {
+        Alert.alert(
+          'Location access first',
+          'Approx needs ordinary location access before iOS will consider keeping '
+          + 'it running in the background. Turn on Location in Settings → '
+          + 'Permissions, then come back.',
+        );
+      } else if (outcome === 'needs_settings') {
+        Alert.alert(
+          'Set this in Settings',
+          'iOS will not ask again from inside the app. Open Settings → Approx → '
+          + 'Location and choose "Always".',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open Settings', onPress: openAppSettings },
+          ],
+        );
+      }
+    }, () => setBusy(false));
   }
 
   async function turnOff() {
     setBusy(true);
-    // The OS permission is the user's to revoke in Settings; what this switch
-    // owns is whether Approx *uses* it. Stopping the task is the honest meaning
-    // of turning this off, and it takes effect immediately.
-    await stopBackgroundLocationUpdates().catch(() => {});
-    Alert.alert(
-      'Background updates off',
-      'Approx will only update your location while the app is open. To withdraw '
-      + 'the permission itself, use Settings → Approx → Location.',
-    );
-    await refresh();
-    setBusy(false);
+    // `await refresh()` below is unguarded and `backgroundStatus()` can
+    // reject — the mount effect already concedes that with its own
+    // `.catch()`. A rejection there used to skip the reset and leave the
+    // switch disabled. See `turnOn` for why this is not an inline `finally`.
+    await runBusy(async () => {
+      // The OS permission is the user's to revoke in Settings; what this switch
+      // owns is whether Approx *uses* it. Stopping the task is the honest meaning
+      // of turning this off, and it takes effect immediately.
+      await stopBackgroundLocationUpdates().catch(() => {});
+      Alert.alert(
+        'Background updates off',
+        'Approx will only update your location while the app is open. To withdraw '
+        + 'the permission itself, use Settings → Approx → Location.',
+      );
+      await refresh();
+    }, () => setBusy(false));
   }
 
   const explanation = (() => {

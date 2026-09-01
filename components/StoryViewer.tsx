@@ -5,14 +5,12 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
-  type PanResponderInstance,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
@@ -23,6 +21,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector, type PanGesture } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { STORY_LIKE } from '@/components/storyReactions';
@@ -160,22 +159,36 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
   // Built once, in an effect rather than during render. The handlers have to
   // read `.current` to stay on the live story, and the compiler counts every
   // ref read reachable from a render-time call as a render-time read — which a
-  // `useRef`/`useState` initialiser is. Inside an effect it is simply allowed.
-  // Costs one extra render on mount; the gesture is live well before a finger
-  // can arrive, since the viewer fades in first.
-  const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
+  // `useRef`/`useState` initialiser and a `useMemo` factory both are. Inside an
+  // effect it is simply allowed. Costs one extra render on mount; the gesture
+  // is live well before a finger can arrive, since the viewer fades in first.
+  //
+  // `.runOnJS(true)`: recognition runs natively, but `goTo` is plain JS state
+  // work, so keeping the callback on the JS thread saves a worklet hop and
+  // lets it read those refs directly. Nothing here tracks the finger visually.
+  //
+  // Thresholds carry over from the PanResponder this replaces: it claimed at
+  // `|dx| > 15` with `|dx| > |dy|`, which is `activeOffsetX` at ±15 plus a
+  // `failOffsetY` of the same, and still fires only past 40.
+  const [swipe, setSwipe] = useState<PanGesture | null>(null);
   useEffect(() => {
-    setPanResponder(
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gs) =>
-          Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy),
-        onPanResponderRelease: (_, gs) => {
-          if (gs.dx < -40) goToRef.current(indexRef.current + 1);
-          else if (gs.dx > 40) goToRef.current(indexRef.current - 1);
-        },
-      }),
+    setSwipe(
+      Gesture.Pan()
+        .runOnJS(true)
+        .activeOffsetX([-15, 15])
+        .failOffsetY([-15, 15])
+        .onEnd((e) => {
+          if (e.translationX < -40) goToRef.current(indexRef.current + 1);
+          else if (e.translationX > 40) goToRef.current(indexRef.current - 1);
+        }),
     );
   }, []);
+
+  // Stands in for the one frame before the effect runs, so the detector always
+  // has a gesture — the same job the old `?? {}` on `panHandlers` did. No
+  // `useMemo`: React Compiler memoises this component, and hand-memoising
+  // inside compiled code is what react-compiler-no-manual-memoization flags.
+  const idleSwipe = Gesture.Pan().enabled(false);
 
   // ── Liking ────────────────────────────────────────────────────────────────
   // The heart kicks once when it fills. Deliberately the only motion down here:
@@ -279,7 +292,8 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
           iOS and never be seen. */}
       {sheets}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <View style={styles.svContainer} {...(panResponder?.panHandlers ?? {})}>
+      <GestureDetector gesture={swipe ?? idleSwipe}>
+      <View style={styles.svContainer}>
         {/* Background — photo fills the screen; a text-only story gets a soft
             vertical wash rather than flat black, which read as a dead screen. */}
         <View style={[StyleSheet.absoluteFill, styles.svBackdrop]} />
@@ -469,6 +483,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
           </Pressable>
         </View>
       </View>
+      </GestureDetector>
       </KeyboardAvoidingView>
     </Modal>
   );

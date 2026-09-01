@@ -25,6 +25,7 @@ import { fonts, withAlpha, type ColorPalette } from '@/constants/theme';
 import type { CategoryStyle } from '@/services/interestCategories';
 
 import { InterestChipIcon } from './InterestChipIcon';
+import { KeyboardDoneButton } from './KeyboardDoneButton';
 
 /**
  * The nine category bubbles, and the interests that live inside them.
@@ -268,6 +269,11 @@ function OpenPanel<T extends BubbleInterest>({
   selected: Set<number>;
   onToggle: (id: number) => void;
 }) {
+  // Local to the panel, not lifted beside `query` in the parent: the panel
+  // unmounts when it closes, so focus resets on its own and cannot outlive
+  // the keyboard it describes.
+  const [searchFocused, setSearchFocused] = useState(false);
+
   const panelStyle = useAnimatedStyle(() => {
     const t = grow.get();
     return {
@@ -414,6 +420,8 @@ function OpenPanel<T extends BubbleInterest>({
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               accessibilityLabel={`Search ${open.style.label}`}
             />
             {query.length > 0 && (
@@ -426,6 +434,7 @@ function OpenPanel<T extends BubbleInterest>({
                 <Ionicons name="close-circle" size={17} color={palette.t3} />
               </Pressable>
             )}
+            <KeyboardDoneButton visible={searchFocused} palette={palette} />
           </View>
         )}
 
@@ -433,6 +442,7 @@ function OpenPanel<T extends BubbleInterest>({
           contentContainerStyle={fieldStyles.chipScroll}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           {open.items.length === 0 ? (
             <Text style={[fieldStyles.empty, { color: palette.t3 }]}>

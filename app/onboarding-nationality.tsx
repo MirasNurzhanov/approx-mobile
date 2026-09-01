@@ -87,6 +87,7 @@ export default function OnboardingNationalityScreen() {
         initialNumToRender={8}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         contentContainerStyle={s.list}
         renderItem={({ item }) => {
           const sel = selected === item.code;

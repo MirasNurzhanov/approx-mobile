@@ -64,7 +64,6 @@ import {
   IconMoon,
   IconMusic,
   IconShield,
-  IconSun,
   IconTrash,
   type IconComponent,
 } from '@/components/ui/icons';

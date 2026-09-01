@@ -177,6 +177,20 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     );
   }, []);
 
+  // ── Liking ────────────────────────────────────────────────────────────────
+  // The heart kicks once when it fills. Deliberately the only motion down here:
+  // the photo is the content, and a second animated thing in the same corner
+  // would be competing with it rather than confirming a tap.
+  //
+  // Declared above the `!story` bail-out below, with the other hooks. It used
+  // to sit beside `handleLike` further down, which put two hooks after an
+  // early return: an empty `stories` array shortened the hook list, and the
+  // next render with content then read this state off the previous order.
+  const heartPop = useSharedValue(0);
+  const heartStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + heartPop.get() * 0.32 }],
+  }));
+
   const story = stories[index];
   if (!story) return null;
 
@@ -219,15 +233,6 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
     // `finally` — React Compiler bails on any component containing one.
     setTogglingStar(false);
   }
-
-  // ── Liking ────────────────────────────────────────────────────────────────
-  // The heart kicks once when it fills. Deliberately the only motion down here:
-  // the photo is the content, and a second animated thing in the same corner
-  // would be competing with it rather than confirming a tap.
-  const heartPop = useSharedValue(0);
-  const heartStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + heartPop.get() * 0.32 }],
-  }));
 
   function handleLike() {
     if (!onReact) return;

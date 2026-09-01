@@ -228,6 +228,10 @@ describe('useSheetDrag', () => {
 
   function build(height: number, onDismiss: () => void, set: (v: number) => void = () => {}) {
     const { useSheetDrag } = require('../../components/ui/useSheetDrag');
+    // useSheetDrag calls no React hooks - it only assembles a Gesture
+    // object, so driving it from a plain helper is safe. The rule fires on
+    // the `use` prefix alone.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
     const gesture = useSheetDrag({
       sheetY: { get: () => 0, set, value: 0 },
       height,

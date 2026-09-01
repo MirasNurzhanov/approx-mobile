@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet } from 'react-native'
 import { Image } from 'expo-image'
-import { fonts, radius } from '@/constants/theme'
+import { fonts } from '@/constants/theme'
 import type { ColorPalette } from '@/constants/theme'
 import { useTheme } from '@/context/ThemeContext'
 import { PresenceDot } from '@/components/PresenceDot'

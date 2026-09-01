@@ -13,7 +13,7 @@
  * throwing, because a dead button is a support ticket and a missing one is not.
  */
 import * as AppleAuthentication from 'expo-apple-authentication';
-import axios from 'axios';
+import axios, { isAxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
@@ -159,7 +159,7 @@ async function exchange(
       accept_terms: acceptedTerms,
     }));
   } catch (err) {
-    if (axios.isAxiosError(err) && err.response?.data) {
+    if (isAxiosError(err) && err.response?.data) {
       const body = err.response.data as { detail?: string; code?: string };
       throw new SocialSignInError(
         body.detail || 'That sign-in could not be completed.',
@@ -338,7 +338,7 @@ async function link(provider: SocialProvider, idToken: string): Promise<SocialPr
       id_token: idToken,
     }));
   } catch (err) {
-    if (axios.isAxiosError(err) && err.response?.data) {
+    if (isAxiosError(err) && err.response?.data) {
       const body = err.response.data as { detail?: string; code?: string };
       throw new SocialSignInError(
         body.detail || 'That account could not be connected.',

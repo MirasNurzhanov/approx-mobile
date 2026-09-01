@@ -16,7 +16,6 @@ import {
   layoutMarkers,
   MIN_FAN_PX,
   roughMeters,
-  SELF_CLEAR_PX,
   type FanInput,
 } from '../markerLayout';
 

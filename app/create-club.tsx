@@ -35,6 +35,7 @@ import {
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { KeyboardDoneButton } from '@/components/ui/KeyboardDoneButton';
 
 interface Interest {
   id: number;
@@ -190,6 +191,7 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+  const [searchFocused, setSearchFocused] = useState(false);
   return (
     <Modal visible={visible} transparent animationType="slide">
       <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
@@ -208,6 +210,8 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
             accessibilityLabel="Search interests"
           />
           {query.length > 0 && (
@@ -220,6 +224,7 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
               <Ionicons name="close" size={16} color={colors.t3} />
             </Pressable>
           )}
+          <KeyboardDoneButton visible={searchFocused} palette={colors} />
         </View>
 
         {loading ? (
@@ -230,6 +235,7 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
             keyExtractor={(interest) => String(interest.id)}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             renderItem={({ item: interest }) => (
               <Pressable
                 style={[styles.interestRow, selectedId === interest.id && styles.interestRowActive]}
@@ -425,6 +431,7 @@ export default function CreateClubScreen() {
           style={{ flex: 1 }}
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
         >
           <EmblemPicker emblemUri={emblemUri} onPick={pickEmblem} />

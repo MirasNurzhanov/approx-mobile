@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
+import axios, { create as createAxios } from 'axios';
 import * as Application from 'expo-application';
 import { router } from 'expo-router';
 
@@ -66,7 +66,7 @@ export function clientHeaders(): Record<string, string> {
   return build === null ? {} : { [CLIENT_BUILD_HEADER]: String(build) };
 }
 
-export const api = axios.create({
+export const api = createAxios({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });

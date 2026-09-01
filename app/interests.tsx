@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/Button';
 import { InterestBubbleField } from '@/components/ui/InterestBubbleField';
 import { IconBack } from '@/components/ui/icons';
 import { InterestChipIcon } from '@/components/ui/InterestChipIcon';
+import { KeyboardDoneButton } from '@/components/ui/KeyboardDoneButton';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -46,6 +47,7 @@ export default function EditInterestsScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const normalizedQuery = query.trim().toLowerCase();
   const visibleInterests = useMemo(
@@ -198,12 +200,15 @@ export default function EditInterestsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
             />
             {query.length > 0 && (
               <Pressable onPress={() => setQuery('')} hitSlop={10}>
                 <Ionicons name="close-circle" size={18} color={colors.t3} />
               </Pressable>
             )}
+            <KeyboardDoneButton visible={searchFocused} palette={colors} />
           </View>
 
           {normalizedQuery ? (
@@ -211,6 +216,7 @@ export default function EditInterestsScreen() {
               contentContainerStyle={styles.grid}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
             >
               {visibleInterests.length === 0 ? (
                 <Text style={styles.emptyText}>No interests match “{query.trim()}”</Text>

@@ -16,9 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/AuthContext';
 import { runBusy } from '@/services/busy';
-import { lightColors as L } from '@/constants/theme';
+import { fonts, lightColors as L } from '@/constants/theme';
 import { TermsAgreement } from '@/components/TermsAgreement';
-import { fonts } from '@/constants/theme';
 
 export default function LoginScreen() {
   const { login } = useAuth();

@@ -6,7 +6,7 @@ import * as TaskManager from 'expo-task-manager';
 
 import { api } from './api';
 import { reportLocation } from './location';
-import { getCachedLocationSharing } from './privacy';
+import { getCachedGhostMode } from './privacy';
 
 // Same guard as services/socialAuth.ts and services/notifications.ts, for the
 // same reason: Expo Go's shell app has no way to declare the background modes
@@ -37,22 +37,21 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     const location = data?.locations?.at(-1);
     if (!location) return;
 
-    // Paused means there is nothing this task can usefully do, and the server
-    // would refuse the write anyway. Checked here as well as in
-    // `startBackgroundLocationUpdates` because the two answer different
-    // questions: that one stops the OS task at the moment the setting changes,
-    // this one covers a task the OS kept alive across an app update or a
-    // reinstall — expo-task-manager restores registrations, so a task can
-    // outlive the choice that started it.
-    if ((await getCachedLocationSharing()) === 'paused') {
-      console.log('[BG Location] sharing paused, nothing sent');
+    // Ghost Mode means there is nothing this task can usefully do. Checked
+    // here as well as in `startBackgroundLocationUpdates` because the two
+    // answer different questions: that one stops the OS task at the moment the
+    // switch is flipped, this one covers a task the OS kept alive across an
+    // app update or a reinstall — expo-task-manager restores registrations, so
+    // a task can outlive the choice that started it.
+    if (await getCachedGhostMode()) {
+      console.log('[BG Location] ghost mode, nothing sent');
       await stopBackgroundLocationUpdates().catch(() => {});
       return;
     }
 
     try {
-      // Honours the Location sharing setting: paused sends nothing at all,
-      // approximate coarsens before transmitting.
+      // Honours both gates in services/location.ts: Ghost Mode sends nothing,
+      // and neither does an install that has not shown the disclosure yet.
       const sent = await reportLocation(
         {
           latitude: location.coords.latitude,
@@ -137,15 +136,15 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     return;
   }
 
-  // Paused should stop the phone tracking us at all, not just stop the
+  // Ghost Mode should stop the phone tracking us at all, not just stop the
   // uploads: background tracking exists to keep a *published* position
   // current, and a background-location indicator burning on the status bar of
   // someone invisible to everyone is the app claiming a need it does not have.
   // The per-update check in the task is the correctness guarantee; this is the
-  // one that saves the battery. Reached from both mode buttons through
-  // `syncBackgroundLocation`, so it starts on resume as well as stopping.
-  if ((await getCachedLocationSharing()) === 'paused') {
-    console.log('[BG Location] sharing paused, not starting');
+  // one that saves the battery. Reached through `syncBackgroundLocation`, so
+  // it starts on leaving Ghost Mode as well as stopping on entering it.
+  if (await getCachedGhostMode()) {
+    console.log('[BG Location] ghost mode, not starting');
     await stopBackgroundLocationUpdates();
     return;
   }

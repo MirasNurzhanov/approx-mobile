@@ -17,11 +17,7 @@ import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { Card } from '@/components/ui/Card';
 import { BackgroundLocationRow } from '@/components/BackgroundLocationRow';
-import { LocationSharingConsent } from '@/components/LocationSharingConsent';
-import {
-  LocationVisibilityCard,
-  type SharingPrecision,
-} from '@/components/LocationVisibilityCard';
+import { LocationVisibilityCard } from '@/components/LocationVisibilityCard';
 import {
   IconBlocked,
   IconChevron,
@@ -39,7 +35,6 @@ import {
   updatePrivacy,
   usePrivacySettings,
   type Audience,
-  type LocationSharing,
   type PrivacySettings,
 } from '@/services/privacy';
 
@@ -173,24 +168,15 @@ export default function PrivacyScreen() {
     );
   }, []);
 
-  // The precision somebody has asked to check in as but not yet agreed to.
-  // Checking *in* publishes your position, so it goes through the consent sheet
-  // first; checking out and changing precision while already visible both apply
-  // at once — see LocationVisibilityCard for why the asymmetry is deliberate.
-  const [pendingMode, setPendingMode] = useState<SharingPrecision | null>(null);
-
-  async function confirmMode(mode: LocationSharing) {
-    await save({ location_sharing: mode });
-    setPendingMode(null);
-  }
-
   async function save(patch: Partial<PrivacySettings>) {
     setSaving(true);
     setError(null);
     try {
       await updatePrivacy(patch);
-      if (patch.location_sharing) {
-        // Pausing must stop OS tracking now, not at the next app launch.
+      if (patch.ghost_mode !== undefined) {
+        // Ghosting must stop OS tracking now, not at the next app launch —
+        // and leaving Ghost Mode must start it again, or the position goes
+        // stale the moment the app is backgrounded.
         await syncBackgroundLocation();
       }
     } catch {
@@ -295,22 +281,12 @@ export default function PrivacyScreen() {
           <LocationVisibilityCard
             settings={settings}
             saving={saving}
-            onCheckIn={setPendingMode}
-            onCheckOut={() => save({ location_sharing: 'paused' })}
-            onPrecision={(mode) => save({ location_sharing: mode })}
+            onGhostChange={(ghost) => save({ ghost_mode: ghost })}
           />
           {/* The only place in the app that asks for Always. Explicit, opt-in,
               and attached to the feature that needs it — see the header note in
               components/BackgroundLocationRow for why it is not on the map. */}
-          <BackgroundLocationRow
-            sharing={settings.location_sharing !== 'paused'}
-          />
-          <LocationSharingConsent
-            mode={pendingMode}
-            busy={saving}
-            onCancel={() => setPendingMode(null)}
-            onConfirm={confirmMode}
-          />
+          <BackgroundLocationRow sharing={!settings.ghost_mode} />
         </View>
 
         {/* ── Per-field visibility ── */}

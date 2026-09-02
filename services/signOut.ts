@@ -8,6 +8,7 @@ import { resetBlocked } from './blocked';
 import { getInstallId } from './device';
 import { resetOwnMotion } from './ownMotion';
 import { resetNotificationPrefs } from './notificationPrefs';
+import { resetLocationDisclosure } from './locationDisclosure';
 import { resetPrivacy } from './privacy';
 import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
@@ -58,29 +59,6 @@ const ACCOUNT_SCOPED_KEYS = [
 /** Server round trip gets this long before we give up and finish locally.
  * Sign-out must never appear to hang because the network is down. */
 const REVOKE_TIMEOUT_MS = 4000;
-
-/**
- * Take the departing account off the map. Best-effort; never throws.
- *
- * See the call site for why sign-out implies this at all. Pausing also
- * clears the stored position server-side, so this leaves nothing behind for
- * the account to be found by either.
- */
-async function pauseLocationSharing(accessToken: string | null): Promise<void> {
-  if (!accessToken) return;
-  try {
-    await axios.patch(
-      `${BASE_URL}/api/users/privacy/`,
-      { location_sharing: 'paused' },
-      {
-        timeout: REVOKE_TIMEOUT_MS,
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
-    );
-  } catch {
-    // Swallowed on purpose. See above.
-  }
-}
 
 /** True when the session is settled and nothing needs retrying later. */
 async function revokeRefreshToken(refresh: string, accessToken: string | null): Promise<boolean> {
@@ -138,18 +116,17 @@ export async function performSignOut(): Promise<void> {
 
   // Off the map, before the credentials that could do it are thrown away.
   //
-  // Signing out is not the same act as choosing Paused and normally should not
-  // imply it. It does here because sharing has no expiry: left alone, somebody
-  // who signed out would stay on other people's maps indefinitely, pinned to
-  // wherever they last were, with no app running to move them and no screen
-  // left to tell them about it.
+  // Nothing is written to the sharing setting here, and that is deliberate.
   //
-  // Bare axios with the token passed in, not the `api` instance, and for the
-  // same reason `revokeRefreshToken` below does it: `beginSessionEnd()` above
-  // has already closed that instance, so a request through it would never
-  // leave the device. Best-effort — it never throws, because sign-out has to
-  // work offline, and the setting is still there to change at next sign-in.
-  await pauseLocationSharing(accessToken);
+  // Sign-out used to pause the account, because visibility had no expiry and
+  // somebody who signed out would otherwise stay pinned to wherever they last
+  // were forever. Two things changed. A position now expires on its own — the
+  // row falls off every map about fifteen minutes after the last report, and
+  // this device stops reporting a few lines below — so the stale pin problem
+  // solves itself. And Ghost Mode is a *setting* rather than a session state:
+  // writing it here would hand the account a choice it never made and greet it
+  // ghosted at next sign-in, which is the empty-map complaint this whole change
+  // set out to fix.
 
   // Server-side revocation, plus push-token unregistration, which the logout
   // endpoint does unconditionally so a signed-out device stops being
@@ -180,6 +157,11 @@ export async function performSignOut(): Promise<void> {
   // account inherits the previous user's privacy settings, block list and
   // story archive.
   await resetPrivacy().catch(() => {});
+  // Per install, not per account: the next person to sign in on this device
+  // has not been told what being on the map means, and inheriting somebody
+  // else's acknowledgement is the one case where they would be published
+  // without ever having read it.
+  await resetLocationDisclosure().catch(() => {});
   await resetArchive().catch(() => {});
   // City outlines are public geometry, not private data — but they are keyed
   // to the cities the previous account chose, and the next one should not

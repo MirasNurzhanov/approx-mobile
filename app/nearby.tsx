@@ -15,6 +15,7 @@ import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import * as Location from 'expo-location';
 
 import { fetchNearbyUsers, isLocationNotAvailable } from '@/services/discovery';
+import { describeZoneReach, fetchSelfZone, type SelfZone } from '@/services/zone';
 import { Avatar } from '@/components/ui/Avatar';
 import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
@@ -146,6 +147,10 @@ export default function NearbyListScreen() {
    * Held apart from `error` because it is not one: nothing has gone wrong and
    * there is nothing for the reader to do about it. */
   const [awaitingFix, setAwaitingFix] = useState(false);
+  /** The viewer's own reach, so the empty state can name it instead of
+   *  quoting a fixed number the server stopped using. `null` until it loads —
+   *  `describeZoneReach` degrades to a plain "nearby" rather than guessing. */
+  const [zone, setZone] = useState<SelfZone | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -197,6 +202,12 @@ export default function NearbyListScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Separate from `load`: this is copy, not content, and a zone fetch that
+  // fails should leave the list working rather than take the screen down.
+  useEffect(() => {
+    fetchSelfZone().then(setZone).catch(() => {});
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -258,7 +269,7 @@ export default function NearbyListScreen() {
                 {error ? 'Nothing to show' : 'Nobody nearby right now'}
               </Text>
               <Text style={styles.emptyBody}>
-                {error ?? 'Approx shows people with shared interests within about 500 metres.'}
+                {error ?? `Approx shows people with shared interests ${describeZoneReach(zone)}. Change how far you see in Zone size.`}
               </Text>
             </View>
           }

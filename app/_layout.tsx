@@ -27,7 +27,8 @@ import {
 
 import { ApproxLoader } from '@/components/ApproxLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { LocationLaunchPrompt } from '@/components/LocationLaunchPrompt';
+import { LocationDisclosure } from '@/components/LocationDisclosure';
+import { useLocationDisclosure } from '@/services/locationDisclosure';
 import { TermsGate } from '@/components/TermsGate';
 import { AuthProvider } from '@/context/AuthContext';
 import { NavStyleProvider } from '@/context/NavStyleContext';
@@ -37,8 +38,6 @@ import { useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
 import { refreshPrivacy } from '@/services/privacy';
-import { goInvisible } from '@/services/goInvisible';
-import { endStaleSharingSession } from '@/services/sharingSession';
 import { refreshAcceptance, useTerms } from '@/services/terms';
 import { startNotificationRouting } from '@/services/notificationRouting';
 import '@/services/backgroundLocation';
@@ -51,13 +50,10 @@ function AppStatusBar() {
 function AppShell() {
   const { isLoading, isAuthenticated, logout } = useAuth();
 
-  // Whether this run has landed on an already-active session — resumed from
-  // the background, or a stale-session end that failed and left sharing
-  // standing (see services/sharingSession.ts). Neither case gets ended
-  // automatically, by design, so this is the visible confirmation in front of
-  // it: see components/LocationLaunchPrompt.
-  const [launchPromptVisible, setLaunchPromptVisible] = useState(false);
-  const [launchPromptBusy, setLaunchPromptBusy] = useState(false);
+  // Whether this install has been told what being on the map means. Shown
+  // once, and `services/location.ts` transmits nothing until it has been —
+  // see services/locationDisclosure.ts for why the order matters.
+  const { acknowledged: locationDisclosed, acknowledge } = useLocationDisclosure();
 
   // Whether this account still owes us an agreement to the current Terms.
   // `null` until the answer is in, so the gate never flashes on and off for
@@ -71,40 +67,17 @@ function AppShell() {
     refreshAcceptance().catch(() => {});
   }, [isAuthenticated]);
 
-  // Whatever this account's sharing mode was when the app last closed, it was
-  // chosen by a run that no longer exists. Ending it here is what makes going
-  // visible a per-launch decision rather than a setting that quietly persists.
-  // See services/sharingSession.ts for why it presents a token instead of
-  // simply pausing — startup races the user's own tap.
+  // Pull the sharing state this account already has. Nothing is ended here any
+  // more: a previous run's visibility used to be torn down on every launch, so
+  // that being on the map was a per-launch decision. It persists now, the way
+  // Find My and Snap Map do, and Ghost Mode is the switch that ends it.
   //
   // Gated on being signed in, like the push effect below: there is nobody to
-  // pause otherwise. Runs once per process, and only in the foreground.
+  // fetch for otherwise.
   useEffect(() => {
     if (!isAuthenticated) return;
-    // Re-read afterwards, not before: a screen that mounted first may already
-    // have pulled a sharing mode that this call has just ended, and the store
-    // would otherwise keep showing the user as visible when they are not.
-    endStaleSharingSession()
-      .then(() => refreshPrivacy())
-      .then((settings) => {
-        if (settings && settings.location_sharing !== 'paused') {
-          setLaunchPromptVisible(true);
-        }
-      })
-      .catch(() => {});
+    refreshPrivacy().catch(() => {});
   }, [isAuthenticated]);
-
-  async function handleGoInvisible() {
-    setLaunchPromptBusy(true);
-    try {
-      await goInvisible();
-      setLaunchPromptVisible(false);
-    } catch {
-      Alert.alert('Could not update', 'Please try again from Privacy & safety.');
-    } finally {
-      setLaunchPromptBusy(false);
-    }
-  }
 
   useEffect(() => {
     console.log('[Push] isAuthenticated:', isAuthenticated);
@@ -206,15 +179,16 @@ function AppShell() {
         <Stack.Screen name="create-club"     options={{ headerShown: false, animation: 'slide_from_bottom' }} />
         <Stack.Screen name="market"          options={{ headerShown: false, animation: 'slide_from_right' }} />
       </Stack>
-      <LocationLaunchPrompt
-        visible={launchPromptVisible}
-        busy={launchPromptBusy}
-        onStayActive={() => setLaunchPromptVisible(false)}
-        onGoInvisible={handleGoInvisible}
+      {/* Signed in, and not yet told. `null` means the flag is still being
+          read, which renders nothing rather than flashing this at somebody who
+          dismissed it months ago. */}
+      <LocationDisclosure
+        visible={isAuthenticated && locationDisclosed === false}
+        onAcknowledge={() => { acknowledge().catch(() => {}); }}
       />
-      {/* Last in the tree so it covers everything, including the location
-          prompt above — an account that has not agreed to the Terms should not
-          be answering a question about its own visibility first. */}
+      {/* Last in the tree so it covers everything, including the disclosure
+          above — an account that has not agreed to the Terms should not be
+          reading about its own visibility first. */}
       <TermsGate
         visible={isAuthenticated && needsAcceptance === true}
         onAccepted={() => refreshAcceptance().catch(() => {})}

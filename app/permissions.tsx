@@ -157,9 +157,11 @@ export default function PermissionsScreen() {
   // the map right now", which is the one direction this screen must never be
   // wrong in: it would tell somebody they were visible when they were not, or
   // worse, reassure them the opposite way round after a failed fetch.
-  const sharingKnown = settings?.location_sharing;
-  const paused = sharingKnown !== 'live' && sharingKnown !== 'approximate';
-  const approximate = sharingKnown === 'approximate';
+  // `undefined` — not loaded, or a failed fetch — reads as hidden. That is
+  // the one direction this screen must never be wrong in: telling somebody
+  // they are visible when they are not, or reassuring them the other way
+  // round after a failed fetch, are both worse than a cautious "off".
+  const ghost = settings?.ghost_mode !== false;
 
   return (
     <View style={[styles.root, { paddingTop: top }]}>
@@ -169,34 +171,31 @@ export default function PermissionsScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* The distinction this screen is most likely to be misread on, said
-            first and unconditionally. Letting Approx read your location is not
-            the same as other people being able to see it — that takes choosing
-            Live or Approximate in Privacy & safety. It is not implied by
-            anything on this page, and none of these switches can turn it on. */}
+        {/* What this page does and does not control, said first. Granting
+            location permission is what puts you on the map now — that is the
+            change — but Ghost Mode still overrides it, and this page cannot
+            turn that off. */}
         <Card style={styles.noticeCard}>
           <Text style={styles.noticeTitle}>
-            {paused ? 'Nobody can see your location' : 'You are on the map right now'}
+            {ghost ? 'Nobody can see your location' : 'You are on the map right now'}
           </Text>
           <Text style={styles.noticeBody}>
-            {paused
-              ? 'Location permission lets Approx show you who is nearby. You are only shown to other people once you choose Live or Approximate in Privacy & safety — never automatically, and never just because this permission is granted.'
-              : 'People nearby can see you, including with Approx in the background, until you choose Paused in Privacy & safety or close Approx.'}
+            {ghost
+              ? 'Ghost Mode is on, so you are off the map and nobody is on yours — whatever this page says. Location permission still lets Approx answer your own searches.'
+              : 'People nearby can see you, including with Approx in the background if you allowed that. Friends see exactly where you are; everyone else sees a rough area of about 500m.'}
           </Text>
         </Card>
 
         {/* An OS permission being granted is not the same as Approx using it.
-            Someone who paused sharing should see that here, not conclude the
+            Someone in Ghost Mode should see that here rather than conclude the
             permission is broken. */}
-        {(paused || approximate) && (
+        {ghost && (
           <Card style={styles.noticeCard}>
-            <Text style={styles.noticeTitle}>
-              {paused ? 'Location sharing is paused' : 'Location sharing is set to Approximate'}
-            </Text>
+            <Text style={styles.noticeTitle}>Ghost Mode is on</Text>
             <Text style={styles.noticeBody}>
-              {paused
-                ? 'Approx has location permission but is not using it — you are off the map until you resume.'
-                : 'Your position is rounded to about 500m before it leaves your phone.'}
+              Approx has location permission but is not publishing it — you are
+              off the map, and the map is empty for you, until you turn Ghost
+              Mode off.
             </Text>
             <Pressable
               onPress={() => router.push('/privacy')}

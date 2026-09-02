@@ -20,7 +20,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { useAuth } from '@/context/AuthContext';
-import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
 import { hasSeenZoneTutorial, markZoneTutorialSeen } from '@/services/tutorial';
 import { openDocument, refreshDocuments, useTerms } from '@/services/terms';
@@ -35,17 +34,8 @@ import {
 } from '@/services/socialAuth';
 import { GoogleMark } from '@/components/SocialAuthButtons';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
-import { LocationSharingConsent } from '@/components/LocationSharingConsent';
-import {
-  LocationVisibilityCard,
-  type SharingPrecision,
-} from '@/components/LocationVisibilityCard';
-import {
-  refreshPrivacy,
-  updatePrivacy,
-  usePrivacySettings,
-  type LocationSharing,
-} from '@/services/privacy';
+import { refreshPrivacy } from '@/services/privacy';
+import { describeZone, type SelfZone } from '@/services/zone';
 import { ApproxNav } from '@/components/ApproxNav';
 import { ZoneTutorialOverlay } from '@/components/tutorial/ZoneTutorialOverlay';
 import { Card } from '@/components/ui/Card';
@@ -75,14 +65,6 @@ import type { ColorPalette } from '@/constants/theme';
 import { useNavStyle } from '@/context/NavStyleContext';
 import { useTheme } from '@/context/ThemeContext';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface SelfZone {
-  zone_active?: boolean;
-  zone_radius?: number;
-  zone_mode?: 'radius' | 'region';
-  zone_region_detail?: { name: string } | null;
-}
-
 const FEEDBACK_EMAIL = 'nurdauletaskar551@gmail.com';
 // Same inbox today, a different label on purpose: App Review asks for
 // published contact information for safety concerns specifically, and a row
@@ -91,10 +73,12 @@ const FEEDBACK_EMAIL = 'nurdauletaskar551@gmail.com';
 const SAFETY_EMAIL = 'nurdauletaskar551@gmail.com';
 
 // ─── Location visibility ──────────────────────────────────────────────────────
-// The status readout, the precision choice and the check in / check out button
-// all live in components/LocationVisibilityCard, shared with Privacy & safety.
-// Two screens carrying their own copy of the most consequential wording in the
-// app is how they end up describing it differently.
+// Not here. The status readout, the precision choice and the check in / check
+// out button live on Privacy & safety, in components/LocationVisibilityCard,
+// and this screen links to it rather than hosting a second copy: two screens
+// carrying the most consequential wording in the app is how they end up
+// describing it differently, and two hosts of the same control is two consent
+// sheets in front of one write.
 
 // ─── SettingsRow ──────────────────────────────────────────────────────────────
 /**
@@ -168,54 +152,6 @@ function PrefSwitch({
 // One component per card on the screen. The screen below owns the state and the
 // calls that change it; these only lay it out, which is what keeps the screen
 // readable as a list of sections rather than 350 lines of nested JSX.
-
-function LocationSharingSection({
-  settings, failed, saving, onRetry, onCheckIn, onCheckOut, onPrecision,
-}: {
-  settings: ReturnType<typeof usePrivacySettings>['settings'];
-  failed: boolean;
-  saving: boolean;
-  onRetry: () => void;
-  onCheckIn: (mode: SharingPrecision) => void;
-  onCheckOut: () => void;
-  onPrecision: (mode: SharingPrecision) => void;
-}) {
-  const { colors } = useTheme();
-  const styles = makeStyles(colors);
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>LOCATION VISIBILITY</Text>
-      {!settings ? (
-        <View style={styles.loadingWrap}>
-          {failed ? (
-            <Pressable onPress={onRetry} style={({ pressed }) => pressed && styles.pressed}>
-              <Text style={styles.modeNote}>
-                Couldn’t load your location setting. Tap to retry.
-              </Text>
-            </Pressable>
-          ) : (
-            <ActivityIndicator color={colors.teal} />
-          )}
-        </View>
-      ) : (
-        <>
-          <LocationVisibilityCard
-            settings={settings}
-            saving={saving}
-            onCheckIn={onCheckIn}
-            onCheckOut={onCheckOut}
-            onPrecision={onPrecision}
-          />
-          {settings.is_private && (
-            <Text style={styles.modeNote}>
-              Your account is private — this only controls where you appear on the map.
-            </Text>
-          )}
-        </>
-      )}
-    </View>
-  );
-}
 
 function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
   zoneActive: boolean | null;
@@ -601,16 +537,6 @@ function AccountActions({ isSigningOut, onSignOut, onDeleteAccount }: {
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
-/** The one-line summary on the Zone size row, so the current shape is legible
- *  without opening the screen. */
-function describeZone(zone: SelfZone): string {
-  if (zone.zone_mode === 'region' && zone.zone_region_detail?.name) {
-    return zone.zone_region_detail.name;
-  }
-  const m = zone.zone_radius && zone.zone_radius > 0 ? zone.zone_radius : 500;
-  return m < 1000 ? `${m} m` : `${(m / 1000) % 1 === 0 ? m / 1000 : (m / 1000).toFixed(1)} km`;
-}
-
 export default function SettingsScreen() {
   const { colors, themeMode, toggleTheme } = useTheme();
   const { navStyle, setNavStyle } = useNavStyle();
@@ -620,9 +546,7 @@ export default function SettingsScreen() {
   const scrollProps = useScrollHandler();
   const navPadding = useNavContentPadding();
 
-  const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);
-  const [privacyFailed, setPrivacyFailed] = useState(false);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   const [zoneActive, setZoneActive] = useState<boolean | null>(null);
@@ -712,8 +636,11 @@ export default function SettingsScreen() {
     return () => sub.remove();
   }, [refreshNotifPermission]);
 
+  // Kept although this screen no longer renders the sharing card: the store it
+  // fills is what the map's paused notice and the background task's mirror read
+  // from, and Settings is a tab people land on often.
   useEffect(() => {
-    refreshPrivacy().catch(() => setPrivacyFailed(true));
+    refreshPrivacy().catch(() => {});
   }, []);
 
   // Re-read on every focus, not once per mount. This is a tab, so it stays
@@ -730,25 +657,6 @@ export default function SettingsScreen() {
         .catch(() => setZoneActive(false));
     }, []),
   );
-
-  // The precision asked for but not yet agreed to. Checking *in* publishes your
-  // position, so it goes through the consent sheet first; checking out applies
-  // at once, because a confirmation on the way out would stand between a user
-  // and hiding.
-  const [pendingMode, setPendingMode] = useState<SharingPrecision | null>(null);
-
-  async function applyLocationSharing(mode: LocationSharing) {
-    setSaving(true);
-    await runBusy(async () => {
-      await updatePrivacy({ location_sharing: mode });
-      // Pausing must stop OS tracking now, not at the next app launch — and
-      // resuming must start it, or the position would go stale the moment the
-      // app was backgrounded.
-      await syncBackgroundLocation();
-      setPendingMode(null);
-    }, () => setSaving(false))
-      .catch(() => Alert.alert('Could not update', 'Your previous setting is still in effect.'));
-  }
 
   async function toggleZone(value: boolean) {
     if (zoneSaving) return;
@@ -830,25 +738,10 @@ export default function SettingsScreen() {
           {saving && <ActivityIndicator color={colors.teal} size="small" />}
         </View>
 
-        <LocationSharingSection
-          settings={settings}
-          failed={privacyFailed}
-          onRetry={() => {
-            setPrivacyFailed(false);
-            refreshPrivacy().catch(() => setPrivacyFailed(true));
-          }}
-          saving={saving}
-          onCheckIn={setPendingMode}
-          onCheckOut={() => applyLocationSharing('paused')}
-          onPrecision={applyLocationSharing}
-        />
-
-        <LocationSharingConsent
-          mode={pendingMode}
-          busy={saving}
-          onCancel={() => setPendingMode(null)}
-          onConfirm={applyLocationSharing}
-        />
+        {/* Location visibility lives on Privacy & safety only — one card, one
+            screen. It was on both, which meant two hosts of the same control
+            and two consent sheets in front of the same write; the row further
+            down this screen is how you get to it. */}
 
         <ZoneSection
           zoneActive={zoneActive}

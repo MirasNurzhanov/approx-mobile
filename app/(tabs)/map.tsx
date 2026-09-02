@@ -42,8 +42,10 @@ import { useSheetDrag } from '@/components/ui/useSheetDrag';
 import {
     IconCalendar,
     IconCamera,
+    IconChevron,
     IconClose,
     IconEyeOff,
+    IconGhost,
     IconHi,
     IconImage,
     IconList,
@@ -98,7 +100,7 @@ import { MotionTrail } from '@/components/MotionTrail';
 import { PresenceDot } from '@/components/PresenceDot';
 import { useMotionTrails } from '@/hooks/useMotionTrails';
 import { recordSpeed } from '@/services/ownMotion';
-import { getCachedLocationSharing, useLocationSharing } from '@/services/privacy';
+import { useGhostMode } from '@/services/privacy';
 import { fmtRadius, trackTitle } from '@/services/zoneAudio';
 import { hasSeenStoryTutorial, markStoryTutorialSeen } from '@/services/tutorial';
 import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
@@ -1960,13 +1962,16 @@ export default function MapScreen() {
   // The owner's own view is the easiest place to leak the precise position of
   // someone sharing approximately, so everything drawn for them — the marker,
   // their zone circle, and where the locate button centres — goes through the
-  // same rounding the network layer applies. Until the mode is known we draw
-  // nothing rather than guess, which is why the map waits on `displayCoords`
-  // and not on `coords`.
-  const sharing = useLocationSharing();
+  // same rounding the network layer applies, so the marker and the wire agree.
+  //
+  // No longer gated on knowing the sharing mode first: there is one precision
+  // now, and the owner always sees their own true position. What other people
+  // see is decided per viewer on the server — see users.visibility, and the
+  // note in services/location.ts.
+  const ghost = useGhostMode();
   const displayCoords = useMemo(
-    () => (coords && sharing ? atSharingPrecision(coords, sharing) : null),
-    [coords, sharing],
+    () => (coords ? atSharingPrecision(coords) : null),
+    [coords],
   );
 
   // ── Location permission, re-read on every foreground ──
@@ -2800,11 +2805,11 @@ export default function MapScreen() {
       const next = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
       fixAtRef.current = fix.timestamp;
       setCoords(next);
-      return atSharingPrecision(next, sharing ?? (await getCachedLocationSharing()));
+      return atSharingPrecision(next);
     } catch {
       return null;
     }
-  }, [sharing]);
+  }, []);
 
   function startFollowing(target: Coordinates) {
     centerOnSelf(target, true);
@@ -2883,6 +2888,12 @@ export default function MapScreen() {
 
   // The strip directly under the top bar, where the map's notices sit.
   const overlayTop = topInset + 52 + (awaitingFix ? 46 : 0);
+
+  // Paused takes the top of that strip, so anything else drawn there stacks
+  // below it rather than on top of it — the basemap-offset notice is pinned to
+  // the same line and the two would otherwise land exactly on each other.
+  const ghostNoticeVisible = chromeVisible && ghost === true;
+  const noticeTop = overlayTop + (ghostNoticeVisible ? 56 : 0);
 
   const region: Region | undefined = displayCoords
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
@@ -3179,18 +3190,12 @@ export default function MapScreen() {
             );
           })}
 
-          {/* Approximate sharers see their own fuzz too. A bare point would
-              tell them they are pinned exactly where they stand, which is the
-              opposite of what they chose. */}
-          {sharing === 'approximate' && (
-            <Circle
-              center={displayCoords}
-              radius={APPROX_RADIUS_M}
-              fillColor={withAlpha(colors.purple, 0.06)}
-              strokeColor={withAlpha(colors.purple, 0.22)}
-              strokeWidth={1}
-            />
-          )}
+          {/* No self-fuzz circle any more. It existed to stop an Approximate
+              sharer being shown a precise dot they had asked us not to publish;
+              precision is the viewer's relationship now, the owner is always on
+              the precise side of it, and a circle here would describe a
+              blurring that no longer applies to them. What a stranger sees is
+              drawn on the stranger's map, from the cell the server sends. */}
 
           {/* Piles that could not be fanned apart without moving someone too far
               — which is what zooming out does to a pixel-sized fan. A number
@@ -3221,7 +3226,7 @@ export default function MapScreen() {
             // only thing on this screen that could be read as "this is what
             // everyone else sees". While paused it is not — nobody sees it —
             // and the map should say so where the question is being asked.
-            hidden={sharing === 'paused'}
+            hidden={ghost === true}
           />
 
           {/* `isDrawable` as well as the numeric coercion at the boundary: the
@@ -3301,13 +3306,45 @@ export default function MapScreen() {
         </View>
       ) : null}
 
+      {/* Ghost Mode, which is the reason this map is empty in *both*
+          directions — and the one the screen would otherwise leave the user to
+          work out for themselves. The muted self marker says it too, but only
+          to somebody already looking at their own dot and already knowing what
+          muted means.
+
+          A route, not a write. Ghost Mode is a setting on the privacy screen,
+          and keeping the write there rather than here means one screen owns it
+          and the map cannot flip somebody's visibility as a side effect of
+          drawing itself. */}
+      {ghostNoticeVisible ? (
+        <Pressable
+          onPress={() => router.push('/privacy')}
+          style={({ pressed }) => [
+            styles.pausedNotice,
+            { top: overlayTop },
+            pressed && { opacity: 0.85 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Ghost Mode is on. Nobody can see you and you cannot see anyone. Opens privacy settings, where you can turn it off."
+        >
+          <IconGhost size={18} color={colors.t2} />
+          <View style={styles.pausedNoticeText}>
+            <Text style={styles.pausedNoticeTitle}>Ghost Mode is on</Text>
+            <Text style={styles.pausedNoticeSub}>
+              Nobody can see you, and you can’t see anyone. Tap to turn it off.
+            </Text>
+          </View>
+          <IconChevron size={18} color={colors.t3} />
+        </Pressable>
+      ) : null}
+
       {/* The one place the map admits it is drawing on a shifted basemap.
           Stated rather than silently corrected: everything here — your dot,
           everyone else's, the zone outline — is in true GPS coordinates and
           agrees with itself, but the tiles underneath are offset. */}
       {chinaOffsetNotice && mapVisible ? (
         <View
-          style={[styles.offsetNotice, { top: overlayTop }]}
+          style={[styles.offsetNotice, { top: noticeTop }]}
           accessible
           accessibilityRole="alert"
         >
@@ -3365,7 +3402,7 @@ export default function MapScreen() {
 
       <CreateStoryModal
         visible={composerOpen}
-        locationless={sharing === 'paused' || (!createStoryCoord && !coords)}
+        locationless={ghost === true || (!createStoryCoord && !coords)}
         onClose={() => { setComposerOpen(false); setCreateStoryCoord(null); }}
         onPost={createStory}
       />
@@ -3383,7 +3420,7 @@ export default function MapScreen() {
         <View style={[styles.hiToast, { top: overlayTop + 52 }]} pointerEvents="none">
           <IconPin size={16} color={colors.teal} />
           <Text style={styles.hiToastText}>
-            {sharing === 'paused' || !coords
+            {ghost === true || !coords
               ? 'Story will be shared with friends, without a map location'
               : 'Story will be posted at your current location'}
           </Text>
@@ -3720,6 +3757,37 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     zIndex: 99,
   },
   pendingChipText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.t2,
+  },
+
+  // Wider than `pendingChip` and pinned to the margins rather than centred:
+  // this one is a control, and a tap target the width of its own text is a
+  // tap target that gets missed.
+  pausedNotice: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.m,
+    backgroundColor: withAlpha(colors.bg, 0.94),
+    borderWidth: 1,
+    borderColor: colors.border,
+    zIndex: 99,
+  },
+  pausedNoticeText: { flex: 1, gap: 1 },
+  pausedNoticeTitle: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.t1,
+  },
+  pausedNoticeSub: {
     fontFamily: fonts.body,
     fontSize: 12,
     color: colors.t2,

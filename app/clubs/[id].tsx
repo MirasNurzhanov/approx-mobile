@@ -424,7 +424,6 @@ function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: strin
   // ── Derived ───────────────────────────────────────────────────────────────
   const memberRecord = members.find((m) => Number(m.user.id) === Number(currentUserId));
   const isMember  = !!memberRecord || fromCreate === '1';
-  const isOwner   = memberRecord?.role === 'owner' || (fromCreate === '1' && !memberRecord);
   // club.creator may come back as a bare id or a nested { id, username } object
   const creatorId = (club?.creator as any)?.id ?? club?.creator;
   const isCreator = (!!creatorId && Number(creatorId) === Number(currentUserId)) || fromCreate === '1';

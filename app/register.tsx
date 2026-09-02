@@ -11,7 +11,7 @@ import {
   type TextInputProps,
   View,
 } from 'react-native';
-import axios from 'axios';
+import axios, { isAxiosError } from 'axios';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -117,7 +117,7 @@ export default function RegisterScreen() {
       await loginRequest(email, password);
       router.replace('/interests-setup');
     }, () => setSubmitting(false)).catch((err) => {
-      if (axios.isAxiosError(err) && err.response?.data) {
+      if (isAxiosError(err) && err.response?.data) {
         const data = err.response.data;
         if (typeof data === 'object' && !Array.isArray(data)) {
           setErrors(data as FieldErrors);

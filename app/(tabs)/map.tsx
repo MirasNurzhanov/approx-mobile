@@ -10,7 +10,6 @@ import {
     KeyboardAvoidingView,
     Linking,
     Modal,
-    PanResponder,
     Platform,
     Pressable,
     StyleSheet,
@@ -29,7 +28,7 @@ import Animated, {
 import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { ApproxNav } from '@/components/ApproxNav';
 import { STORY_LIKE } from '@/components/storyReactions';
@@ -1934,24 +1933,29 @@ export default function MapScreen() {
     setComposerOpen(true);
   }, [composeParam, router]);
 
-  // The left-edge strip that opens `/compose`. PanResponder rather than a
-  // gesture-handler `Pan`, matching components/StoryViewer: these callbacks
-  // run on the JS thread, so navigating from one needs no worklet hop.
+  // The left-edge strip that opens `/compose`.
   //
-  // Both `shouldSet` callbacks earn their place. `onStart` returning false
-  // lets a tap — or a vertical drag beginning at the edge — fall straight
-  // through to the map underneath, so the strip costs the map nothing until a
-  // gesture is both clearly horizontal and clearly rightward.
+  // Recognition runs natively (gesture-handler), but the callback is kept on
+  // the JS thread with `.runOnJS(true)` — navigating from it then needs no
+  // worklet hop, which is the one thing the PanResponder this replaces was
+  // chosen for. Nothing here tracks the finger visually, so there is no
+  // shared value to drive on the UI thread.
+  //
+  // Both thresholds carry over from the responder. Gesture-handler never
+  // claims on touch-down, which is what `onStartShouldSetPanResponder:
+  // () => false` bought — a tap, or a vertical drag beginning at the edge,
+  // still falls straight through to the map underneath. `activeOffsetX(12)`
+  // is the old `dx > 12`, and `failOffsetY` is its `|dx| > |dy| * 1.5`
+  // dominance test, which at that same 12pt allows 8pt of vertical drift.
   const composeEdge = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gs) =>
-          gs.dx > 12 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
-        onPanResponderRelease: (_, gs) => {
-          if (gs.dx > 40) router.push('/compose');
-        },
-      }),
+      Gesture.Pan()
+        .runOnJS(true)
+        .activeOffsetX(12)
+        .failOffsetY([-8, 8])
+        .onEnd((e) => {
+          if (e.translationX > 40) router.push('/compose');
+        }),
     [router],
   );
 
@@ -3281,7 +3285,9 @@ export default function MapScreen() {
           `(tabs)` entry in app/_layout).
           Rendered directly after the map so every control below still takes
           the touch ahead of it. */}
-      <View style={styles.composeEdge} {...composeEdge.panHandlers} />
+      <GestureDetector gesture={composeEdge}>
+        <View style={styles.composeEdge} />
+      </GestureDetector>
 
       {/* Top bar */}
       <TopBar

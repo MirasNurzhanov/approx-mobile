@@ -338,12 +338,12 @@ export default function MessagesScreen() {
     return () => clearInterval(timer);
   }, [id]);
 
+  // Opening the thread is what marks it read: MessagesView.get() flips
+  // is_read on its way out (friends/views.py). There is no mark-as-read
+  // endpoint to call — a POST to one used to sit here and 404'd on every
+  // open, silently, because the failure was swallowed.
   useEffect(() => {
     AsyncStorage.setItem('chat_last_seen', new Date().toISOString());
-    const timer = setTimeout(() => {
-      api.post(`/api/friends/messages/${id}/read/`).catch(() => {});
-    }, 1000);
-    return () => clearTimeout(timer);
   }, [id]);
 
   useEffect(() => {

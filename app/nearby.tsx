@@ -16,6 +16,7 @@ import * as Location from 'expo-location';
 
 import { fetchNearbyUsers, isLocationNotAvailable } from '@/services/discovery';
 import { describeZoneReach, fetchSelfZone, type SelfZone } from '@/services/zone';
+import { runBusy } from '@/services/busy';
 import { Avatar } from '@/components/ui/Avatar';
 import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
@@ -211,8 +212,12 @@ export default function NearbyListScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    // `load` swallows its own errors today, so the reset happened to run —
+    // but that is `load`’s invariant, not this one’s, and a spinner that
+    // never stops is the cost of it changing. `runBusy` makes the guarantee
+    // local. It is a module-level try/finally: a `finally` written inline
+    // here would make React Compiler bail on this whole screen.
+    await runBusy(load, () => setRefreshing(false));
   }, [load]);
 
   // Sorted here rather than in `load`, so a refetch that arrives in a different

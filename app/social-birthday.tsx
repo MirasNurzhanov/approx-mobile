@@ -22,7 +22,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import axios from 'axios';
+import { isAxiosError } from 'axios';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -57,7 +57,7 @@ export default function SocialBirthdayScreen() {
         // The under-13 rejection comes back here, phrased by the server, and it
         // is the message that matters most on this screen — a generic "could
         // not save" would leave someone tapping Continue forever.
-        const detail = axios.isAxiosError(err)
+        const detail = isAxiosError(err)
           ? err.response?.data?.date_of_birth?.[0]
           : null;
         setError(detail ?? 'Could not save that. Please try again.');

@@ -251,6 +251,7 @@ export default function SearchScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         // Required by `headerSearchBarOptions`: it is what lets UIKit inset the
         // list for the search bar and collapse it as the list scrolls.
         contentInsetAdjustmentBehavior="automatic"

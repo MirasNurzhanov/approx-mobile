@@ -1164,6 +1164,7 @@ export default function ZoneAreaScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <ModeTabs mode={mode} onChange={commitMode} disabled={saving} />
 

@@ -392,7 +392,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   hero: { alignItems: 'center', gap: 6, marginBottom: 24 },
   avatarWrap: { marginBottom: 6 },
   avatarOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 42,
     alignItems: 'center',

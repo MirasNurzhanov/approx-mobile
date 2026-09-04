@@ -63,12 +63,14 @@ jest.mock('react-native-reanimated', () => ({
   withTiming: (v: unknown) => v,
 }));
 
-// Only `scheduleOnRN` is stubbed — a wholesale replacement of this module
-// breaks reanimated's own `createSerializable`, which is the sort of failure
-// that reads as a bug in the code under test rather than in its mock.
+// Overrides the global mock in jest.setup.js so the scheduled callbacks can
+// be captured and flushed by hand instead of running immediately.
+// Built explicitly rather than spread from `jest.requireActual`: from
+// worklets 0.10 that import initialises a native module and throws. Keep
+// `createSerializable` - reanimated imports it from here.
 const scheduled: (() => void)[] = [];
 jest.mock('react-native-worklets', () => ({
-  ...jest.requireActual('react-native-worklets'),
+  createSerializable: (value: unknown) => value,
   scheduleOnRN: (fn: () => void) => scheduled.push(fn),
 }));
 

@@ -301,7 +301,7 @@ export function ReportSheet({
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)' },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.7)' },
   sheet: {
     maxHeight: '88%',
     borderTopLeftRadius: radius.l,

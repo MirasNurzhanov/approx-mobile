@@ -193,7 +193,7 @@ function FloatingBubble({
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           {
             borderRadius: size / 2,
             alignItems: 'center',
@@ -313,7 +313,7 @@ function OpenPanel<T extends BubbleInterest>({
           it grew out of rather than a plain sheet. */}
       <View
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           { backgroundColor: withAlpha(open.style.color, 0.07) },
         ]}
         pointerEvents="none"
@@ -587,7 +587,7 @@ export function InterestBubbleField<T extends BubbleInterest>({
       }
     >
       <Animated.View
-        style={[StyleSheet.absoluteFillObject, openKey ? dimStyle : null]}
+        style={[StyleSheet.absoluteFill, openKey ? dimStyle : null]}
         pointerEvents={openKey ? 'none' : 'auto'}
       >
         {scale > 0 &&

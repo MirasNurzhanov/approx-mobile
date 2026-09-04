@@ -4167,7 +4167,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
   // ─── Create story modal ───
   createModalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.7)',
   },
   createModalSheet: {

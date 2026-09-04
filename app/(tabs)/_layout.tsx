@@ -1,10 +1,7 @@
 import type { Href } from 'expo-router';
 import { TabList, TabSlot, TabTrigger, Tabs } from 'expo-router/ui';
-import {
-  Badge, Icon, Label, NativeTabs, VectorIcon,
-} from 'expo-router/unstable-native-tabs';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { StyleSheet } from 'react-native';
 
 import { NAV_SECTIONS } from '@/components/navSections';
@@ -46,28 +43,24 @@ export const unstable_settings = { anchor: 'map' };
  * Both routes end up as a template image the system tints, so the two kinds sit
  * together without looking pasted in.
  */
-// `sf` names the iOS SF Symbol; `md` is a Material Icons name that reaches
-// Android through expo-router's `VectorIcon` bridge.
-//
-// Not the `md` *prop* on `Icon` — that is SDK 56 and later. On SDK 54 the Icon
-// element takes a symbol, a bundled Android drawable, or an image source, and
-// `VectorIcon` is the supported way to turn an @expo/vector-icons glyph into
-// the third of those.
+// `sf` names the iOS SF Symbol, `md` a Material Symbols name. Both are props
+// on `Icon` in SDK 57 and the pair is a supported combination, so the glyph no
+// longer has to be bridged through `VectorIcon` to reach Android - which is
+// what `androidSrc` did here before, and `androidSrc` is gone in 57.
 const TAB_ICONS = {
   map: { sf: 'map.fill', md: 'map' },
   profile: { sf: 'person.fill', md: 'person' },
-  // Chat is the app's own Ionicons `chatbubbles` on both platforms rather than
+  // Chat is the app’s own Ionicons `chatbubbles` on both platforms rather than
   // an SF Symbol, which is what it looked like before this bar was native and
   // what the wheel and ApproxTabBar still draw (see navSections). The nearest
   // symbol, `bubble.left.and.bubble.right.fill`, is two bubbles set side by
-  // side facing apart; Ionicons' is two stacked and overlapping, and the pair
+  // side facing apart; Ionicons’ is two stacked and overlapping, and the pair
   // read as different icons rather than as the same one in two styles.
   //
-  // `src` takes a `VectorIcon` element on every platform — `Icon` checks it
-  // before `sf`, and rasterises the glyph to the same white-on-transparent
-  // template image the `androidSrc` bridge produces, so the system still tints
-  // it with the tab bar's own icon colour.
-  chat: { src: <VectorIcon family={Ionicons} name="chatbubbles" /> },
+  // `src` is last in priority on both platforms (iOS `sf` > `xcasset` > `src`,
+  // Android `drawable` > `md` > `src`), so naming it alone keeps this one glyph
+  // on both.
+  chat: { src: <NativeTabs.Trigger.VectorIcon family={Ionicons} name="chatbubbles" /> },
   swifts: { src: require('@/assets/images/tab-swift.png') },
   settings: { sf: 'gearshape.fill', md: 'settings' },
 } as const;
@@ -85,12 +78,11 @@ const TAB_ICONS = {
  * drawing a bar this app fully controls. See `constants/platform`'s
  * `BAR_STYLE_IS_NATIVE`, which is what decides between the two.
  *
- * On SDK 54 the trigger's parts are *standalone* exports (`Label`, `Icon`,
- * `Badge`) rather than the compound `NativeTabs.Trigger.*` form SDK 56
- * introduced.
+ * On SDK 57 the parts of a trigger are compound - `NativeTabs.Trigger.Label`,
+ * `.Icon`, `.Badge` and `.VectorIcon`. The standalone `Label`/`Icon`/`Badge`
+ * exports this file used on SDK 54 no longer exist.
  *
- * Icons go through `VectorIcon`, which is expo-router's bridge for
- * SF Symbols on iOS and Material Symbols on Android, which are each platform's
+ * Icons are SF Symbols on iOS and Material Symbols on Android, which are each
  * own icon set — the same reasoning as the bar itself. Swifts is the exception:
  * it is the app's own drawing, the same `IconSwift` the wheel uses, baked to a
  * PNG by `scripts/generate-tab-icons.js`. `Icon` takes an image, a symbol name
@@ -124,20 +116,13 @@ function NativeTabsLayout() {
           : undefined;
         return (
           <NativeTabs.Trigger key={s.name} name={s.name}>
-            {/* Standalone `Label`/`Icon`/`Badge`, which is the SDK 54 shape.
-                SDK 56 made these compound (`NativeTabs.Trigger.Label`); that
-                spelling does not resolve in expo-router 6 and is the thing to
-                change back if this project moves forward again. */}
-            <Label>{s.label}</Label>
+            <NativeTabs.Trigger.Label>{s.label}</NativeTabs.Trigger.Label>
             {'src' in icon
-              ? <Icon src={icon.src} />
-              : (
-                <Icon
-                  sf={icon.sf}
-                  androidSrc={<VectorIcon family={MaterialIcons} name={icon.md} />}
-                />
-              )}
-            {badge ? <Badge>{badge}</Badge> : null}
+              ? <NativeTabs.Trigger.Icon src={icon.src} />
+              : <NativeTabs.Trigger.Icon sf={icon.sf} md={icon.md} />}
+            {badge
+              ? <NativeTabs.Trigger.Badge>{badge}</NativeTabs.Trigger.Badge>
+              : null}
           </NativeTabs.Trigger>
         );
       })}

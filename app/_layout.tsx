@@ -128,7 +128,7 @@ function AppShell() {
             from the opposite edge.
             The back gesture is off, and its absence is deliberate. Coming from
             the left, the gesture that should dismiss this travels *left*, and
-            react-native-screens on SDK 54 only offers `gestureDirection`
+            react-native-screens' native stack offers only `gestureDirection`
             'horizontal' | 'vertical' — no inverted variant — so the one it would
             give us drags the screen further the way it came. A gesture that
             works backwards is worse than none; the close button is the

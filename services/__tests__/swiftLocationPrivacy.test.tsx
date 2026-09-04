@@ -214,7 +214,7 @@ beforeEach(() => {
   });
 });
 
-/** React Native 0.81's `VirtualizedList` schedules `_updateCellsToRender` on a
+/** React Native's `VirtualizedList` schedules `_updateCellsToRender` on a
  *  `setTimeout`. Left mounted, that fires after the test has finished and logs
  *  an act() warning during teardown, which Jest reports as a failure in the
  *  suite that happens to run next. Unmounting ends the timer with the tree. */

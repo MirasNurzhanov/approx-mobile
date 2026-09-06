@@ -175,6 +175,12 @@ export function useMapData(
           longitude: parseFloat(c.longitude.toFixed(6)),
         }
       : {};
+    /** Set when the POST succeeded but the echo could not be read; thrown below
+     *  the try/catch, which is the only place the compiler allows it. */
+    let unreadable = false;
+    // Derived before the `try`: a `??` inside one is a "value block", which
+    // React Compiler cannot lower.
+    const photoName = photoUri ? (photoUri.split('/').pop() ?? 'story.jpg') : null;
     try {
       const form = new FormData();
       form.append('content', text);
@@ -183,7 +189,7 @@ export function useMapData(
       if (photoUri) {
         form.append('image', {
           uri: photoUri,
-          name: photoUri.split('/').pop() ?? 'story.jpg',
+          name: photoName,
           type: 'image/jpeg',
         } as any);
       }
@@ -194,17 +200,30 @@ export function useMapData(
       // poll, so its coordinates need the same coercion — this is the one path
       // that puts a marker on screen without going through fetchMapData first.
       const [newStory] = normalizeStories([response.data]);
-      if (!newStory) throw new Error('Story saved but came back unreadable');
-      // Only on the map if it came back with somewhere to be. A story posted
-      // while paused is saved, is in the archive, and reaches friends through
-      // Chats — it simply has no pin, and the missing marker is the feature.
-      const [drawable] = placedStories([newStory]);
-      if (drawable) setStories(prev => [...prev, drawable]);
-      recordOwnStory(newStory);
-      setTimeout(() => fetchMapData(), 500);
+      if (newStory) {
+        // Only on the map if it came back with somewhere to be. A story posted
+        // while paused is saved, is in the archive, and reaches friends through
+        // Chats — it simply has no pin, and the missing marker is the feature.
+        const [drawable] = placedStories([newStory]);
+        if (drawable) setStories(prev => [...prev, drawable]);
+        recordOwnStory(newStory);
+        setTimeout(() => fetchMapData(), 500);
+      } else {
+        unreadable = true;
+      }
     } catch (error: any) {
       console.log('[Story] error:', error.response?.status ?? error.message);
       throw error;
+    }
+
+    // Raised out here rather than inside the `try`: React Compiler cannot lower
+    // a `throw` within a try/catch and bails on this whole hook when it meets
+    // one — which is what used to cost the map screen its memoization. The
+    // catch above only logged and rethrew, so both are done by hand instead.
+    if (unreadable) {
+      const message = 'Story saved but came back unreadable';
+      console.log('[Story] error:', message);
+      throw new Error(message);
     }
   }
 

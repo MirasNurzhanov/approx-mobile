@@ -563,10 +563,14 @@ export function InterestBubbleField<T extends BubbleInterest>({
   };
 
   const needle = query.trim().toLowerCase();
-  // Kept despite react-doctor/react-compiler-no-manual-memoization: removing
-  // it changes the compiler's own emitted caching (fewer memo slots, `needle`
-  // folded into this block instead of cached on its own) — not proven to be a
-  // behavior change, but not proven byte-identical either, so left alone.
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: removing it
+  // is a behavior change, not a wash. With the wrapper the compiler caches
+  // `needle` on `[query]` and this filter on `[needle, open.items]`; without it
+  // both collapse into one block keyed on `[open, query]` (cache 52 → 50). That
+  // is a strictly wider invalidation key: typing a trailing space changes
+  // `query` but not `needle`, and `open` is re-derived from `groups` every
+  // render, so the unwrapped form rebuilds this array — and re-renders the list
+  // off it — in two cases the wrapped form does not.
   const shown = useMemo(() => {
     if (!open) return [];
     return needle ? open.items.filter((i) => i.name.toLowerCase().includes(needle)) : open.items;

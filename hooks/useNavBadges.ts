@@ -11,6 +11,20 @@ export interface NavBadges {
   alerts: number;
 }
 
+/** The unread endpoint has answered with a bare number, a list, and a `{
+ *  unread_count }` envelope at different times; all three still mean a count.
+ *
+ *  At module scope because the call site is inside a `try`, and the `??` chain
+ *  it needs is a "value block" React Compiler cannot lower there. */
+function unreadFrom(d: unknown): number {
+  if (typeof d === 'number') return d;
+  if (Array.isArray(d)) return d.length;
+  if (d && typeof d === 'object') {
+    return Number((d as any).unread_count ?? (d as any).count ?? 0);
+  }
+  return 0;
+}
+
 /**
  * The unread counts the bottom nav shows, polled once for whichever nav style
  * is on screen.
@@ -37,9 +51,7 @@ export function useNavBadges(): NavBadges {
       let count = 0;
       if (unreadRes.status === 'fulfilled') {
         const d = unreadRes.value.data;
-        if (typeof d === 'number') count += d;
-        else if (Array.isArray(d)) count += d.length;
-        else if (d && typeof d === 'object') count += Number((d as any).unread_count ?? (d as any).count ?? 0);
+        count += unreadFrom(d);
       }
       setChat(count);
     } catch {}

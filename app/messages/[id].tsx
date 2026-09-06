@@ -71,6 +71,31 @@ function fmtTime(iso: string) {
   }
 }
 
+/** Nothing to show: no words and no picture.
+ *
+ *  At module scope because the call site is inside a `try`, where a `&&` chain
+ *  is a "value block" React Compiler cannot lower. */
+function isBlank(m: Message): boolean {
+  return !m.text && !m.image;
+}
+
+/** What a screen reader says when a message arrives. A message only changes the
+ *  list — there is no focus change — so nothing is announced unless we do it.
+ *
+ *  At module scope for the same reason as `isBlank`: the ternary and `??` this
+ *  needs are "value blocks" the compiler cannot lower inside a `try`. */
+function arrivalNotice(m: Message, username?: string): string {
+  if (m.text) return `${username ?? 'New message'}: ${m.text}`;
+  return `${username ?? 'Someone'} sent a photo`;
+}
+
+/** The reason the socket gave for refusing a message, or a plain fallback.
+ *  At module scope because the call site is inside a `try`, and a `??` there is
+ *  a "value block" React Compiler cannot lower. */
+function detailOf(raw: unknown): string {
+  return (raw as { detail?: string }).detail ?? 'That message could not be sent.';
+}
+
 function extractSenderId(raw: RawMessage): number {
   if (raw.sender_id != null) return Number(raw.sender_id);
   if (typeof raw.sender === 'number') return raw.sender;
@@ -381,24 +406,19 @@ export default function MessagesScreen() {
           // which reads as the app being broken rather than the message being
           // refused.
           if ((raw as { type?: string }).type === 'error') {
-            const detail = (raw as { detail?: string }).detail
-              ?? 'That message could not be sent.';
+            const detail = detailOf(raw);
             setMessages((prev) => prev.filter((m) => !m.pending));
             Alert.alert('Message not sent', detail);
             return;
           }
 
           const incoming = normalise(raw);
-          if (!incoming.text && !incoming.image) return;
+          if (isBlank(incoming)) return;
 
           // A message arriving only changes the list — there is no focus
           // change, so a screen reader says nothing unless we announce it.
           if (incoming.sender_id !== currentUserIdRef.current) {
-            announce(
-              incoming.text
-                ? `${username ?? 'New message'}: ${incoming.text}`
-                : `${username ?? 'Someone'} sent a photo`,
-            );
+            announce(arrivalNotice(incoming, username));
           }
 
           setMessages((prev) => {

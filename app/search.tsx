@@ -37,6 +37,13 @@ interface SearchUser {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+/** A search response that isn't a list means "nothing found" rather than an
+ *  error. At module scope because the call site is inside a `try`, and a
+ *  ternary there is a "value block" React Compiler cannot lower. */
+function listOf(data: unknown): SearchUser[] {
+  return Array.isArray(data) ? data : [];
+}
+
 function sharedCount(user: SearchUser): number {
   if (user.shared_interests_count != null) return user.shared_interests_count;
   if (Array.isArray(user.shared_interests)) return user.shared_interests.length;
@@ -171,7 +178,7 @@ export default function SearchScreen() {
     setSearched(true);
     try {
       const { data } = await api.get<SearchUser[]>(`/api/users/search/?q=${encodeURIComponent(q)}`);
-      setResults(Array.isArray(data) ? data : []);
+      setResults(listOf(data));
     } catch {
       setResults([]);
     }

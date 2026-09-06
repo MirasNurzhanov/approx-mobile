@@ -159,9 +159,10 @@ function CommentsBody({
       // Hand the words back rather than losing them.
       setDraft(text);
       Alert.alert('Couldn’t post that', 'Check your connection and try again.');
-    } finally {
-      setSending(false);
     }
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // Neither branch above returns early, so this still runs on both paths.
+    setSending(false);
   }
 
   function reportComment(comment: SwiftComment) {

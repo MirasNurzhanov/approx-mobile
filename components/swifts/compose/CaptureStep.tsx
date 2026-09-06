@@ -145,72 +145,92 @@ export function CaptureStep({ onCaptured, onCancel }: Props) {
       setMicDenied(true);
     }
 
+    // Read before the `try`: an optional call is a "value block", which React
+    // Compiler cannot lower inside a try/catch, and it gives up on the whole
+    // component when it meets one. There is nothing to record without a mounted
+    // camera in any case — the screen is still showing the permission gate.
+    const camera = cameraRef.current;
+    if (!camera) return;
+
     setRecording(true);
     setElapsed(0);
     startedAt.current = Date.now();
 
+    // Only the await is inside the `try`. Everything that inspects the result
+    // reads it with `?.`, and an optional chain — like a ternary or a `??` — is
+    // a "value block" React Compiler cannot lower inside a try/catch, so it
+    // would bail on the whole component. The handling below is unreachable on
+    // the throwing path anyway, because `result` stays undefined.
+    let result: Awaited<ReturnType<NonNullable<typeof camera.recordAsync>>> | undefined;
     try {
-      const result = await cameraRef.current?.recordAsync({
+      result = await camera.recordAsync({
         // The OS enforces this, not our timer.
         maxDuration: MAX_SWIFT_MS / 1000,
       });
-      if (cancelled.current) return;
-
-      const durationMs = Date.now() - startedAt.current;
-      if (!result?.uri) return;
-
-      if (durationMs < MIN_SWIFT_MS) {
-        Alert.alert('Too short', 'Hold the button to record at least a second.');
-        return;
-      }
-      onCaptured({
-        uri: result.uri,
-        durationMs: Math.min(durationMs, MAX_SWIFT_MS),
-        // The camera does not report dimensions; the composer reads them off
-        // the player once the source loads — see EditStep's `onMeasured`.
-        width: 0,
-        height: 0,
-        source: 'camera',
-      });
     } catch {
       Alert.alert('Recording failed', 'Something interrupted the camera. Try again.');
-    } finally {
-      setRecording(false);
-      setElapsed(0);
     }
+
+    // Nested rather than the three early returns this used to use: those only
+    // cleared the spinner because a `finally` caught them, and React Compiler
+    // bails on any component containing one.
+    if (!cancelled.current && result?.uri) {
+      const durationMs = Date.now() - startedAt.current;
+      if (durationMs < MIN_SWIFT_MS) {
+        Alert.alert('Too short', 'Hold the button to record at least a second.');
+      } else {
+        onCaptured({
+          uri: result.uri,
+          durationMs: Math.min(durationMs, MAX_SWIFT_MS),
+          // The camera does not report dimensions; the composer reads them off
+          // the player once the source loads — see EditStep's `onMeasured`.
+          width: 0,
+          height: 0,
+          source: 'camera',
+        });
+      }
+    }
+    setRecording(false);
+    setElapsed(0);
   }
 
   async function handlePick() {
     setBusy(true);
+    // Only the await is inside the `try`, for the same reason as `handleRecord`
+    // above: the checks below need `?.` and `??`, and those are "value blocks"
+    // React Compiler cannot lower inside a try/catch.
+    let picked: ImagePicker.ImagePickerResult | undefined;
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
+      picked = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['videos'],
         allowsEditing: false,
         quality: 1,
       });
-      if (result.canceled || !result.assets?.length) return;
+    } catch {
+      Alert.alert('Could not open your library', 'Try again in a moment.');
+    }
 
-      const asset = result.assets[0];
+    // Nested rather than the two early returns this used to use: those only
+    // cleared the spinner because a `finally` caught them.
+    if (picked && !picked.canceled && picked.assets?.length) {
+      const asset = picked.assets[0];
       // `duration` is milliseconds and may be absent for some providers.
       const durationMs = Math.round(asset.duration ?? 0);
       if (durationMs && durationMs < MIN_SWIFT_MS) {
         Alert.alert('Too short', 'Pick a video at least a second long.');
-        return;
+      } else {
+        onCaptured({
+          uri: asset.uri,
+          // Zero means "ask the player" — the trim step measures it either way,
+          // and an over-long video is trimmed rather than refused.
+          durationMs,
+          width: asset.width ?? 0,
+          height: asset.height ?? 0,
+          source: 'library',
+        });
       }
-      onCaptured({
-        uri: asset.uri,
-        // Zero means "ask the player" — the trim step measures it either way,
-        // and an over-long video is trimmed rather than refused.
-        durationMs,
-        width: asset.width ?? 0,
-        height: asset.height ?? 0,
-        source: 'library',
-      });
-    } catch {
-      Alert.alert('Could not open your library', 'Try again in a moment.');
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
   }
 
   // ── Permission states ──────────────────────────────────────────────────────

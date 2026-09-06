@@ -228,7 +228,10 @@ export function useZonePlayback({
       // `onStatus` turns it around at the end of the window instead.
       sound.loop = rangeRef.current.endMs == null;
 
-      const from = startAt || rangeRef.current.startMs;
+      // `||` is a "value block" React Compiler cannot lower inside a try/catch,
+      // so the fallback is spelled out as a statement instead.
+      let from = startAt;
+      if (!from) from = rangeRef.current.startMs;
       if (from) await sound.seekTo(from / 1000).catch(() => {});
 
       // A blur that landed while this was still loading applies to it too —

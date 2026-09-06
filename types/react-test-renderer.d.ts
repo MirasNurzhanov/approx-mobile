@@ -14,6 +14,8 @@ declare module 'react-test-renderer' {
     props: Record<string, any>;
     children: (ReactTestInstance | string)[];
     findAllByType(type: unknown): ReactTestInstance[];
+    findByType(type: unknown): ReactTestInstance;
+    findByProps(props: Record<string, unknown>): ReactTestInstance;
   }
 
   /** A rendered host element, as `toJSON` reports it. */
@@ -27,6 +29,7 @@ declare module 'react-test-renderer' {
     root: ReactTestInstance;
     toJSON(): ReactTestRendererJSON | ReactTestRendererJSON[] | null;
     unmount(): void;
+    update(element: ReactElement): void;
   }
 
   export function create(element: ReactElement): ReactTestRenderer;

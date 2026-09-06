@@ -62,6 +62,11 @@ export function tabLabel(label: string, badge: number): string {
   return `${label}, ${badge > 99 ? 'over 99' : badge} unread`;
 }
 
+/** Keep the wheel in its slim form throughout the video feed. */
+export function isSwiftsFeedRoute(pathname: string): boolean {
+  return pathname === '/swifts' || pathname === '/(tabs)/swifts';
+}
+
 export function matchSection(pathname: string): number {
   const idx = NAV_SECTIONS.findIndex(
     s =>

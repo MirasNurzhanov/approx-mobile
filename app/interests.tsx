@@ -34,6 +34,30 @@ interface Interest {
   category_label?: string;
 }
 
+/** The catalogue endpoint answers with a list; anything else means "nothing to
+ *  show". At module scope because the call site is inside a `try`, and a
+ *  ternary there is a "value block" React Compiler cannot lower. */
+function listOf(data: unknown): Interest[] {
+  return Array.isArray(data) ? data : [];
+}
+
+/** Drop what was unpicked, then add what was picked.
+ *
+ *  Removals go out together — a failed one is ignored, since the interest not
+ *  being there is the desired end state either way — while additions stay
+ *  sequential so a rejection stops the rest.
+ *
+ *  At module scope because the caller runs it inside a `try`, and the loop is a
+ *  control-flow block React Compiler cannot lower there. */
+async function applySelection(toDeselect: number[], toSelect: number[]) {
+  await Promise.all(
+    toDeselect.map((id) => api.delete(`/api/interests/${id}/select/`).catch(() => {})),
+  );
+  for (const id of toSelect) {
+    await api.post(`/api/interests/${id}/select/`);
+  }
+}
+
 export default function EditInterestsScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -73,8 +97,8 @@ export default function EditInterestsScreen() {
         api.get<Interest[]>('/api/interests/'),
         api.get<{ interests?: Interest[] }>('/api/users/profile/'),
       ]);
-      const all = Array.isArray(allRes.data) ? allRes.data : [];
-      const mine = profileRes.data.interests ?? [];
+      const all = listOf(allRes.data);
+      const mine = listOf(profileRes.data.interests);
       console.log('[Interests] /api/interests/ →', all.length, '· mine →', mine.length);
       // Custom interests may not be in the shared list — merge them in so they
       // show as chips and can be deselected.
@@ -136,12 +160,7 @@ export default function EditInterestsScreen() {
 
     setSaving(true);
     try {
-      await Promise.all(
-        toDeselect.map((id) => api.delete(`/api/interests/${id}/select/`).catch(() => {}))
-      );
-      for (const id of toSelect) {
-        await api.post(`/api/interests/${id}/select/`);
-      }
+      await applySelection(toDeselect, toSelect);
       router.back();
     } catch {
       setError('Failed to save. Please try again.');

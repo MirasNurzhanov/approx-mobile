@@ -85,6 +85,29 @@ export default function SwiftComposerScreen() {
     setDraft((prev) => ({ ...prev, ...next }));
 
   // ── Navigation between steps ───────────────────────────────────────────────
+
+  // Declared above `goBack`, which calls it. React Compiler cannot rewrite a
+  // reference to a function hoisted from further down the component
+  // ([PruneHoistedContexts]) and bails on the whole screen when it finds one.
+  function confirmExit() {
+    if (!draft.uri) {
+      router.back();
+      return;
+    }
+    Alert.alert('Discard this Swift?', 'Nothing will be saved.', [
+      { text: 'Keep editing', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: () => {
+          abortRef.current?.abort();
+          discardTempFile(tempUriRef.current);
+          router.back();
+        },
+      },
+    ]);
+  }
+
   function goBack() {
     if (progress && progress.stage !== 'error') return; // mid-upload; use Cancel
     const index = ORDER.indexOf(step);
@@ -111,25 +134,6 @@ export default function SwiftComposerScreen() {
       return;
     }
     setStep(ORDER[index - 1]);
-  }
-
-  function confirmExit() {
-    if (!draft.uri) {
-      router.back();
-      return;
-    }
-    Alert.alert('Discard this Swift?', 'Nothing will be saved.', [
-      { text: 'Keep editing', style: 'cancel' },
-      {
-        text: 'Discard',
-        style: 'destructive',
-        onPress: () => {
-          abortRef.current?.abort();
-          discardTempFile(tempUriRef.current);
-          router.back();
-        },
-      },
-    ]);
   }
 
   // Android's hardware back has to mean "previous step", not "leave the
@@ -201,16 +205,18 @@ export default function SwiftComposerScreen() {
     } catch (e: any) {
       if (e instanceof UploadCancelled) {
         setProgress(null);
-        return;
+      } else {
+        setProgress({ stage: 'error', ratio: 0, attempt: 1 });
+        // `.message` on an `UploadError` is already the user-facing wording;
+        // `.detail` is the raw server reason, logged rather than shown — see
+        // services/swiftUpload.
+        setError(e?.message ?? 'Could not publish that Swift.');
       }
-      setProgress({ stage: 'error', ratio: 0, attempt: 1 });
-      // `.message` on an `UploadError` is already the user-facing wording;
-      // `.detail` is the raw server reason, logged rather than shown — see
-      // services/swiftUpload.
-      setError(e?.message ?? 'Could not publish that Swift.');
-    } finally {
-      abortRef.current = null;
     }
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // The cancelled branch is an `else` rather than an early return so that this
+    // still clears on that path, which is what the `finally` was for.
+    abortRef.current = null;
   }
 
   function cancelUpload() {

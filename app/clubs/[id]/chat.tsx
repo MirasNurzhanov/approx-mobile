@@ -105,6 +105,31 @@ function fmtPickerTime(d: Date) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/** The messages endpoint answers with a bare array or a paginated envelope
+ *  depending on the query; both mean the same list here.
+ *
+ *  At module scope rather than inline at the two call sites because one of them
+ *  sits inside a `try`, and a ternary there is a "value block" — something
+ *  React Compiler cannot lower, so it gives up on the whole component. */
+function pageOf(data: unknown): RawMsg[] {
+  return Array.isArray(data) ? data : ((data as any)?.results ?? []);
+}
+
+/** Nothing to show: no words and no picture. Proposals are allowed through
+ *  without either, since the card is the content.
+ *
+ *  At module scope for the same reason as `pageOf` — the call site is inside a
+ *  `try`, where a `&&` chain is a "value block" the compiler cannot lower. */
+function isBlank(m: ClubMessage): boolean {
+  return !m.text && !m.image && m.message_type !== 'meetup_proposal';
+}
+
+/** The reason the socket gave for refusing a message, or a plain fallback.
+ *  At module scope for the same reason as `pageOf`. */
+function detailOf(raw: unknown): string {
+  return (raw as { detail?: string }).detail ?? 'That message could not be sent.';
+}
+
 function normalise(raw: RawMsg, fallbackId?: string): ClubMessage {
   let sender_id = -1;
   let sender_username: string | undefined;
@@ -804,7 +829,7 @@ function useClubChat(
   useEffect(() => {
     api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/`)
       .then((r) => {
-        const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
+        const raw = pageOf(r.data);
         const msgs = raw.map((m) => normalise(m));
         msgs.forEach(cacheSender);
         setMessages(msgs);
@@ -821,12 +846,20 @@ function useClubChat(
     setLoadingMore(true);
     try {
       const r = await api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/?before=${oldestId}`);
-      const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
-      if (raw.length === 0) { setHasMore(false); return; }
-      const older = raw.map((m) => normalise(m));
-      older.forEach(cacheSender);
-      setMessages((prev) => [...older, ...prev]);
-    } catch {} finally { setLoadingMore(false); }
+      const raw = pageOf(r.data);
+      if (raw.length === 0) {
+        setHasMore(false);
+      } else {
+        const older = raw.map((m) => normalise(m));
+        older.forEach(cacheSender);
+        setMessages((prev) => [...older, ...prev]);
+      }
+    } catch {}
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // The empty-page case is an `else` rather than an early return for the same
+    // reason: it used to return out of the `try`, which only a `finally` could
+    // have caught.
+    setLoadingMore(false);
   }, [clubId, loadingMore, hasMore, messages]);
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -856,16 +889,14 @@ function useClubChat(
           // the optimistic bubble and say why — otherwise it hangs "pending"
           // forever and looks like a stalled network.
           if ((raw as { type?: string }).type === 'error') {
-            const detail = (raw as { detail?: string }).detail
-              ?? 'That message could not be sent.';
+            const detail = detailOf(raw);
             setMessages((prev) => prev.filter((m) => !m.pending));
             Alert.alert('Message not sent', detail);
             return;
           }
 
           const incoming = hydrate(normalise(raw));
-          // Allow proposals through even without text/image
-          if (!incoming.text && !incoming.image && incoming.message_type !== 'meetup_proposal') return;
+          if (isBlank(incoming)) return;
           cacheSender(incoming);
 
           setMessages((prev) => {

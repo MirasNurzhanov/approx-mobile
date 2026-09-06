@@ -381,9 +381,10 @@ export function SwiftsFeed() {
       setActiveReveal((prev) =>
         prev && prev.swiftId === swift.id ? { ...prev, error: message } : prev,
       );
-    } finally {
-      setRevealingId(null);
     }
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // Neither branch above returns early, so this still runs on both paths.
+    setRevealingId(null);
   }, []);
 
   function closeReveal() {

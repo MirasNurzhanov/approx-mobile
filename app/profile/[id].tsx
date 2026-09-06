@@ -455,13 +455,21 @@ export default function UserProfileScreen() {
     ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
     : null;
   const age      = _ageRaw !== null && !Number.isNaN(_ageRaw) ? _ageRaw : null;
-  const natInfo  = profile.nationality ? COUNTRIES.find(c => c.code === profile.nationality) ?? null : null;
-  const profInfo = profile.profession  ? PROFESSIONS.find(p => p.key === profile.profession) ?? null  : null;
-  const metaLine = [
-    natInfo  ? `${flagEmoji(natInfo.code)} ${natInfo.name}` : null,
-    profInfo ? `${profInfo.emoji} ${profInfo.label}`        : null,
-    age !== null ? String(age)                              : null,
-  ].filter(Boolean).join(' · ') || null;
+  // The lookup and the `?? null` are separate statements because a `??` inside
+  // a ternary branch is a logical test block React Compiler cannot lower, and
+  // it gives up on the whole screen when it meets one.
+  const natFound  = profile.nationality ? COUNTRIES.find(c => c.code === profile.nationality) : undefined;
+  const profFound = profile.profession  ? PROFESSIONS.find(p => p.key === profile.profession) : undefined;
+  const natInfo  = natFound  ?? null;
+  const profInfo = profFound ?? null;
+  // Built by pushing rather than as an array of ternaries filtered down: a
+  // ternary feeding a logical test is a shape React Compiler cannot lower, and
+  // it gives up on the whole screen when it meets one.
+  const metaParts: string[] = [];
+  if (natInfo) metaParts.push(`${flagEmoji(natInfo.code)} ${natInfo.name}`);
+  if (profInfo) metaParts.push(`${profInfo.emoji} ${profInfo.label}`);
+  if (age !== null) metaParts.push(String(age));
+  const metaLine = metaParts.length > 0 ? metaParts.join(' · ') : null;
 
   return (
     <View style={styles.root}>

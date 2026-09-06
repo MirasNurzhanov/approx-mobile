@@ -116,32 +116,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // background location task and clears account-scoped caches. Never
       // throws: signing out has to succeed locally even with no network.
       await performSignOut();
-    } finally {
-      // In the finally, so a teardown that somehow threw still lands on the
-      // auth screen: by this point the api client is latched shut, and leaving
-      // the user inside the tabs with a dead session is the worse failure.
-      //
-      // dismissAll() first so any modal or pushed screen is gone, then replace
-      // rather than navigate — the auth screen becomes the only entry on the
-      // stack, so Back cannot return to an authenticated screen.
-      //
-      // Guarded, because dismissAll() dispatches POP_TO_TOP unconditionally and
-      // signing out from a tab is the common case: the root stack holds only
-      // `(tabs)` then, nothing pops, and the action falls through to the tab
-      // navigator — which cannot handle it either — for a red "action
-      // 'POP_TO_TOP' was not handled by any navigator" on every sign out.
-      if (router.canDismiss()) router.dismissAll();
-      // Straight to the screen with Log in and Create account on it, rather
-      // than to '/' — which routes a signed-out user through the intro
-      // carousel. Somebody who just signed out has used the app; making them
-      // swipe an introduction to reach the login button reads as the sign-out
-      // having gone nowhere.
-      router.replace('/welcome');
-      // Released so the buttons never strand the user on a permanently
-      // spinning Sign out.
-      signingOut.current = false;
-      setIsSigningOut(false);
+    } catch {
+      // Swallowed here rather than left to a `finally`, which React Compiler
+      // cannot lower — it bails on any component containing one. The guarantee
+      // is unchanged: a teardown that somehow threw still reaches the teardown
+      // below instead of stranding the user inside the tabs.
     }
+
+    // Reached on both paths, so a teardown that threw still lands on the auth
+    // screen: by this point the api client is latched shut, and leaving the
+    // user inside the tabs with a dead session is the worse failure.
+    //
+    // dismissAll() first so any modal or pushed screen is gone, then replace
+    // rather than navigate — the auth screen becomes the only entry on the
+    // stack, so Back cannot return to an authenticated screen.
+    //
+    // Guarded, because dismissAll() dispatches POP_TO_TOP unconditionally and
+    // signing out from a tab is the common case: the root stack holds only
+    // `(tabs)` then, nothing pops, and the action falls through to the tab
+    // navigator — which cannot handle it either — for a red "action
+    // 'POP_TO_TOP' was not handled by any navigator" on every sign out.
+    if (router.canDismiss()) router.dismissAll();
+    // Straight to the screen with Log in and Create account on it, rather
+    // than to '/' — which routes a signed-out user through the intro
+    // carousel. Somebody who just signed out has used the app; making them
+    // swipe an introduction to reach the login button reads as the sign-out
+    // having gone nowhere.
+    router.replace('/welcome');
+    // Released so the buttons never strand the user on a permanently
+    // spinning Sign out.
+    signingOut.current = false;
+    setIsSigningOut(false);
   }
 
   function confirmLogout() {

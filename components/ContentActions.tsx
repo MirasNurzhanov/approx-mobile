@@ -62,26 +62,33 @@ export function useContentActions() {
 
   const doBlock = useCallback(async (item: ContentActionTarget) => {
     if (item.authorId == null) return;
+    // Resolved before the `try`: a `??` inside one is a "value block", which
+    // React Compiler cannot lower — it bails on this whole file otherwise.
+    const username = item.authorUsername ?? 'this account';
+    // The server files a moderation report on every block; this is what tells it
+    // which surface the block came from. A block raised from a profile carries
+    // no note - it is not an accusation - while one raised from a Swift or a
+    // comment names the content, which is what makes it worth a moderator's
+    // attention. Built before the `try` because a ternary inside one is a
+    // "value block" React Compiler cannot lower.
+    const context = item.target === 'user'
+      ? {}
+      : { note: `Blocked from a ${SURFACE_LABEL[item.target]}` };
     try {
       await blockUser(
         {
           id: item.authorId,
-          username: item.authorUsername ?? 'this account',
+          username,
           profile_picture: item.authorAvatar,
         },
-        // The server files a moderation report on every block; this is what
-        // tells it which surface the block came from. A block raised from a
-        // profile carries no note - it is not an accusation - while one raised
-        // from a Swift or a comment names the content, which is what makes it
-        // worth a moderator's attention.
-        item.target === 'user'
-          ? {}
-          : { note: `Blocked from a ${SURFACE_LABEL[item.target]}` },
+        context,
       );
       // Local removal first, server filtering second. The server is the source
       // of truth and will keep them out of every future response; this is what
       // makes the current screen agree with that immediately.
-      item.onRemoved?.();
+      // Spelled out rather than `item.onRemoved?.()`: an optional call is a
+      // "value block" React Compiler cannot lower inside a try/catch.
+      if (item.onRemoved) item.onRemoved();
     } catch {
       Alert.alert(
         'Could not block',

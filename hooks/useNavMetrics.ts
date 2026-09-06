@@ -1,14 +1,16 @@
+import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   NAV_ARC_H,
+  NAV_WHEEL_SLIM_H,
   NAV_BAR_GAP,
   NAV_BAR_H,
   NATIVE_TAB_BAR_H,
   navArcClearance,
   tabAlignedRightInset,
 } from '@/components/navGeometry';
-import { NAV_SECTIONS } from '@/components/navSections';
+import { NAV_SECTIONS, isSwiftsFeedRoute } from '@/components/navSections';
 import { BAR_STYLE_IS_NATIVE, isIOS26OrNewer } from '@/constants/platform';
 import { useNavStyle } from '@/context/NavStyleContext';
 
@@ -32,7 +34,11 @@ function barHeightAboveInset(): number {
  */
 export function useNavClearance(fromRight: number, width: number): number {
   const { navStyle } = useNavStyle();
-  return navStyle === 'wheel' ? navArcClearance(fromRight, width) : barHeightAboveInset();
+  const pathname = usePathname();
+  if (navStyle === 'wheel') {
+    return isSwiftsFeedRoute(pathname) ? NAV_WHEEL_SLIM_H : navArcClearance(fromRight, width);
+  }
+  return barHeightAboveInset();
 }
 
 /**
@@ -61,7 +67,11 @@ export function useNavAlignedRight(controlWidth: number, edgeInset: number): num
  */
 export function useNavHeight(): number {
   const { navStyle } = useNavStyle();
-  return navStyle === 'wheel' ? NAV_ARC_H : barHeightAboveInset();
+  const pathname = usePathname();
+  if (navStyle === 'wheel') {
+    return isSwiftsFeedRoute(pathname) ? NAV_WHEEL_SLIM_H : NAV_ARC_H;
+  }
+  return barHeightAboveInset();
 }
 
 /** `useNavHeight` plus the safe-area inset and a little breathing room, ready

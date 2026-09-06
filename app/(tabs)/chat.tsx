@@ -89,6 +89,26 @@ interface FriendList {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+/** Unread-per-friend, from either shape the breakdown endpoint answers with:
+ *  `{ [userId]: count }` or `[{ user_id, count }]`.
+ *
+ *  At module scope because the call site is inside a `try`, and the `??` chains
+ *  this needs are "value blocks" React Compiler cannot lower there. */
+function unreadByUser(data: unknown): Map<number, number> {
+  const counts = new Map<number, number>();
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+      counts.set(Number(k), Number(v) || 0);
+    }
+  } else if (Array.isArray(data)) {
+    for (const entry of data as any[]) {
+      const uid = entry.user_id ?? entry.id;
+      if (uid != null) counts.set(Number(uid), Number(entry.count ?? entry.unread_count) || 0);
+    }
+  }
+  return counts;
+}
+
 function fmtTime(iso?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -1222,31 +1242,27 @@ export default function ChatScreen() {
   // `useFocusEffect` dependency array below, alongside `fetchAll` — a hedge
   // against re-subscribing every render if this hook ever bails compilation.
   const fetchUnreadBreakdown = useCallback(async () => {
+    // Only the request is inside the `try`. Everything below it needs `??` and
+    // ternaries, and those are "value blocks" React Compiler cannot lower
+    // inside a try/catch — it bails on the whole hook when it meets one.
+    let data: unknown;
     try {
       const res = await api.get<unknown>('/api/friends/messages/unread/breakdown/');
-      const data = res.data;
-      // Accept { [userId]: count } or [{ user_id, count }]
-      const countMap = new Map<number, number>();
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
-          countMap.set(Number(k), Number(v) || 0);
-        }
-      } else if (Array.isArray(data)) {
-        for (const entry of data as any[]) {
-          const uid = entry.user_id ?? entry.id;
-          if (uid != null) countMap.set(Number(uid), Number(entry.count ?? entry.unread_count) || 0);
-        }
-      }
-      if (countMap.size === 0) return;
-      setFriendList((prev) => ({
-        connections: prev.connections.map((u) =>
-          countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
-        ),
-        friends: prev.friends.map((u) =>
-          countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
-        ),
-      }));
-    } catch {}
+      data = res.data;
+    } catch {
+      return;
+    }
+
+    const countMap = unreadByUser(data);
+    if (countMap.size === 0) return;
+    setFriendList((prev) => ({
+      connections: prev.connections.map((u) =>
+        countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
+      ),
+      friends: prev.friends.map((u) =>
+        countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
+      ),
+    }));
   }, []);
 
   // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds the

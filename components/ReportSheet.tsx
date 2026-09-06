@@ -121,7 +121,9 @@ export function ReportSheet({
     try {
       await reportContent(target, targetId, reason, note);
       setDone(true);
-      onReported?.();
+      // Spelled out rather than `onReported?.()`: an optional call is a "value
+      // block", which React Compiler cannot lower inside a try/catch.
+      if (onReported) onReported();
     } catch (e) {
       setError(
         e instanceof ReportFailed

@@ -304,8 +304,11 @@ export default function StarredStoriesScreen() {
 
   async function onRefresh() {
     setRefreshing(true);
+    // Chosen before the `try`: a ternary inside one is a "value block", which
+    // React Compiler cannot lower — it bails on the whole screen.
+    const refresh = activeTab === 'mine' ? refreshMine : refreshStarred;
     try {
-      await (activeTab === 'mine' ? refreshMine() : refreshStarred());
+      await refresh();
     } catch {
       // Offline or server error — the cached list stays on screen.
     }
@@ -317,8 +320,11 @@ export default function StarredStoriesScreen() {
   async function onEndReached() {
     if (loadingMore || !list || total === null || list.length >= total) return;
     setLoadingMore(true);
+    // Chosen before the `try`, as in `onRefresh`: a ternary inside one is a
+    // "value block" React Compiler cannot lower.
+    const loadMorePage = activeTab === 'mine' ? loadMoreMine : loadMoreStarred;
     try {
-      await (activeTab === 'mine' ? loadMoreMine() : loadMoreStarred());
+      await loadMorePage();
     } catch {}
     // The `catch` swallows everything, so this always runs.
     setLoadingMore(false);

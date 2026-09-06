@@ -17,7 +17,7 @@ import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
-import { NAV_ARC_R_OUT } from '@/components/navGeometry';
+import { NAV_ARC_R_OUT, NAV_WHEEL_SLIM_H as SLIM_H } from '@/components/navGeometry';
 import { NavTrigger } from '@/components/nav/NavTrigger';
 import {
   NAV_SECTIONS,
@@ -47,7 +47,6 @@ const SVG_H  = R_OUT + 6;
 const CX     = W / 2;
 const CY     = SVG_H;
 const NEEDLE = R_IN - 10;
-const SLIM_H = 56; // slim tab bar row height
 
 const SPRING = { damping: 18, stiffness: 150, mass: 0.9 };
 const FADE   = { duration: 200, easing: Easing.out(Easing.cubic) };
@@ -129,6 +128,8 @@ const GLOW_ARC = [
 ].join(' ');
 
 interface SpeedometerProps {
+  /** Screen-owned layout: cached Swifts must never expand on another route. */
+  compact?: boolean;
   /** Name of a NAV_SECTIONS entry (e.g. 'settings') to spotlight — every other
    *  wedge dims and this one pulses coral. Used by the zone tutorial to point
    *  at Settings without a static colour override fighting the arc's own
@@ -144,10 +145,11 @@ interface SpeedometerProps {
  * alternative to the tab bar (Settings → Preferences → Wheel navigation bar).
  * Screens render `components/ApproxNav` rather than this directly.
  */
-export function Speedometer({ highlightSection, standalone }: SpeedometerProps = {}) {
+export function Speedometer({ highlightSection, standalone, compact = false }: SpeedometerProps = {}) {
   const pathname          = usePathname();
   const { bottom: safeBottom } = useSafeAreaInsets();
-  const { collapsed }     = useScrollNav();
+  const { collapsed: scrollCollapsed } = useScrollNav();
+  const collapsed = compact || scrollCollapsed;
   const { colors }        = useTheme();
   const styles            = makeStyles(colors);
 
@@ -198,8 +200,8 @@ export function Speedometer({ highlightSection, standalone }: SpeedometerProps =
   }));
 
   const needleAngle      = useSharedValue(SECTIONS[matchSection(pathname)].mid);
-  const containerH       = useSharedValue(SVG_H + safeBottom);
-  const collapseProgress = useSharedValue(0); // 0 = full speedometer, 1 = slim bar
+  const containerH       = useSharedValue((collapsed ? SLIM_H : SVG_H) + safeBottom);
+  const collapseProgress = useSharedValue(collapsed ? 1 : 0); // 0 = full speedometer, 1 = slim bar
 
   // Sync needle when route changes. The shared value is Reanimated's, not
   // React's, so driving it from an effect is the point of the effect.
@@ -268,12 +270,19 @@ export function Speedometer({ highlightSection, standalone }: SpeedometerProps =
     opacity: interpolate(collapseProgress.get(), [0, 1], [0, 1], Extrapolation.CLAMP),
   }));
 
+  // Compact screens use ordinary views throughout their lifetime. Removing an
+  // animated style alone does not clear native values left by Reanimated.
+  const Container = compact ? View : Animated.View;
+  const SlimBar = compact ? View : Animated.View;
+
   return (
-    <Animated.View style={[styles.container, containerStyle]}>
+    <Container style={[styles.container, compact ? { height: SLIM_H + safeBottom } : containerStyle]}>
 
       {/* ── Full speedometer (visible when expanded) ── */}
-      <View
+      {!compact && <View
         pointerEvents={collapsed ? 'none' : 'box-none'}
+        accessibilityElementsHidden={collapsed}
+        importantForAccessibility={collapsed ? 'no-hide-descendants' : 'auto'}
         style={styles.fullWrap}
       >
         <Animated.View style={svgFadeStyle}>
@@ -372,14 +381,16 @@ export function Speedometer({ highlightSection, standalone }: SpeedometerProps =
 
         {/* Safe area spacer */}
         <View style={{ height: safeBottom }} />
-      </View>
+      </View>}
 
       {/* ── Slim tab bar (visible when collapsed) ── */}
       <View
         pointerEvents={collapsed ? 'box-none' : 'none'}
+        accessibilityElementsHidden={!collapsed}
+        importantForAccessibility={collapsed ? 'auto' : 'no-hide-descendants'}
         style={styles.slimWrap}
       >
-        <Animated.View style={[styles.slimBar, slimFadeStyle]}>
+        <SlimBar style={[styles.slimBar, !compact && slimFadeStyle]}>
           <View style={styles.slimRow}>
             {SECTIONS.map((s, i) => {
               const isActive = i === activeIdx;
@@ -415,10 +426,10 @@ export function Speedometer({ highlightSection, standalone }: SpeedometerProps =
             })}
           </View>
           <View style={{ height: safeBottom, backgroundColor: colors.navBg }} />
-        </Animated.View>
+        </SlimBar>
       </View>
 
-    </Animated.View>
+    </Container>
   );
 }
 

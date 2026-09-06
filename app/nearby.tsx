@@ -58,6 +58,13 @@ interface NearbyUser {
 
 /** Whose name and face are ours to show. Matches the map's rule exactly: a Hi
  *  in one direction is not an introduction, so `hi_sent` stays anonymous. */
+/** A response that isn't a list means nobody is nearby, not an error.
+ *  At module scope because the call site is inside a `try`, and a ternary there
+ *  is a "value block" React Compiler cannot lower. */
+function listOf(data: unknown): NearbyUser[] {
+  return Array.isArray(data) ? data : [];
+}
+
 function identified(user: NearbyUser): boolean {
   return user.relationship === 'friend' || user.relationship === 'connected';
 }
@@ -163,21 +170,23 @@ export default function NearbyListScreen() {
       // for GPS.
       let coords: { latitude: number; longitude: number } | null = null;
       try {
-        const fix =
-          (await Location.getLastKnownPositionAsync()) ??
-          (await Location.getCurrentPositionAsync({
+        // Two statements rather than `??` between the awaits: a nullish
+        // coalesce inside a `try` is a "value block", which React Compiler
+        // cannot lower. The cheap cached fix still wins when there is one.
+        let fix = await Location.getLastKnownPositionAsync();
+        if (!fix) {
+          fix = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
-          }));
-        coords = fix
-          ? { latitude: fix.coords.latitude, longitude: fix.coords.longitude }
-          : null;
+          });
+        }
+        if (fix) coords = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
       } catch {
         // No permission, or no fix. `fetchNearbyUsers` returns an empty list
         // for a paused caller without one, which the empty state explains.
       }
 
       const data = await fetchNearbyUsers<NearbyUser>(coords);
-      setUsers(Array.isArray(data) ? data : []);
+      setUsers(listOf(data));
       setAwaitingFix(false);
       setError(null);
     } catch (e: any) {

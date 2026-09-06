@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -2497,7 +2497,10 @@ function MapToasts({ styles, colors, top, hiToast, locationToast, locationless }
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MapScreen() {
   const { colors, themeMode } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  // No wrapper: now that the screen's compile-blocking code has moved into
+  // `useMapData`, React Compiler caches this and every `styles.*` read off it
+  // by itself — emit is byte-identical with and without a `useMemo`.
+  const styles = makeStyles(colors);
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const { ensure: ensurePermission, primer } = usePermissionPrimer();

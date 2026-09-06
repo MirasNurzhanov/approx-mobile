@@ -183,6 +183,11 @@ function SwiftActionsImpl({
   );
 }
 
+// Kept despite react-doctor/react-compiler-no-manual-memoization: SwiftCard
+// wraps every handler it passes here in a `useCallback` specifically to keep
+// this `memo` honest (see the comment at SwiftCard's handler block), and
+// SwiftCard itself does not compile — so this boundary is the only thing
+// keeping the action rail out of each card's re-render in the feed.
 export const SwiftActions = memo(SwiftActionsImpl);
 
 const styles = StyleSheet.create({

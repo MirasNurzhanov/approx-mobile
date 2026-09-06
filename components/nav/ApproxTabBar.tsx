@@ -97,6 +97,11 @@ export function ApproxTabBar({ highlightSection, standalone }: ApproxTabBarProps
   const { collapsed } = useScrollNav();
   const { colors, themeMode } = useTheme();
   const reduceMotion = useReduceMotion();
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: dropping it
+  // is not a no-op. Compiling this file with and without the wrapper shrinks
+  // this component's cache from 42 slots to 10 — the compiler stops caching
+  // `makeStyles(colors)` and every `styles.*` read that hangs off it. Same
+  // finding as `ApproxLoader`; the bar renders on every screen.
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   // Which item is lit is a pure function of the route, so it is worked out on

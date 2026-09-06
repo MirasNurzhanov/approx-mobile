@@ -49,6 +49,10 @@ export function NavStyleProvider({ children }: { children: React.ReactNode }) {
     setStyle(next);
   }, []);
 
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: this is a
+  // context value, so its identity is what every `useNavStyle()` consumer
+  // re-renders on — the nav bar and the wheel among them. `setNavStyle` is
+  // memoized to match, since it feeds this dependency array.
   const value = useMemo(
     () => ({ navStyle, setNavStyle, ready }),
     [navStyle, setNavStyle, ready],

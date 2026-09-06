@@ -54,6 +54,12 @@ const SURFACE_LABEL: Record<ReportTarget, string> = {
 export function useContentActions() {
   const [reporting, setReporting] = useState<ContentActionTarget | null>(null);
 
+  // The three wrappers below are kept despite
+  // react-doctor/react-compiler-no-manual-memoization: React Compiler bails on
+  // this whole file (the ternary inside `doBlock`'s try/catch is a value block
+  // it cannot lower), so it emits no cache here at all and these are the only
+  // memoization there is. `present` is also this hook's public surface.
+
   const doBlock = useCallback(async (item: ContentActionTarget) => {
     if (item.authorId == null) return;
     try {

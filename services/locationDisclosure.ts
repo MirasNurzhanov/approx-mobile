@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // The one screen that tells somebody they are on the map, shown once.
 //
@@ -97,9 +97,9 @@ export function useLocationDisclosure(): {
     };
   }, []);
 
-  const acknowledge = useCallback(async () => {
+  const acknowledge = async () => {
     await acknowledgeLocationDisclosure();
-  }, []);
+  };
 
   return { acknowledged: value, acknowledge };
 }

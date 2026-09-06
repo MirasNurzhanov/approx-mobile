@@ -12,7 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
@@ -149,7 +149,7 @@ export function Speedometer({ highlightSection, standalone }: SpeedometerProps =
   const { bottom: safeBottom } = useSafeAreaInsets();
   const { collapsed }     = useScrollNav();
   const { colors }        = useTheme();
-  const styles            = useMemo(() => makeStyles(colors), [colors]);
+  const styles            = makeStyles(colors);
 
   // Which wedge is lit is a pure function of the route, so it is worked out
   // here rather than mirrored into state by an effect — that version repainted
@@ -164,6 +164,9 @@ export function Speedometer({ highlightSection, standalone }: SpeedometerProps =
   // Motion on they jump to the end state instead — the feedback is kept, the
   // movement is not.
   const reduceMotion = useReduceMotion();
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: read from
+  // the dependency arrays of the two effects below, so an unstable identity
+  // would re-fire the needle sweep and the collapse spring on every render.
   const animate = useCallback(
     <T,>(value: T, spring: boolean) => {
       if (reduceMotion) return value;

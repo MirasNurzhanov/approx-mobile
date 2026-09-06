@@ -1,11 +1,9 @@
 import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    AppState,
     FlatList,
     KeyboardAvoidingView,
     Linking,
@@ -22,13 +20,11 @@ import MapView, { Circle, Marker, Polygon, Polyline, PROVIDER_GOOGLE, type Regio
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
-    withSpring,
     type SharedValue,
 } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { GestureDetector } from 'react-native-gesture-handler';
 
 import { ApproxNav } from '@/components/ApproxNav';
 import { STORY_LIKE } from '@/components/storyReactions';
@@ -63,157 +59,60 @@ import { mapStyleFor } from '@/constants/mapStyle';
 import {
     CAPTION_GAP,
     CAPTION_H,
-    layoutMarkers,
+    isDrawable,
     offsetByMeters,
-    type FanInput,
-    M_PER_DEG,
     SELF_KEY,
+    type ClusterResult,
+    type FanResult,
     type GeoPoint,
     type MarkerLayout,
-    type ZoneArea,
 } from '@/services/markerLayout';
-import { fonts, radius, type, withAlpha, zoneRingColor } from '@/constants/theme';
+import { fonts, radius, type, withAlpha } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { useNavAlignedRight, useNavClearance } from '@/hooks/useNavMetrics';
-import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
+import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
-import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
-import { fetchMapNearby, isLocationNotAvailable } from '@/services/discovery';
-import { atSharingPrecision, reportLocation, type Coordinates } from '@/services/location';
-import {
-  backgroundStatus,
-  bindForegroundRefresh,
-  check as checkPermission,
-  openAppSettings,
-  refreshPermissions,
-  SUPPORTS_BACKGROUND_LOCATION,
-  usePermissionStore,
-  type PermissionState,
-} from '@/services/permissions';
-import { registerNearbyRefresh, registerMeetupRemove } from '@/services/nearbyRefresh';
+// `PermissionState` explicitly, not the DOM global of the same name — that one
+// is 'granted' | 'denied' | 'prompt', so leaving it unimported makes the
+// `=== 'blocked'` checks below silently type-error instead of resolving here.
+import { openAppSettings, type PermissionState } from '@/services/permissions';
 import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
 import { MotionTrail } from '@/components/MotionTrail';
 import { PresenceDot } from '@/components/PresenceDot';
+import { useMapData } from '@/hooks/useMapData';
+import { useMapLocation, type LocateState } from '@/hooks/useMapLocation';
+import { useMapOverlays, type MapOverlays, type MusicZone } from '@/hooks/useMapOverlays';
+import { useMapSheets, SHEET_H, SPRING_CFG } from '@/hooks/useMapSheets';
+import { useMarkerSlots, type MarkerSlots } from '@/hooks/useMarkerSlots';
 import { useMotionTrails } from '@/hooks/useMotionTrails';
-import { recordSpeed } from '@/services/ownMotion';
+import { useStoryComposer } from '@/hooks/useStoryComposer';
+import { useStoryTutorial } from '@/hooks/useStoryTutorial';
+import { useVisiblePeople } from '@/hooks/useVisiblePeople';
 import { useGhostMode } from '@/services/privacy';
 import { fmtRadius, trackTitle } from '@/services/zoneAudio';
-import { hasSeenStoryTutorial, markStoryTutorialSeen } from '@/services/tutorial';
-import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
-import {
-    getRegion,
-    ringsForDisplay,
-    type Region as ZoneRegion,
-    type ZoneMode,
-} from '@/services/zoneArea';
-import {
-    normalizeStories,
-    placedStories,
-    recordOwnStory,
-    useStoryArchive,
-    type ReactionType,
-    type Story,
-} from '@/services/stories';
-import { withNumericCoordsList } from '@/services/coords';
+import { MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
+import type { ReactionType, Story } from '@/services/stories';
+import type {
+    ClubMeetup,
+    NearbyUser,
+    Relationship,
+    SelfZone,
+} from '@/services/mapTypes';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Relationship = 'stranger' | 'hi_sent' | 'connected' | 'friend';
-
-interface NearbyUser {
-  id: number;
-  username: string;
-  latitude: number;
-  longitude: number;
-  relationship: Relationship;
-  distance?: number;
-  distance_km?: number;
-  shared_interests?: string[];
-  profile_picture?: string;
-  zone_active?: boolean;
-  zone_radius?: number;
-  /** 'region' means the zone is a real place's border, not a circle — draw
-   *  `zone_region_id`'s outline instead of `zone_radius`. */
-  zone_mode?: ZoneMode;
-  /** Id only: the outline is ~1500 points and this payload is polled every
-   *  10s. Resolved through services/zoneArea, which caches per region. */
-  zone_region_id?: number | null;
-  zone_audio_url?: string;
-  /** Their music zone: how close you have to be to *hear* them, which is not
-   *  how big their zone is. Sent only to viewers allowed to hear the track and
-   *  only while the music zone is switched on, so its absence means either "no
-   *  audio for you" or "there is no music zone" — and both draw nothing. */
-  music_zone_radius?: number;
-  /** Present for Apple Music tracks, which have a real name and cover art.
-   *  Everything else is still named by services/zoneAudio from its URL. */
-  zone_track_title?: string;
-  zone_track_artist?: string;
-  zone_track_artwork?: string;
-  /** The slice of the track its owner set to repeat. Absent means the whole
-   *  thing. Honoured here, not just on the owner's screen — the trim is part
-   *  of what the zone plays. */
-  zone_track_start_ms?: number;
-  zone_track_end_ms?: number | null;
-  /** 'approximate' means the position is snapped to a ~500m cell, so it should
-   * be drawn as an area rather than a point that looks exact. */
-  location_precision?: 'precise' | 'approximate';
-  /** Absent when the viewer is not allowed to see it — which is not the same
-   * as offline. Render nothing at all rather than a grey dot. */
-  presence?: Presence;
-  /** Coarse bucket, friends and connections only. Absent means no trail. */
-  motion_class?: MotionClass;
-}
-
-/** Only what the owner's own zone circle needs. Their own audio is no longer
- * surfaced on the map — see the zone-detection effect. */
-interface SelfZone {
-  zone_active: boolean;
-  zone_radius: number;
-  zone_mode: ZoneMode;
-  zone_region_id: number | null;
-  /** The music zone, drawn as its own ring. The owner is the one person who
-   *  cannot hear their own zone from the map, so seeing where the sound stops
-   *  is the only feedback they get — and it is the only place the radius they
-   *  set on Zone Music is visible at real scale. */
-  music_zone_radius: number;
-  /** Whether they have a music zone at all. Off means no ring: the zone has
-   *  been removed, not muted, so there is no edge left to mark. */
-  music_zone_active: boolean;
-  /** Whether there is a track at all. Nothing carries from an empty zone, so a
-   *  ring around one would mark the reach of silence. */
-  has_track: boolean;
-}
-
-interface ClubMeetup {
-  id: number;
-  club: number;
-  club_name: string;
-  club_emblem?: string;
-  created_by: { id: number; username: string; profile_picture?: string };
-  title: string;
-  description?: string;
-  location_name?: string;
-  latitude: number;
-  longitude: number;
-  event_datetime: string;
-  status: string;
-  expires_at: string;
-}
-
-interface MapNearbyResponse {
-  users: NearbyUser[];
-  stories: Story[];
-  meetups: ClubMeetup[];
-}
+// The payload shapes live in services/mapTypes so the hooks below can share
+// them without importing this screen back. Everything still local is a prop
+// bag for a component in this file.
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Ring colour carries the relationship, and nothing else does: blue is a
 // friend, orange is a connection, teal is a matched stranger. One colour per
 // state, used on the marker, in the sheet and on the zone.
-// COLOR_FRIEND / COLOR_CONNECTED / COLOR_STRANGER are computed inside MapScreen
-// using the dynamic theme — see below.
+// COLOR_FRIEND / COLOR_CONNECTED / COLOR_STRANGER are computed inside
+// `PeopleLayer` from the dynamic theme — see below.
 
 /** Matches APPROX_GRID_M on the server. */
 const APPROX_RADIUS_M = 500;
@@ -288,6 +187,24 @@ const Z_MEETUP  = 8;
  * worth pooling too if stale faces ever show up.
  */
 
+// ─── Two things this screen deliberately no longer does ───────────────────────
+/*
+ * Both used to live in the middle of MapScreen, as notes about code that had
+ * been taken out. They are here instead because they describe absences, and an
+ * absence has no line to sit next to.
+ *
+ * **Nearby people do not generate alerts.** They used to, from this screen —
+ * "@miras is nearby · 180m away", "@aisha shares your interests". Being
+ * somewhere is not an event, and the map already shows who is around. The
+ * markers are the whole of it now.
+ *
+ * **Zone audio is not the map's to play.** There is no screen-level sound, no
+ * autoplay when you cross into someone's circle, and nothing to stop on
+ * unmount: a friend's track is loaded by the player inside their card and
+ * unloaded when that card closes. Walking into a zone is an invitation, not a
+ * command to a stranger's phone speaker.
+ */
+
 const REL_LABEL: Record<Relationship, string> = {
   stranger:  'Nearby',
   hi_sent:   'Hi Sent',
@@ -295,40 +212,21 @@ const REL_LABEL: Record<Relationship, string> = {
   friend:    'Friend',
 };
 
-const POLL_MS            = 10_000;
-/** How still the camera must be before the marker layout reacts to a new zoom. */
-const ZOOM_SETTLE_MS     = 220;
-
-/** How far the sheet travels to get off screen — not its height, which sizes
- *  to content. Raised from 400 when the zone player moved into the card: a
- *  friend broadcasting a track makes the tallest card the sheet holds, and a
- *  travel distance shorter than the card leaves a sliver of it on screen. */
-const SHEET_H   = 560;
+// SHEET_H and SPRING_CFG describe the sheet animation and live with it, in
+// hooks/useMapSheets. Imported above; the drag handles below share them so a
+// flick and a programmatic dismiss settle identically.
 /** Travel for the story composer, which is its own `Modal` rather than one of
  *  the two sheets `SHEET_H` describes — see `CreateStoryModal`. Taller,
  *  because it holds a photo well and a keyboard-avoiding text field. */
 const STORY_SHEET_H = 620;
-const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
 
 // ── Locate control ──
-/** Street-level, close enough to tell which side of the road you're on. */
-const FOCUS_DELTA = 0.006;
-/** Long enough to read as travel between two places rather than a cut. */
-const RECENTER_MS = 450;
+// FOCUS_DELTA, RECENTER_MS and STALE_FIX_MS moved with the camera they drive,
+// into hooks/useMapLocation. What is left here is what the button *looks* like.
 const LOCATE_SIZE = 48;   // ≥ 44pt target
 /** Edge inset, used on the wheel. On the tab bar the button tracks the last
  *  tab instead — see `useNavAlignedRight`. Matches the top bar's padding. */
 const LOCATE_INSET = 20;
-/**
- * How old the last fix may be before recentering re-reads it rather than
- * trusting it. The watcher only fires every 10m, so a still user's fix is old
- * and correct — age is not shown as staleness anywhere, it only decides
- * whether to ask the OS again first. Coming back from a long backgrounding is
- * the case this exists for: the alternative is confidently centring on where
- * the phone was an hour ago.
- */
-const STALE_FIX_MS = 30_000;
-
 // Muted avatar hues from the redesign (hue1–hue6), dark text on top.
 const AVATAR_COLORS = ['#7FB8A4', '#A48FD1', '#C9A06B', '#8FA9D1', '#C98A8A', '#9BBF7F'];
 
@@ -359,76 +257,6 @@ function fmtTimeLeft(expiresAt: string): string {
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   return h > 0 ? `${h}h ${m}m remaining` : `${m}m remaining`;
-}
-
-/**
- * The radius of the viewer's own music-zone ring, or null for no ring.
- *
- * The same two conditions everyone else's ring gets, which is the point: what
- * the owner sees is what a friend standing next to them sees.
- *
- *  1. Is the music zone switched on? That switch is the whole feature now — on
- *     draws the circle, off removes it from this map and every other one.
- *  2. Is there a track? A music zone with nothing loaded is audible to nobody,
- *     and a ring around it would be marking the reach of silence. It also
- *     matters that the switch defaults to *on*: without this, everyone who has
- *     never opened Zone Music would find a circle around themselves for a
- *     feature they are not using.
- *
- * Not gated on `zone_active` or `zone_mode`. The map zone is a different
- * circle, drawn separately and answering a different question; the music zone
- * is always its own radius, never a city border it inherited.
- */
-function selfMusicZoneRing(zone: SelfZone | null): number | null {
-  if (!zone?.music_zone_active) return null;
-  if (!zone.has_track) return null;
-  if (!(zone.music_zone_radius > 0)) return null;
-  return zone.music_zone_radius;
-}
-
-
-/**
- * Widest span the layout will reason about, in degrees of latitude.
- *
- * Google Maps will happily zoom out to the whole globe, at which point a pixel
- * is worth tens of kilometres and `SELF_CLEAR_PX` worth of offset lands a badge
- * in another hemisphere — or past the poles, which is an invalid coordinate and
- * takes the native map down with it.
- */
-const MAX_ZOOM_DELTA = 2;
-
-/**
- * The zoom, rounded to half a power of two.
- *
- * The layout only needs a rough idea of how far out the camera is, and a
- * continuous value meant every marker re-rendered on every zoom event Android
- * emitted mid-pinch. Buckets reduce a whole pinch to a handful of updates.
- */
-function zoomBucket(latitudeDelta: number): number {
-  if (!Number.isFinite(latitudeDelta) || latitudeDelta <= 0) return 0.012;
-  const clamped = Math.min(Math.max(latitudeDelta, 0.0005), MAX_ZOOM_DELTA);
-  return 2 ** (Math.round(Math.log2(clamped) * 2) / 2);
-}
-
-/** Refuse to hand the native map a coordinate it can crash on.
- *
- * `Number.isFinite` does not coerce, so this also rejects the string
- * coordinates DRF sends for stories and meetups — which is precisely why
- * people's markers survived the New Architecture and those two did not. The
- * coercion in services/coords.ts is the real fix; this stays as the last gate
- * in front of the native view, and additionally rejects the polar latitudes
- * Mercator cannot project even though they are perfectly real places.
- *
- * Generic so `.filter(isDrawable)` narrows to the caller's own row type rather
- * than flattening it to a bare point. */
-function isDrawable<T extends GeoPoint>(p?: T | null): p is T {
-  return (
-    !!p &&
-    Number.isFinite(p.latitude) &&
-    Number.isFinite(p.longitude) &&
-    Math.abs(p.latitude) <= 85 &&
-    Math.abs(p.longitude) <= 180
-  );
 }
 
 /**
@@ -491,6 +319,117 @@ function useMarkerSettle(key: string, settleMs = 400) {
  * which is safe to show, because it is not really about them — it is the
  * overlap, and you already know your own half of it.
  */
+/**
+ * The word under a marker, with an optional coloured suffix.
+ *
+ * Shared by the dot and the avatar because they render the same thing for
+ * different reasons — "+2 more shared interests" on one, "· zone" on the other
+ * — and the caption has to keep the same height in both or a mixed map reads
+ * as two different kinds of pin.
+ */
+function MarkerCaption({ text, tag, tagColor }: {
+  text?: string;
+  tag?: string;
+  tagColor: string;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  if (!text) return null;
+  return (
+    <View style={styles.markerCaption}>
+      <Text style={styles.markerCaptionText} numberOfLines={1}>
+        {text}
+        {tag ? <Text style={[styles.markerCaptionTag, { color: tagColor }]}>{tag}</Text> : null}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * The picture inside an avatar marker's ring, or the coloured initial that
+ * stands in for it.
+ *
+ * `uri` arrives already blanked when a load has failed, so the fallback here is
+ * the single "no picture to show" path — a missing uri and a broken one look
+ * the same to the person reading the map.
+ */
+function AvatarFace({ uri, username, inner, onLoaded, onFailed }: {
+  uri?: string;
+  username: string;
+  inner: number;
+  onLoaded: (uri: string) => void;
+  onFailed: (uri: string) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const round = { width: inner, height: inner, borderRadius: inner / 2 };
+
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={round}
+        onLoad={() => onLoaded(uri)}
+        onError={() => onFailed(uri)}
+      />
+    );
+  }
+
+  return (
+    <View style={[styles.avatarMarkerFallback, round, { backgroundColor: avatarBgColor(username) }]}>
+      <Text style={styles.avatarMarkerInitial}>
+        {username ? username.charAt(0).toUpperCase() : '?'}
+      </Text>
+    </View>
+  );
+}
+
+/** What a stranger's dot announces to a screen reader. */
+function dotAccessibilityLabel(primary?: string, extra = 0): string {
+  if (!primary) return 'Someone nearby with a shared interest';
+  const more = extra > 0 ? `, and ${extra} more shared` : '';
+  return `Someone nearby who also likes ${primary}${more}`;
+}
+
+/**
+ * The lit disc itself: bloom, core and presence pip.
+ *
+ * Split from `DotMarker` so that component is only about where the marker sits
+ * and when it re-rasterizes, while this one is only about what it looks like.
+ */
+function DotGlyph({ color, haloH, presence, InterestIcon }: {
+  color: string;
+  haloH: number;
+  presence?: Presence;
+  InterestIcon: ReturnType<typeof iconForInterest> | null;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  return (
+    <View style={[styles.dotWrap, { width: haloH, height: haloH }]}>
+      {/* Two discs, not one: a wide faint bloom and a tighter brighter one,
+          which is what makes the dot read as lit from within rather than as
+          a flat circle sitting on the map. */}
+      <View style={[styles.dotBloom, { width: haloH, height: haloH, borderRadius: haloH / 2, backgroundColor: color }]} />
+      {InterestIcon ? (
+        <View style={[styles.dotIconCore, { borderColor: color, boxShadow: `0 0 5px ${withAlpha(color, 0.9)}` }]}>
+          {InterestIcon({ size: 13, color })}
+        </View>
+      ) : (
+        <>
+          <View style={[styles.dotGlow, { backgroundColor: color }]} />
+          <View style={[styles.userDot, { backgroundColor: color, boxShadow: `0 0 5px ${withAlpha(color, 0.9)}` }]} />
+        </>
+      )}
+      {/* Absent presence renders nothing — PresenceDot returns null — so a
+          hidden state never becomes a visible "offline". */}
+      <View style={[styles.dotPresence, InterestIcon && styles.dotPresenceIcon]}>
+        <PresenceDot presence={presence} size={8} haloColor={colors.bg} />
+      </View>
+    </View>
+  );
+}
+
 function DotMarker({
   coordinate, color, presence, zIndex, sharedInterests, showCaption = true, parked, onPress,
 }: {
@@ -543,51 +482,24 @@ function DotMarker({
       tracksViewChanges={settling}
       opacity={parked ? 0 : 1}
       zIndex={zIndex}
-      accessibilityLabel={
-        parked
-          ? undefined
-          : primary
-            ? `Someone nearby who also likes ${primary}${extra > 0 ? `, and ${extra} more shared` : ''}`
-            : 'Someone nearby with a shared interest'
-      }
+      accessibilityLabel={parked ? undefined : dotAccessibilityLabel(primary, extra)}
       onPress={parked ? undefined : onPress}
     >
       {parked ? <View style={styles.parkedMarker} /> : (
       /* Android clips marker children to their parent box when it rasterizes,
          so the halo and the caption both have to live inside this column. */
       <View style={styles.dotColumn}>
-        <View style={[styles.dotWrap, { width: haloH, height: haloH }]}>
-          {/* Two discs, not one: a wide faint bloom and a tighter brighter one,
-              which is what makes the dot read as lit from within rather than as
-              a flat circle sitting on the map. */}
-          <View style={[styles.dotBloom, { width: haloH, height: haloH, borderRadius: haloH / 2, backgroundColor: color }]} />
-          {InterestIcon ? (
-            <View style={[styles.dotIconCore, { borderColor: color, boxShadow: `0 0 5px ${withAlpha(color, 0.9)}` }]}>
-              {InterestIcon({ size: 13, color })}
-            </View>
-          ) : (
-            <>
-              <View style={[styles.dotGlow, { backgroundColor: color }]} />
-              <View style={[styles.userDot, { backgroundColor: color, boxShadow: `0 0 5px ${withAlpha(color, 0.9)}` }]} />
-            </>
-          )}
-          {/* Absent presence renders nothing — PresenceDot returns null — so a
-              hidden state never becomes a visible "offline". */}
-          <View style={[styles.dotPresence, primary && styles.dotPresenceIcon]}>
-            <PresenceDot presence={presence} size={8} haloColor={colors.bg} />
-          </View>
-        </View>
-
-        {captionText ? (
-          <View style={styles.markerCaption}>
-            <Text style={styles.markerCaptionText} numberOfLines={1}>
-              {captionText}
-              {extra > 0 ? (
-                <Text style={[styles.markerCaptionTag, { color }]}>{` +${extra}`}</Text>
-              ) : null}
-            </Text>
-          </View>
-        ) : null}
+        <DotGlyph
+          color={color}
+          haloH={haloH}
+          presence={presence}
+          InterestIcon={InterestIcon}
+        />
+        <MarkerCaption
+          text={captionText}
+          tag={extra > 0 ? ` +${extra}` : undefined}
+          tagColor={color}
+        />
       </View>
       )}
     </Marker>
@@ -707,41 +619,26 @@ function AvatarMarker({
          it rasterizes, so the caption has to live inside it. */
       <View style={styles.avatarMarkerWrap}>
         <View style={[styles.avatarMarkerRing, { width: size, height: size, borderRadius: size / 2, borderColor: ringColor }]}>
-          {uri && !imageFailed ? (
-            <Image
-              source={{ uri }}
-              style={{ width: inner, height: inner, borderRadius: inner / 2 }}
-              onLoad={() => {
-                loadedAvatars.add(uri);
-                setTimeout(() => setLoad({ uri, ready: true, failed: false }), 250);
-              }}
-              onError={() => setLoad({ uri, ready: true, failed: true })}
-            />
-          ) : (
-            <View
-              style={[
-                styles.avatarMarkerFallback,
-                { width: inner, height: inner, borderRadius: inner / 2, backgroundColor: avatarBgColor(username) },
-              ]}
-            >
-              <Text style={styles.avatarMarkerInitial}>{username ? username.charAt(0).toUpperCase() : '?'}</Text>
-            </View>
-          )}
+          <AvatarFace
+            uri={imageFailed ? undefined : uri}
+            username={username}
+            inner={inner}
+            onLoaded={(loadedUri) => {
+              loadedAvatars.add(loadedUri);
+              setTimeout(() => setLoad({ uri: loadedUri, ready: true, failed: false }), 250);
+            }}
+            onFailed={(failedUri) => setLoad({ uri: failedUri, ready: true, failed: true })}
+          />
           <View style={styles.markerPresence}>
             <PresenceDot presence={presence} size={10} haloColor={colors.bg} />
           </View>
         </View>
 
-        {caption ? (
-          <View style={styles.markerCaption}>
-            <Text style={styles.markerCaptionText} numberOfLines={1}>
-              {caption}
-              {captionTag ? (
-                <Text style={[styles.markerCaptionTag, { color: ringColor }]}>{` · ${captionTag}`}</Text>
-              ) : null}
-            </Text>
-          </View>
-        ) : null}
+        <MarkerCaption
+          text={caption}
+          tag={captionTag ? ` · ${captionTag}` : undefined}
+          tagColor={ringColor}
+        />
       </View>
       )}
     </Marker>
@@ -1040,15 +937,8 @@ function StoryMarker({ stories, onPress }: { stories: Story[]; onPress: () => vo
 }
 
 // ─── Locate control ───────────────────────────────────────────────────────────
-type LocateState =
-  /** Camera is free — wherever the user last left it. */
-  | 'off'
-  /** Camera tracks each new fix. */
-  | 'following'
-  /** No fix yet, or one is being resolved. */
-  | 'locating'
-  /** No permission, so there is nothing to centre on. */
-  | 'unavailable';
+// `LocateState` itself lives with the camera it describes, in
+// hooks/useMapLocation — this is only what the button draws for each state.
 
 /** Written as what tapping does, since that is what changes on activation. */
 const LOCATE_LABEL: Record<LocateState, string> = {
@@ -1543,6 +1433,228 @@ interface SheetProps {
 // music zone could be a city border, so "are you inside it" was a
 // point-in-polygon question. A music zone is always a circle now, and a scalar
 // distance answers it.
+/**
+ * What the viewer is to this person, and what that entitles them to see.
+ *
+ * `identified` is the load-bearing one: below a mutual Hi there is no name and
+ * no face on the card, because the map showed a point and the card has to agree
+ * with the map or the point was never really anonymous.
+ */
+function describeRelationship(rel: Relationship, colors: ColorPalette) {
+  const isFriend = rel === 'friend';
+  const isConnected = rel === 'connected';
+  return {
+    isFriend,
+    isConnected,
+    isHiSent: rel === 'hi_sent',
+    isStranger: rel === 'stranger',
+    identified: isFriend || isConnected,
+    ringColor: isFriend ? colors.blue : isConnected ? colors.orange : colors.t3,
+    labelColor: isFriend ? colors.blue : isConnected ? colors.orange : colors.t2,
+  };
+}
+
+type RelationshipInfo = ReturnType<typeof describeRelationship>;
+
+/**
+ * Identity row: who, how far, and what they are to you — one line of each, read
+ * left to right. The old sheet stacked this centred over 400px, which pushed
+ * the actions below the fold on small screens.
+ */
+function UserSheetHead({ user, rel, info, metaLine }: {
+  user: NearbyUser;
+  rel: Relationship;
+  info: RelationshipInfo;
+  metaLine: string;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+
+  return (
+    <View style={styles.sheetHead}>
+      {info.identified ? (
+        <Avatar
+          uri={user.profile_picture}
+          name={user.username}
+          size="md"
+          ringColor={info.ringColor}
+          presence={user.presence}
+        />
+      ) : (
+        // The marker, enlarged. A stranger is a point of light here too.
+        <View style={styles.strangerAvatar}>
+          <View style={styles.strangerAvatarGlow} />
+          <View style={styles.strangerAvatarCore} />
+        </View>
+      )}
+
+      <View style={styles.sheetHeadBody}>
+        <Text style={styles.sheetName} numberOfLines={1}>
+          {info.identified ? user.username : 'Someone nearby'}
+        </Text>
+        {metaLine ? (
+          <Text style={styles.sheetMeta} numberOfLines={1}>{metaLine}</Text>
+        ) : null}
+      </View>
+
+      <View style={[styles.relPill, { borderColor: info.ringColor }]}>
+        <Text style={[styles.relPillText, { color: info.labelColor }]}>
+          {REL_LABEL[rel] ?? 'Nearby'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Presence and motion were badges in the meta row and are now a single quiet
+ * line — still spelled out in words, because the trail on the map is decorative
+ * and hidden from assistive tech.
+ */
+function UserSheetStatus({ user }: { user: NearbyUser }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const motion = motionLabel(user.motion_class);
+
+  if (!user.presence && !motion) return null;
+  return (
+    <View style={styles.statusRow}>
+      {user.presence && <PresenceDot presence={user.presence} size={8} withText />}
+      {motion && (
+        <Text style={styles.statusMotion} accessible accessibilityLabel={motion}>
+          {user.motion_class === 'fast' ? 'Moving fast' : 'On the move'}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/**
+ * Their zone track, on the person it belongs to — the map used to float this
+ * over everything as a banner, which is how it ended up playing to people who
+ * had never asked for it.
+ */
+function UserSheetZone({ user, zoneUrl }: { user: NearbyUser; zoneUrl: string }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+
+  const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
+  // Their music zone, which is always a circle — never the city border their
+  // *map* zone might be. A region is a shape, not a distance, and comparing a
+  // radius against one was wrong in both directions: someone 3km away can be
+  // well inside a city while someone 300m away across the boundary is outside.
+  // The music zone having its own radius is what removed that problem.
+  const musicRadius = user.music_zone_radius && user.music_zone_radius > 0
+    ? user.music_zone_radius
+    : 200;
+  const zoneLabel = fmtRadius(musicRadius);
+  // Unknown position is not "out of range" — a card that refuses to play with
+  // no reason it can name is worse than one that plays a track you can hear.
+  const insideZone = distanceM == null || distanceM < musicRadius;
+
+  return (
+    <View style={styles.zoneSection}>
+      <Text style={styles.sectionLabel}>Zone music</Text>
+      <ZonePlayer
+        // Remounts per track, so switching between two friends' cards
+        // cannot leave the previous one loaded.
+        key={zoneUrl}
+        url={zoneUrl}
+        // An Apple track knows its own name and artist; an upload is
+        // still named from the URL, which for Apple's CDN would be a
+        // hash.
+        title={user.zone_track_title || trackTitle(zoneUrl)}
+        artwork={user.zone_track_artwork}
+        startMs={user.zone_track_start_ms ?? 0}
+        endMs={user.zone_track_end_ms ?? null}
+        subtitle={
+          [
+            user.zone_track_artist || `@${user.username}`,
+            insideZone
+              ? `inside their ${zoneLabel} music zone`
+              : `${zoneLabel} music zone`,
+          ].join(' · ')
+        }
+        blockedReason={
+          insideZone
+            ? null
+            : `Out of range — step within ${zoneLabel} of them to listen`
+        }
+        accessibilityName={`${user.username}'s zone track`}
+      />
+      <View style={styles.zoneNote}>
+        <IconLock size={12} color={colors.t3} />
+        <Text style={styles.zoneNoteText}>
+          Audible to their friends only. It stays silent until you press play.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * One decision, then a way out of it. The primary action is wide and the
+ * dismiss is a square beside it, so the choice a stranger card offers reads as
+ * "yes, or nothing".
+ */
+function UserSheetActions({ info, requestSent, onAddFriend, onHi, onMessage, onProfile, onDismiss }: {
+  info: RelationshipInfo;
+  requestSent: boolean;
+  onAddFriend: () => void;
+  onHi: () => void;
+  onMessage: () => void;
+  onProfile: () => void;
+  onDismiss: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+
+  return (
+    <>
+      {/* Connections can be promoted to friends right from the map; the
+          server rejects friend requests to anyone not connected yet. */}
+      {info.isConnected && (
+        <View style={styles.addFriendRow}>
+          <Button
+            label={requestSent ? 'Friend Request Sent ✓' : 'Add Friend'}
+            variant={requestSent ? 'secondary' : 'primary'}
+            size="md"
+            fullWidth
+            disabled={requestSent}
+            onPress={onAddFriend}
+          />
+        </View>
+      )}
+
+      <View style={styles.actions}>
+        <View style={styles.actionPrimary}>
+          {info.isStranger && (
+            <Button label="Say Hi" variant="primary" size="md" fullWidth onPress={onHi} />
+          )}
+          {info.isHiSent && (
+            <Button label="Hi Sent ✓" variant="secondary" size="md" fullWidth disabled />
+          )}
+          {info.identified && (
+            <Button label="Message" variant="primary" size="md" fullWidth onPress={onMessage} />
+          )}
+        </View>
+        <View style={styles.actionSecondary}>
+          <Button label="Profile" variant="ghost" size="md" fullWidth onPress={onProfile} />
+        </View>
+        <Pressable
+          onPress={onDismiss}
+          style={styles.actionDismiss}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss"
+        >
+          <IconClose size={16} color={colors.t3} />
+        </Pressable>
+      </View>
+    </>
+  );
+}
+
 function UserSheet({
   user, sheetY, onDismiss, onFriendChange,
 }: SheetProps) {
@@ -1555,15 +1667,9 @@ function UserSheet({
   }));
   const drag = useSheetDrag({ sheetY, height: SHEET_H, onDismiss, spring: SPRING_CFG });
 
-  const rel         = user.relationship ?? 'stranger';
-  const isFriend    = rel === 'friend';
-  const isConnected = rel === 'connected';
-  const isHiSent    = rel === 'hi_sent';
-  const isStranger  = rel === 'stranger';
-
-  const relRingColor  = isFriend ? colors.blue : isConnected ? colors.orange : colors.t3;
-  const relLabelColor = isFriend ? colors.blue : isConnected ? colors.orange : colors.t2;
-  const dist          = fmtDistance(user.distance);
+  const rel  = user.relationship ?? 'stranger';
+  const info = describeRelationship(rel, colors);
+  const dist = fmtDistance(user.distance);
 
   // The sheet stays mounted when tapping straight to another marker, so "sent"
   // has to mean "sent to *this* person". Recording who it was sent to says that
@@ -1596,16 +1702,10 @@ function UserSheet({
     router.push({ pathname: '/profile/[id]', params: { id: user.id, username: user.username } });
   }
 
-  // Whether this person's identity is ours to show. Below a mutual Hi there is
-  // no name and no face on this card — the map showed a point, and the card has
-  // to agree with the map or the point was never really anonymous.
-  const identified = isFriend || isConnected;
-
   // Friends and connections get the real number; a stranger gets a band.
-  const distLine = identified ? dist : distanceBand(user.distance);
-  const zoneLine = identified && user.zone_audio_url ? 'has a music zone' : null;
+  const distLine = info.identified ? dist : distanceBand(user.distance);
+  const zoneLine = info.identified && user.zone_audio_url ? 'has a music zone' : null;
   const metaLine = [distLine, zoneLine].filter(Boolean).join(' · ');
-
 
   // ── Their zone track ──
   // The server only sends zone_audio_url to viewers allowed to hear it —
@@ -1617,20 +1717,7 @@ function UserSheet({
   // The track is its own switch. `zone_active` governs whether they are drawn
   // with a zone on the map, and reading it here is what made turning that
   // circle off silently mute a song its owner had not touched.
-  const zoneUrl = identified ? user.zone_audio_url : undefined;
-  const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
-  // Their music zone, which is always a circle — never the city border their
-  // *map* zone might be. A region is a shape, not a distance, and comparing a
-  // radius against one was wrong in both directions: someone 3km away can be
-  // well inside a city while someone 300m away across the boundary is outside.
-  // The music zone having its own radius is what removed that problem.
-  const musicRadius = user.music_zone_radius && user.music_zone_radius > 0
-    ? user.music_zone_radius
-    : 200;
-  const zoneLabel = fmtRadius(musicRadius);
-  // Unknown position is not "out of range" — a card that refuses to play with
-  // no reason it can name is worse than one that plays a track you can hear.
-  const insideZone = distanceM == null || distanceM < musicRadius;
+  const zoneUrl = info.identified ? user.zone_audio_url : undefined;
 
   return (
     <>
@@ -1642,106 +1729,16 @@ function UserSheet({
           </View>
         </GestureDetector>
 
-        {/* Identity row: who, how far, and what they are to you — one line of
-            each, read left to right. The old sheet stacked this centred over
-            400 px, which pushed the actions below the fold on small screens. */}
-        <View style={styles.sheetHead}>
-          {identified ? (
-            <Avatar
-              uri={user.profile_picture}
-              name={user.username}
-              size="md"
-              ringColor={relRingColor}
-              presence={user.presence}
-            />
-          ) : (
-            // The marker, enlarged. A stranger is a point of light here too.
-            <View style={styles.strangerAvatar}>
-              <View style={styles.strangerAvatarGlow} />
-              <View style={styles.strangerAvatarCore} />
-            </View>
-          )}
+        <UserSheetHead user={user} rel={rel} info={info} metaLine={metaLine} />
 
-          <View style={styles.sheetHeadBody}>
-            <Text style={styles.sheetName} numberOfLines={1}>
-              {identified ? user.username : 'Someone nearby'}
-            </Text>
-            {metaLine ? (
-              <Text style={styles.sheetMeta} numberOfLines={1}>{metaLine}</Text>
-            ) : null}
-          </View>
+        <UserSheetStatus user={user} />
 
-          <View style={[styles.relPill, { borderColor: relRingColor }]}>
-            <Text style={[styles.relPillText, { color: relLabelColor }]}>
-              {REL_LABEL[rel] ?? 'Nearby'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Presence and motion were badges in the meta row and are now a single
-            quiet line — still spelled out in words, because the trail on the map
-            is decorative and hidden from assistive tech. */}
-        {(user.presence || motionLabel(user.motion_class)) && (
-          <View style={styles.statusRow}>
-            {user.presence && <PresenceDot presence={user.presence} size={8} withText />}
-            {motionLabel(user.motion_class) && (
-              <Text
-                style={styles.statusMotion}
-                accessible
-                accessibilityLabel={motionLabel(user.motion_class)!}
-              >
-                {user.motion_class === 'fast' ? 'Moving fast' : 'On the move'}
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* Their zone, on the person it belongs to — the map used to float this
-            over everything as a banner, which is how it ended up playing to
-            people who had never asked for it. */}
-        {zoneUrl && (
-          <View style={styles.zoneSection}>
-            <Text style={styles.sectionLabel}>Zone music</Text>
-            <ZonePlayer
-              // Remounts per track, so switching between two friends' cards
-              // cannot leave the previous one loaded.
-              key={zoneUrl}
-              url={zoneUrl}
-              // An Apple track knows its own name and artist; an upload is
-              // still named from the URL, which for Apple's CDN would be a
-              // hash.
-              title={user.zone_track_title || trackTitle(zoneUrl)}
-              artwork={user.zone_track_artwork}
-              startMs={user.zone_track_start_ms ?? 0}
-              endMs={user.zone_track_end_ms ?? null}
-              subtitle={
-                [
-                  user.zone_track_artist || `@${user.username}`,
-                  insideZone
-                    ? `inside their ${zoneLabel} music zone`
-                    : `${zoneLabel} music zone`,
-                ].join(' · ')
-              }
-              blockedReason={
-                insideZone
-                  ? null
-                  : `Out of range — step within ${zoneLabel} of them to listen`
-              }
-              accessibilityName={`${user.username}'s zone track`}
-            />
-            <View style={styles.zoneNote}>
-              <IconLock size={12} color={colors.t3} />
-              <Text style={styles.zoneNoteText}>
-                Audible to their friends only. It stays silent until you press play.
-              </Text>
-            </View>
-          </View>
-        )}
+        {zoneUrl && <UserSheetZone user={user} zoneUrl={zoneUrl} />}
 
         {user.shared_interests && user.shared_interests.length > 0 && (
           <View style={styles.interestsSection}>
             <Text style={styles.sectionLabel}>
-              {identified ? 'Shared interests' : 'You both like'}
+              {info.identified ? 'Shared interests' : 'You both like'}
             </Text>
             <FlatList
               horizontal
@@ -1758,53 +1755,19 @@ function UserSheet({
           </View>
         )}
 
-        {/* Connections can be promoted to friends right from the map; the
-            server rejects friend requests to anyone not connected yet. */}
-        {isConnected && (
-          <View style={styles.addFriendRow}>
-            <Button
-              label={requestSent ? 'Friend Request Sent ✓' : 'Add Friend'}
-              variant={requestSent ? 'secondary' : 'primary'}
-              size="md"
-              fullWidth
-              disabled={requestSent}
-              onPress={sendFriendRequest}
-            />
-          </View>
-        )}
-
-        {/* One decision, then a way out of it. The primary action is wide and
-            the dismiss is a square beside it, so the choice a stranger card
-            offers reads as "yes, or nothing". */}
-        <View style={styles.actions}>
-          <View style={styles.actionPrimary}>
-            {isStranger && (
-              <Button label="Say Hi" variant="primary" size="md" fullWidth onPress={sendHi} />
-            )}
-            {isHiSent && (
-              <Button label="Hi Sent ✓" variant="secondary" size="md" fullWidth disabled />
-            )}
-            {identified && (
-              <Button label="Message" variant="primary" size="md" fullWidth onPress={goToMessages} />
-            )}
-          </View>
-          <View style={styles.actionSecondary}>
-            <Button label="Profile" variant="ghost" size="md" fullWidth onPress={goToProfile} />
-          </View>
-          <Pressable
-            onPress={onDismiss}
-            style={styles.actionDismiss}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss"
-          >
-            <IconClose size={16} color={colors.t3} />
-          </Pressable>
-        </View>
+        <UserSheetActions
+          info={info}
+          requestSent={requestSent}
+          onAddFriend={sendFriendRequest}
+          onHi={sendHi}
+          onMessage={goToMessages}
+          onProfile={goToProfile}
+          onDismiss={onDismiss}
+        />
 
         {/* Says out loud what the card is already doing. Someone deciding
             whether to send a Hi is deciding how much of themselves it costs. */}
-        {isStranger && (
+        {info.isStranger && (
           <Text style={styles.sheetFootnote}>
             They see the same shared interests — and nothing else about you.
           </Text>
@@ -1814,538 +1777,801 @@ function UserSheet({
   );
 }
 
+// ─── Map layers ───────────────────────────────────────────────────────────────
+/*
+ * The three groups of children the map draws, in draw order: the circles
+ * underneath, the people standing in them, and the pins for things rather than
+ * people. Split out of the screen's own `return` because that return had grown
+ * past the point where the order was legible — which is the one property this
+ * JSX has to make obvious, since every z-index on this map is decided by it.
+ *
+ * Each is a plain function returning a fragment, so the children the native map
+ * receives are exactly the ones it received before: same elements, same keys,
+ * same order. That matters more here than anywhere else in the app — see
+ * PARKED_MARKERS.
+ */
+
+type MapStyles = ReturnType<typeof makeStyles>;
+
+/** Circles: music rings, the viewer's own zone, and the chips that name them. */
+function ZoneLayer({
+  musicZones, musicBadges, musicBadgeSlotIds, selfZone, selfZoneRings, displayCoords, colors,
+}: {
+  musicZones: MusicZone[];
+  musicBadges: (MusicZone | null)[];
+  musicBadgeSlotIds: string[];
+  selfZone: SelfZone | null;
+  selfZoneRings: GeoPoint[][];
+  displayCoords: GeoPoint;
+  colors: ColorPalette;
+}) {
+  return (
+    <>
+      {/* Other people's detection zones are deliberately not drawn.
+          A zone is a radar: it decides who *its owner* can find. Seeing a
+          stranger's radar tells you nothing you can act on — you are on it
+          or you are not, and either way the answer is already the fact that
+          they are on your screen. What it did do was fill the map with
+          overlapping teal circles, one per person, until the only thing
+          legible was the circles.
+          Your own zone is below, because that one is a tool: it is the
+          reach you are tuning when you change its size. And music zones
+          stay, because those answer a question you can act on — walk
+          inside one and you can hear what is playing. */}
+
+      {/* Music zones. Someone else's ring is drawn when the viewer is
+          allowed to hear their track; the viewer's own whenever they have
+          a music zone switched on — see `selfMusicZoneRing`. A ring means
+          "the music stops here", so a zone that has been switched off has
+          no ring, on the owner's map or anyone else's.
+          A hairline and nothing else. What identifies it as *music* is the
+          badge on its edge, not the stroke — the map already has circles in
+          this colour, and shouting with opacity would only have made a
+          louder anonymous ring. Not dashed either: `lineDashPattern` on a
+          Circle is Apple-Maps-only and this map is PROVIDER_GOOGLE, so the
+          dashes would silently never appear. */}
+      {/* Colours come from the palette, not from literals.
+          Somebody else's ring used to be a hardcoded rgba(31,199,182) —
+          the *dark* theme's teal — so on the light map it stayed a pale
+          teal thread over a near-white basemap and simply could not be
+          seen. The light palette answers `teal` with a strong orange, the
+          same colour those people's markers already use, so taking the hue
+          from `colors` fixes the contrast and makes the ring match the dots
+          it belongs to. Dark mode is unchanged. */}
+      {musicZones.map(({ key, center, radius, color }) => (
+        <Circle
+          key={key}
+          center={center}
+          radius={radius}
+          fillColor="transparent"
+          strokeColor={withAlpha(color, 0.6)}
+          strokeWidth={1.5}
+        />
+      ))}
+
+      {/* Own zone.
+          One polygon per *piece*, not per ring: a region straddling the
+          ±180 meridian is cut in two there, so it draws as the island group
+          it is instead of as a band stretched around the planet. Regions
+          that do not cross come back as a single piece, unchanged. */}
+      {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
+        ? selfZoneRings.map((piece) => (
+            <Polygon
+              // Keyed on where the piece starts: the split is deterministic,
+              // so a piece keeps its identity until the region itself moves.
+              key={`self-zone-${piece[0].latitude},${piece[0].longitude}`}
+              coordinates={piece}
+              fillColor={withAlpha(colors.purple, 0.05)}
+              strokeColor={withAlpha(colors.purple, 0.35)}
+              strokeWidth={1.5}
+            />
+          ))
+        : selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
+          <Circle
+            center={displayCoords}
+            radius={selfZone.zone_radius}
+            fillColor={withAlpha(colors.purple, 0.07)}
+            strokeColor={withAlpha(colors.purple, 0.35)}
+            strokeWidth={1.5}
+          />
+        )}
+
+      {/* The chip that says which ring is which — literally, now: a
+          friend's ring is labelled with their @name and drawn in their own
+          colour, so two overlapping circles are two people rather than one
+          anonymous smudge. Drawn after every circle so it sits on top of
+          them, and skipped when the ring is too small on screen for a label
+          to mean anything. Your own is included: where your music stops is
+          the one thing you cannot check by listening.
+          Slotted, and a spare slot goes transparent rather than unmounting
+          — see PARKED_MARKERS. A zone switched off has to take its chip
+          with its circle, and an unmounted Marker does not reliably go. */}
+      {musicBadges.map((z, i) => (
+        <MusicZoneBadge
+          key={musicBadgeSlotIds[i]}
+          center={z?.center ?? displayCoords}
+          radius={z?.radius ?? 0}
+          mine={z?.mine}
+          label={z?.label ?? ''}
+          color={z?.color ?? colors.purple}
+          parked={!z}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * One person on the map, as either a face or a lit point.
+ *
+ * Anyone you have a name for gets a face and a name plate — blue ring for a
+ * friend, orange for a connection. Strangers stay a lit point: no photo, no
+ * name, nothing to screenshot, until the Hi is mutual and they cross into the
+ * row above.
+ */
+function PersonMarker({ user, layout, isFriend, isConnected, color, onPress }: {
+  user: NearbyUser;
+  /** Absent means this person was folded into a headcount badge. */
+  layout: FanResult | undefined;
+  isFriend: boolean;
+  isConnected: boolean;
+  color: string;
+  onPress: () => void;
+}) {
+  // Absent from `placed` means this person was folded into a headcount
+  // badge. Drawing them as well would put two of them on the map — so
+  // the marker parks: transparent, untappable, still mounted. The
+  // unmount it replaces is the one that left a face behind under the
+  // badge on every pinch. See PARKED_MARKERS.
+  const truePos = { latitude: user.latitude, longitude: user.longitude };
+  const parked = !layout || !isDrawable(layout.position);
+  // Nowhere legal to stand at all: the one case still worth skipping,
+  // since a Marker needs a coordinate the native map can survive.
+  if (parked && !isDrawable(truePos)) return null;
+  const position = parked ? truePos : layout!.position;
+
+  return isFriend || isConnected ? (
+    <AvatarMarker
+      coordinate={position}
+      parked={parked}
+      uri={user.profile_picture}
+      username={user.username}
+      ringColor={color}
+      presence={user.presence}
+      motion={user.motion_class}
+      // Dropped when this marker shares its spot: the fan separates
+      // rings, and a name chip is wider than the ring it hangs under.
+      caption={layout?.crowded ? undefined : user.username}
+      // Friends and connections both have zone access. The tag
+      // marks a track you can play, so it follows the track rather
+      // than the map-zone switch.
+      captionTag={!layout?.crowded && user.zone_audio_url ? 'zone' : undefined}
+      zIndex={Z_FRIEND}
+      onPress={onPress}
+    />
+  ) : (
+    <DotMarker
+      coordinate={position}
+      parked={parked}
+      color={color}
+      presence={user.presence}
+      sharedInterests={user.shared_interests}
+      // The interest *name* is this marker's caption and the widest
+      // thing it draws — four of them stacked down a street is what
+      // made the map unreadable. The glyph inside the dot still says
+      // which interest it is, so only the word goes.
+      showCaption={!layout?.crowded}
+      zIndex={Z_STRANGER}
+      onPress={onPress}
+    />
+  );
+}
+
+/** People: the approximate haze, their trails, the fan's leader lines, the
+ *  markers themselves, the headcounts that stand in for a pile, and you. */
+function PeopleLayer({
+  visibleNearby, motionTrails, reduceMotion, leaders, leaderSlotIds, markerLayout,
+  badges, badgeSlotIds, friendIds, connectionIds, colors, displayCoords, selfProfile,
+  ghost, posFor, onOpenSheet, onZoomToCluster,
+}: {
+  visibleNearby: NearbyUser[];
+  motionTrails: ReturnType<typeof useMotionTrails>;
+  reduceMotion: boolean;
+  leaders: ([GeoPoint, GeoPoint] | null)[];
+  leaderSlotIds: string[];
+  markerLayout: MarkerLayout;
+  badges: (ClusterResult | null)[];
+  badgeSlotIds: string[];
+  friendIds: Set<number>;
+  connectionIds: Set<number>;
+  colors: ColorPalette;
+  displayCoords: GeoPoint;
+  selfProfile: { username: string; profile_picture?: string } | null;
+  ghost: boolean | null | undefined;
+  posFor: (key: string, fallback: GeoPoint) => GeoPoint;
+  onOpenSheet: (user: NearbyUser) => void;
+  onZoomToCluster: (center: GeoPoint) => void;
+}) {
+  // Ring colour carries the relationship, and nothing else does.
+  const COLOR_FRIEND    = colors.blue;
+  const COLOR_CONNECTED = colors.orange;
+  const COLOR_STRANGER  = colors.teal;
+
+  return (
+    <>
+      {/* Approximate sharers get a haze instead of a precise-looking pin —
+          the marker would otherwise imply accuracy the data doesn't have. */}
+      {visibleNearby.reduce<ReactNode[]>((circles, u) => {
+        if (u.location_precision === 'approximate' && u.latitude != null && u.longitude != null) {
+          circles.push(
+            <Circle
+              key={`approx-${u.id}`}
+              center={{ latitude: u.latitude, longitude: u.longitude }}
+              radius={APPROX_RADIUS_M}
+              fillColor="rgba(244,244,246,0.06)"
+              strokeColor="rgba(244,244,246,0.18)"
+              strokeWidth={1}
+            />,
+          );
+        }
+        return circles;
+      }, [])}
+
+      {/* Speed trails, drawn before the markers so they sit underneath and
+          read as something the avatar is leaving behind. Only ever built
+          from positions already observed — never extrapolated ahead of the
+          last known point, which on a 10s poll is already stale. */}
+      {Array.from(motionTrails.entries()).map(([id, path]) => (
+        <MotionTrail key={`trail-${id}`} path={path} reduceMotion={reduceMotion} />
+      ))}
+
+      {/* Leader lines back to the spot a moved marker really occupies.
+          Without them the fan would quietly claim that people sitting at
+          one table are tens of metres apart. Drawn under the markers.
+          Slotted, and a spare slot collapses onto the owner's own point in
+          full transparency rather than unmounting — see PARKED_MARKERS. */}
+      {leaders.map((line, i) => (
+        <Polyline
+          key={leaderSlotIds[i]}
+          coordinates={line ?? [displayCoords, displayCoords]}
+          strokeColor={line ? 'rgba(244,244,246,0.28)' : 'transparent'}
+          strokeWidth={1}
+          lineDashPattern={[3, 3]}
+          zIndex={2}
+        />
+      ))}
+
+      {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
+        const uid = Number(user.id);
+        const isFriend = friendIds.has(uid);
+        const isConnected = connectionIds.has(uid);
+        return (
+          <PersonMarker
+            key={user.id}
+            user={user}
+            layout={markerLayout.placed.get(`u-${user.id}`)}
+            isFriend={isFriend}
+            isConnected={isConnected}
+            color={isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_STRANGER}
+            onPress={() => onOpenSheet(user)}
+          />
+        );
+      })}
+
+      {/* No self-fuzz circle any more. It existed to stop an Approximate
+          sharer being shown a precise dot they had asked us not to publish;
+          precision is the viewer's relationship now, the owner is always on
+          the precise side of it, and a circle here would describe a
+          blurring that no longer applies to them. What a stranger sees is
+          drawn on the stranger's map, from the cell the server sends. */}
+
+      {/* Piles that could not be fanned apart without moving someone too far
+          — which is what zooming out does to a pixel-sized fan. A number
+          instead, and a tap to go in and see who.
+          Slots, not badges: zooming back in empties a slot rather than
+          removing it, because a removed badge is the one that stayed on the
+          map on top of the faces it had been standing in for. An empty slot
+          parks on the owner's own point, where it is invisible, one pixel
+          wide and deaf to taps. See PARKED_MARKERS. */}
+      {badges.map((cluster, i) => (
+        <ClusterMarker
+          key={badgeSlotIds[i]}
+          coordinate={cluster ? cluster.position : displayCoords}
+          count={cluster ? cluster.count : 0}
+          parked={!cluster}
+          onPress={cluster ? () => onZoomToCluster(cluster.anchor ?? cluster.position) : undefined}
+        />
+      ))}
+
+      {/* Never moved, and never folded into a count. When someone stands
+          where you stand, they are the one who gets fanned aside — so this
+          marker, and the zone centred on it, stay exactly where you are. */}
+      <SelfMarker
+        coordinate={posFor(SELF_KEY, displayCoords)}
+        uri={selfProfile?.profile_picture}
+        username={selfProfile?.username ?? ''}
+        // Drawn muted while Paused, because the owner's own marker is the
+        // only thing on this screen that could be read as "this is what
+        // everyone else sees". While paused it is not — nobody sees it —
+        // and the map should say so where the question is being asked.
+        hidden={ghost === true}
+      />
+    </>
+  );
+}
+
+/** Pins for things rather than people: story bubbles and club meetups. */
+function PinsLayer({ storiesByAuthor, clubMeetups, onOpenStories, onOpenMeetup }: {
+  storiesByAuthor: Map<number, Story[]>;
+  clubMeetups: ClubMeetup[];
+  onOpenStories: (stories: Story[]) => void;
+  onOpenMeetup: (meetup: ClubMeetup) => void;
+}) {
+  return (
+    <>
+      {/* `isDrawable` as well as the numeric coercion at the boundary: the
+          two answer different questions. services/coords.ts guarantees a
+          real coordinate; this guarantees one Google's Mercator projection
+          can actually place, which stops above ±85°. People's markers have
+          always been filtered this way — stories and meetups were not, and
+          were the two that could reach the native map unchecked. */}
+      {Array.from(storiesByAuthor).reduce<ReactNode[]>((markers, [authorId, authorStories]) => {
+        if (isDrawable(authorStories[0])) {
+          // Keyed by author alone. It used to include the newest story id
+          // as well, to force a remount so a fresh story could not reuse a
+          // stale frozen snapshot — but StoryMarker already re-arms
+          // `tracksViewChanges` off that same id, so the remount bought
+          // nothing and cost a ghost: an unmounted marker never leaves the
+          // native map (see `PARKED_MARKERS`), so posting a story left the
+          // previous bubble behind next to the new one.
+          markers.push(
+            <StoryMarker
+              key={`story-author-${authorId}`}
+              stories={authorStories}
+              onPress={() => onOpenStories(authorStories)}
+            />,
+          );
+        }
+        return markers;
+      }, [])}
+
+      {/* Approved club meetup pins — one per event, above story bubbles. */}
+      {clubMeetups.reduce<ReactNode[]>((markers, meetup) => {
+        if (isDrawable(meetup)) {
+          markers.push(
+            <MeetupMarker
+              key={`meetup-${meetup.id}`}
+              meetup={meetup}
+              onPress={() => onOpenMeetup(meetup)}
+            />,
+          );
+        }
+        return markers;
+      }, [])}
+    </>
+  );
+}
+
+// ─── Map surface ──────────────────────────────────────────────────────────────
+/**
+ * The map itself and everything drawn on it, as opposed to over it.
+ *
+ * `overlays` and `slots` arrive as whole hook results rather than unpacked into
+ * twenty props. That is not just brevity: the slot pools only mean anything as
+ * a set — a badge and its id come from the same run, and splitting them across
+ * a prop list is how they get to disagree. See PARKED_MARKERS.
+ */
+function MapCanvas({
+  mapRef, styles, themeMode, region, displayCoords, colors,
+  overlays, slots, visibleNearby, motionTrails, reduceMotion,
+  friendIds, connectionIds, selfProfile, selfZone, ghost,
+  storiesByAuthor, clubMeetups,
+  onMapLayout, onRegionChangeComplete, onPanDrag, onLongPress,
+  onOpenSheet, onZoomToCluster, onOpenStories, onOpenMeetup,
+}: {
+  mapRef: React.RefObject<MapView | null>;
+  styles: MapStyles;
+  themeMode: string;
+  region: Region | undefined;
+  displayCoords: GeoPoint;
+  colors: ColorPalette;
+  overlays: MapOverlays;
+  slots: MarkerSlots;
+  visibleNearby: NearbyUser[];
+  motionTrails: ReturnType<typeof useMotionTrails>;
+  reduceMotion: boolean;
+  friendIds: Set<number>;
+  connectionIds: Set<number>;
+  selfProfile: { username: string; profile_picture?: string } | null;
+  selfZone: SelfZone | null;
+  ghost: boolean | null | undefined;
+  storiesByAuthor: Map<number, Story[]>;
+  clubMeetups: ClubMeetup[];
+  onMapLayout: (height: number) => void;
+  onRegionChangeComplete: (region: Region) => void;
+  onPanDrag: () => void;
+  onLongPress: () => void;
+  onOpenSheet: (user: NearbyUser) => void;
+  onZoomToCluster: (center: GeoPoint) => void;
+  onOpenStories: (stories: Story[]) => void;
+  onOpenMeetup: (meetup: ClubMeetup) => void;
+}) {
+  return (
+    <MapView
+      ref={mapRef}
+      onLayout={(e) => onMapLayout(e.nativeEvent.layout.height)}
+      style={styles.map}
+      provider={PROVIDER_GOOGLE}
+      customMapStyle={mapStyleFor(themeMode)}
+      initialRegion={region}
+      showsUserLocation={false}
+      showsMyLocationButton={false}
+      rotateEnabled={false}
+      pitchEnabled={false}
+      // Dragging the map is the user taking the camera back. Follow mode
+      // drops out rather than fighting the gesture and snapping away from
+      // wherever they just moved to. Pinch-zoom is not a pan, so zooming
+      // in on yourself keeps following, the way it does in Google Maps.
+      onPanDrag={onPanDrag}
+      onRegionChangeComplete={onRegionChangeComplete}
+      onLongPress={onLongPress}
+    >
+      <ZoneLayer
+        musicZones={overlays.musicZones}
+        musicBadges={slots.musicBadges}
+        musicBadgeSlotIds={slots.musicBadgeSlotIds}
+        selfZone={selfZone}
+        selfZoneRings={overlays.selfZoneRings}
+        displayCoords={displayCoords}
+        colors={colors}
+      />
+
+      <PeopleLayer
+        visibleNearby={visibleNearby}
+        motionTrails={motionTrails}
+        reduceMotion={reduceMotion}
+        leaders={slots.leaders}
+        leaderSlotIds={slots.leaderSlotIds}
+        markerLayout={slots.markerLayout}
+        badges={slots.badges}
+        badgeSlotIds={slots.badgeSlotIds}
+        friendIds={friendIds}
+        connectionIds={connectionIds}
+        colors={colors}
+        displayCoords={displayCoords}
+        selfProfile={selfProfile}
+        ghost={ghost}
+        posFor={slots.posFor}
+        onOpenSheet={onOpenSheet}
+        onZoomToCluster={onZoomToCluster}
+      />
+
+      <PinsLayer
+        storiesByAuthor={storiesByAuthor}
+        clubMeetups={clubMeetups}
+        onOpenStories={onOpenStories}
+        onOpenMeetup={onOpenMeetup}
+      />
+    </MapView>
+  );
+}
+
+// ─── Screen chrome ────────────────────────────────────────────────────────────
+/*
+ * The things drawn over the map rather than on it: the dead end that replaces
+ * it, the notices strung under the top bar, the sheets, and the two toasts.
+ *
+ * Kept in three pieces rather than one because the tree order between them is
+ * load-bearing — every one of these is absolutely positioned, so what is
+ * written later sits on top. The toasts are last on purpose; folding them in
+ * with the notices would put them under the sheets.
+ */
+
+/** No permission, and an explicit dead end with a way out — rather than a
+ *  spinner that never resolves or a sentence with no action attached. */
+function MapPermissionGate({ permState, styles, onAllow, onList }: {
+  permState: PermissionState;
+  styles: MapStyles;
+  onAllow: () => void;
+  onList: () => void;
+}) {
+  const blocked = permState === 'blocked';
+  return (
+    <View style={styles.center} accessible accessibilityRole="alert">
+      <Text style={styles.emptyTitle}>The map needs location access</Text>
+      <Text style={styles.errorText}>
+        {blocked
+          ? 'Location is turned off for Approx in system settings. The map can’t show anyone nearby until it’s back on.'
+          : 'Approx shows people with shared interests near you right now. Without location there’s nothing to show.'}
+      </Text>
+      <Pressable
+        onPress={onAllow}
+        style={({ pressed }) => [styles.emptyBtn, pressed && { opacity: 0.7 }]}
+        accessibilityRole="button"
+        accessibilityLabel={blocked ? 'Open system settings' : 'Allow location access'}
+      >
+        <Text style={styles.emptyBtnText}>{blocked ? 'Open Settings' : 'Allow location'}</Text>
+      </Pressable>
+      <Pressable
+        onPress={onList}
+        style={({ pressed }) => [styles.emptyLink, pressed && { opacity: 0.7 }]}
+        accessibilityRole="button"
+        accessibilityLabel="Open the nearby people list instead"
+      >
+        <Text style={styles.emptyLinkText}>See nearby people as a list</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/** The strip under the top bar, where the map explains itself. */
+function MapNotices({
+  styles, colors, topInset, overlayTop, noticeTop,
+  pending, ghostNotice, offsetNotice, onOpenPrivacy,
+}: {
+  styles: MapStyles;
+  colors: ColorPalette;
+  topInset: number;
+  overlayTop: number;
+  noticeTop: number;
+  pending: boolean;
+  ghostNotice: boolean;
+  offsetNotice: boolean;
+  onOpenPrivacy: () => void;
+}) {
+  return (
+    <>
+      {/* Sharing is on, the first position has not landed, and the map is
+          therefore empty for a reason that has nothing to do with who is
+          around. Stated, because an unexplained empty map reads as a broken
+          one — and because the honest answer is "not yet", not "nobody". */}
+      {pending ? (
+        <View
+          style={[styles.pendingChip, { top: topInset + 52 }]}
+          accessible
+          accessibilityRole="alert"
+        >
+          <ActivityIndicator size="small" color={colors.t2} />
+          <Text style={styles.pendingChipText}>Getting your location…</Text>
+        </View>
+      ) : null}
+
+      {/* Ghost Mode, which is the reason this map is empty in *both*
+          directions — and the one the screen would otherwise leave the user to
+          work out for themselves. The muted self marker says it too, but only
+          to somebody already looking at their own dot and already knowing what
+          muted means.
+
+          A route, not a write. Ghost Mode is a setting on the privacy screen,
+          and keeping the write there rather than here means one screen owns it
+          and the map cannot flip somebody's visibility as a side effect of
+          drawing itself. */}
+      {ghostNotice ? (
+        <Pressable
+          onPress={onOpenPrivacy}
+          style={({ pressed }) => [
+            styles.pausedNotice,
+            { top: overlayTop },
+            pressed && { opacity: 0.85 },
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Ghost Mode is on. Nobody can see you and you cannot see anyone. Opens privacy settings, where you can turn it off."
+        >
+          <IconGhost size={18} color={colors.t2} />
+          <View style={styles.pausedNoticeText}>
+            <Text style={styles.pausedNoticeTitle}>Ghost Mode is on</Text>
+            <Text style={styles.pausedNoticeSub}>
+              Nobody can see you, and you can’t see anyone. Tap to turn it off.
+            </Text>
+          </View>
+          <IconChevron size={18} color={colors.t3} />
+        </Pressable>
+      ) : null}
+
+      {/* The one place the map admits it is drawing on a shifted basemap.
+          Stated rather than silently corrected: everything here — your dot,
+          everyone else's, the zone outline — is in true GPS coordinates and
+          agrees with itself, but the tiles underneath are offset. */}
+      {offsetNotice ? (
+        <View
+          style={[styles.offsetNotice, { top: noticeTop }]}
+          accessible
+          accessibilityRole="alert"
+        >
+          <Text style={styles.offsetNoticeText}>{MAINLAND_CHINA_NOTICE}</Text>
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+/** The two panels and the full-screen viewer that can cover the map. */
+function MapSheets({
+  sheetUser, selectedUser, sheetMeetup, selectedMeetup, sheetY,
+  storyViewer, currentUserId, friendIds,
+  onCloseSheet, onCloseMeetupSheet, onFriendChange, onCloseStories, onReact,
+}: {
+  sheetUser: NearbyUser | null;
+  selectedUser: NearbyUser | null;
+  sheetMeetup: ClubMeetup | null;
+  selectedMeetup: ClubMeetup | null;
+  sheetY: SharedValue<number>;
+  storyViewer: { stories: Story[] } | null;
+  currentUserId: number | null;
+  friendIds: Set<number>;
+  onCloseSheet: () => void;
+  onCloseMeetupSheet: () => void;
+  onFriendChange: () => void;
+  onCloseStories: () => void;
+  onReact: (storyId: number, reaction: ReactionType) => Promise<void>;
+}) {
+  // Who a reply would go to, or nobody: the author has to be a friend, and
+  // replying to yourself is not a thing.
+  const author = storyViewer?.stories[0]?.author;
+  const authorId = author ? Number(author.id) : null;
+  const replyTo =
+    author && authorId !== null && authorId !== currentUserId && friendIds.has(authorId)
+      ? { id: authorId, username: author.username }
+      : null;
+
+  return (
+    <>
+      {/* User detail sheet — kept mounted after first tap to avoid remount cost. */}
+      {sheetUser && (
+        <View
+          style={[StyleSheet.absoluteFill, { opacity: selectedUser ? 1 : 0 }]}
+          pointerEvents={selectedUser ? 'box-none' : 'none'}
+        >
+          <UserSheet
+            user={sheetUser}
+            sheetY={sheetY}
+            onDismiss={onCloseSheet}
+            onFriendChange={onFriendChange}
+          />
+        </View>
+      )}
+
+      {/* Club meetup detail sheet — same pre-mount strategy. */}
+      {sheetMeetup && (
+        <View
+          style={[StyleSheet.absoluteFill, { opacity: selectedMeetup ? 1 : 0 }]}
+          pointerEvents={selectedMeetup ? 'box-none' : 'none'}
+        >
+          <MeetupSheet
+            meetup={sheetMeetup}
+            sheetY={sheetY}
+            onDismiss={onCloseMeetupSheet}
+          />
+        </View>
+      )}
+
+      {/* Full-screen story viewer */}
+      {storyViewer && (
+        <StoryViewer
+          stories={storyViewer.stories}
+          onClose={onCloseStories}
+          onReact={onReact}
+          replyTo={replyTo}
+          currentUserId={currentUserId}
+        />
+      )}
+    </>
+  );
+}
+
+/** Momentary confirmations, drawn above everything so a sheet cannot bury one. */
+function MapToasts({ styles, colors, top, hiToast, locationToast, locationless }: {
+  styles: MapStyles;
+  colors: ColorPalette;
+  top: number;
+  hiToast: boolean;
+  locationToast: boolean;
+  /** Whether the story being written will carry a pin. */
+  locationless: boolean;
+}) {
+  return (
+    <>
+      {/* Hi sent toast */}
+      {hiToast && (
+        <View style={[styles.hiToast, { top }]} pointerEvents="none">
+          <IconHi size={16} color={colors.teal} />
+          <Text style={styles.hiToastText}>Hi sent</Text>
+        </View>
+      )}
+
+      {/* Story location toast */}
+      {locationToast && (
+        <View style={[styles.hiToast, { top }]} pointerEvents="none">
+          <IconPin size={16} color={colors.teal} />
+          <Text style={styles.hiToastText}>
+            {locationless
+              ? 'Story will be shared with friends, without a map location'
+              : 'Story will be posted at your current location'}
+          </Text>
+        </View>
+      )}
+    </>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MapScreen() {
   const { colors, themeMode } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const COLOR_FRIEND    = colors.blue;
-  const COLOR_CONNECTED = colors.orange;
-  const COLOR_STRANGER  = colors.teal;
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
-  const [coords, setCoords]           = useState<{ latitude: number; longitude: number } | null>(null);
-  const [nearby, setNearby]           = useState<NearbyUser[]>([]);
-  const [permState, setPermState]     = useState<PermissionState | null>(null);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
-  /** Who the sheet was opened for. The row shown is read back out of the live
-   *  list below, so an open sheet follows each poll on its own. */
-  const [openUser, setOpenUser] = useState<NearbyUser | null>(null);
-  const selectedUser = openUser ? (nearby.find((u) => u.id === openUser.id) ?? openUser) : null;
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
-  const [connectionIds, setConnectionIds] = useState<Set<number>>(new Set());
-  const [selfProfile, setSelfProfile] = useState<{ username: string; profile_picture?: string } | null>(null);
-  const [selfZone, setSelfZone]       = useState<SelfZone | null>(null);
 
-  // First-run tutorial, step 1: how to post a story. Keyed by account, not
-  // just checked once on mount — it waits on `currentUserId` because the flag
-  // itself is namespaced by id (see services/tutorial.ts), and re-runs only
-  // when that id changes, which happens once per session.
-  const [showStoryTutorial, setShowStoryTutorial] = useState(false);
-  useEffect(() => {
-    if (currentUserId === null) return;
-    hasSeenStoryTutorial(currentUserId).then((seen) => { if (!seen) setShowStoryTutorial(true); });
-  }, [currentUserId]);
-  function dismissStoryTutorial() {
-    setShowStoryTutorial(false);
-    if (currentUserId !== null) markStoryTutorialSeen(currentUserId).catch(() => {});
-  }
+  // The device's own position, the permission behind it, and the camera that
+  // follows it — see hooks/useMapLocation. Called before every hook that reads
+  // `coordsRef`, so its mirror effect lands first on any commit where both run.
+  const {
+    mapRef, coords, coordsRef, displayCoords, speedRef,
+    permState, setPermState,
+    locateState, handleLocatePress, stopFollowing, zoomToCluster,
+    zoomDelta, mapH, onMapLayout, onRegionChangeComplete,
+  } = useMapLocation(ensurePermission);
+
+  // Everyone else, and the poll that keeps them true — see hooks/useMapData.
+  // It reads `coordsRef`, so it is called after the hook that owns it.
+  const {
+    nearby, currentUserId, friendIds, connectionIds, selfProfile, selfZone,
+    stories, clubMeetups, awaitingFix, fetchFriends, reactToStory, createStory,
+  } = useMapData(coordsRef, speedRef, !!coords);
+
+  // Which panel is open over the map, and the spring that opens it — see
+  // hooks/useMapSheets. Given the live lists so an open sheet follows each poll.
+  const {
+    sheetY, selectedUser, selectedMeetup, storyViewer, sheetUser, sheetMeetup,
+    openSheet, closeSheet, openMeetupSheet, closeMeetupSheet,
+    openStoryViewer, closeStoryViewer,
+  } = useMapSheets(nearby, stories);
+
+  // The story composer and the left-edge swipe that opens it.
+  const { composerOpen, createStoryCoord, composeEdge, openComposerAt, closeComposer } =
+    useStoryComposer(coordsRef);
+
+  const { showStoryTutorial, dismissStoryTutorial } = useStoryTutorial(currentUserId);
   const [hiToast, setHiToast]           = useState(false);
   const [locationToast, setLocationToast] = useState(false);
-  const [stories, setStories]           = useState<Story[]>([]);
-  /** Which stories the viewer was opened on. Each one is read back out of the
-   *  live list below, so reactions and refetches show through without the
-   *  viewer's copy having to be patched to match. */
-  const [openStories, setOpenStories]   = useState<Story[] | null>(null);
-  const storyViewer = openStories
-    ? { stories: openStories.map((s) => stories.find((f) => f.id === s.id) ?? s) }
-    : null;
-  const [createStoryCoord, setCreateStoryCoord] = useState<{ latitude: number; longitude: number } | null>(null);
-  // Separate from the coordinate above, which is now allowed to be null: a
-  // story does not need a position, so "is the composer open" and "where will
-  // the pin go, if there is one" are two questions.
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [clubMeetups, setClubMeetups]   = useState<ClubMeetup[]>([]);
-  const [selectedMeetup, setSelectedMeetup] = useState<ClubMeetup | null>(null);
-
-  // The last non-null selection — lets us keep the sheet components mounted
-  // between taps instead of unmounting on every dismiss. State rather than a
-  // ref, because render reads it back to decide what stays mounted, and a ref
-  // read during render is what stops the compiler optimising this screen.
-  const [sheetUser, setSheetUser]     = useState<NearbyUser | null>(null);
-  const [sheetMeetup, setSheetMeetup] = useState<ClubMeetup | null>(null);
-
-  const [followRequested, setFollowRequested] = useState(false);
-  const [locating, setLocating]       = useState(false);
-
-  const coordsRef          = useRef(coords);
   const hiToastTimer       = useRef<ReturnType<typeof setTimeout> | null>(null);
   const locationToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentUserIdRef   = useRef<number | null>(null);
-  const mapRef             = useRef<MapView | null>(null);
-  /** Last region the map settled on, so recentering can keep the user's zoom
-   * instead of snapping back to the default every time they move. */
-  const regionRef          = useRef<Region | null>(null);
-  /** Viewport, for turning the marker fan's pixel thresholds into map metres.
-   *
-   * State rather than a ref because the fan is rendered from it — but coarse
-   * state: `zoomDelta` only moves when the zoom changes materially, so panning
-   * (which never changes latitudeDelta) re-renders nothing, and a pinch
-   * re-rasterizes the markers once instead of continuously. */
-  const [zoomDelta, setZoomDelta] = useState(() => zoomBucket(0.012));
-  const [mapH, setMapH] = useState(0);
-  /** Debounce for the above — see onRegionChangeComplete. */
-  const zoomSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current); }, []);
-  /** The position the camera was last sent to, so a fix that rounds to the
-   * same approximate point doesn't re-issue an animation. */
-  const centeredOnRef      = useRef<Coordinates | null>(null);
-  /** When `coords` was last measured, not when it was last rendered. */
-  const fixAtRef           = useRef(0);
-  /** Latest platform speed estimate, in m/s; null when it has none. A ref, not
-   * state — it changes on every fix and only the next poll reads it. */
-  const speedRef           = useRef<number | null>(null);
-  const followingRef       = useRef(false);
-  const watchRef           = useRef<Location.LocationSubscription | null>(null);
-  const startingWatchRef   = useRef(false);
-  // Both mirror state for the polling and location callbacks further down.
-  // Declared above every effect that reads them, so on any commit where both
-  // run this one lands first.
-  useEffect(() => {
-    coordsRef.current = coords;
-    currentUserIdRef.current = currentUserId;
-  });
+  // Mirrors state for the polling callbacks further down. Declared above every
+  // effect that reads it, so on any commit where both run this one lands first.
+  // `coordsRef` is the same arrangement one level up, in useMapLocation.
+  useEffect(() => { currentUserIdRef.current = currentUserId; });
 
-  // ── The composer, and the swipe that opens it ──
-  // `/compose` sends "Story" back here rather than opening a composer of its
-  // own: the sheet is this screen's (`composerOpen`), and only this screen
-  // holds the coordinate that decides whether the story becomes a pin.
-  //
-  // The param is cleared as it is read. Left in the route it would survive the
-  // sheet being closed, and every later pass through here would reopen it.
-  const { compose: composeParam } = useLocalSearchParams<{ compose?: string }>();
-  useEffect(() => {
-    if (composeParam !== 'story') return;
-    router.setParams({ compose: undefined });
-    // `coordsRef`, not `coords`: this reacts to the param arriving, not to
-    // every position that lands afterwards.
-    setCreateStoryCoord(coordsRef.current ?? null);
-    setComposerOpen(true);
-  }, [composeParam, router]);
-
-  // The left-edge strip that opens `/compose`.
-  //
-  // Recognition runs natively (gesture-handler), but the callback is kept on
-  // the JS thread with `.runOnJS(true)` — navigating from it then needs no
-  // worklet hop, which is the one thing the PanResponder this replaces was
-  // chosen for. Nothing here tracks the finger visually, so there is no
-  // shared value to drive on the UI thread.
-  //
-  // Both thresholds carry over from the responder. Gesture-handler never
-  // claims on touch-down, which is what `onStartShouldSetPanResponder:
-  // () => false` bought — a tap, or a vertical drag beginning at the edge,
-  // still falls straight through to the map underneath. `activeOffsetX(12)`
-  // is the old `dx > 12`, and `failOffsetY` is its `|dx| > |dy| * 1.5`
-  // dominance test, which at that same 12pt allows 8pt of vertical drift.
-  const composeEdge = useMemo(
-    () =>
-      Gesture.Pan()
-        .runOnJS(true)
-        .activeOffsetX(12)
-        .failOffsetY([-8, 8])
-        .onEnd((e) => {
-          if (e.translationX > 40) router.push('/compose');
-        }),
-    [router],
-  );
-
-  const sheetY = useSharedValue(SHEET_H);
   const reduceMotion = useReduceMotion();
 
-  // ── Location accuracy ──
-  // The owner's own view is the easiest place to leak the precise position of
-  // someone sharing approximately, so everything drawn for them — the marker,
-  // their zone circle, and where the locate button centres — goes through the
-  // same rounding the network layer applies, so the marker and the wire agree.
-  //
-  // No longer gated on knowing the sharing mode first: there is one precision
-  // now, and the owner always sees their own true position. What other people
-  // see is decided per viewer on the server — see users.visibility, and the
-  // note in services/location.ts.
-  const ghost = useGhostMode();
-  const displayCoords = useMemo(
-    () => (coords ? atSharingPrecision(coords) : null),
-    [coords],
+  // Who is allowed on this map at all, and whose stories may pin to it — see
+  // hooks/useVisiblePeople. Policy, not plumbing.
+  const { visibleNearby, storiesByAuthor } = useVisiblePeople(
+    nearby, stories, currentUserId, friendIds, connectionIds,
   );
 
-  // ── Location permission, re-read on every foreground ──
-  // A grant seen when the map mounted is not a grant now: iOS "Allow Once"
-  // lapses the moment the app is backgrounded, and either OS can revoke from
-  // Settings while we are suspended. This is the same store Settings →
-  // Permissions reads, so the two can't disagree.
-  const permissions = usePermissionStore();
-  useEffect(() => {
-    refreshPermissions(['location']).catch(() => {});
-    return bindForegroundRefresh();
-  }, []);
-  const locationState = permissions.location?.state ?? permState;
-  const locationGranted = locationState === 'granted';
-
-  // Following depends on the permission that feeds it, so it is stated as a
-  // condition rather than a flag some effect has to switch off afterwards.
-  // Losing location mid-follow now stops it in the same render; before, the
-  // camera stayed locked to a position that would never update again until an
-  // effect noticed and re-rendered.
-  // `following` itself is still derived in render, so the condition above still
-  // holds the moment the permission drops. Only the ref mirror — read by
-  // `stopFollowing`, which both gestures and taps reach after a commit — waits
-  // for the effect. The handlers that need it sooner still set it themselves.
-  const following = followRequested && locationGranted;
-  useEffect(() => { followingRef.current = following; });
-
-  // Stories deleted from the archive screen vanish here immediately instead of
-  // waiting for the next poll.
-  const { deletedIds } = useStoryArchive();
-
-  // Stories are friends-only: the backend returns everyone nearby, so drop
-  // anything not authored by the current user or one of their friends.
-  const storiesByAuthor = useMemo(() => {
-    const map = new Map<number, Story[]>();
-    for (const story of stories) {
-      if (deletedIds.has(story.id)) continue;
-      const id = Number(story.author.id);
-      if (id !== currentUserId && !friendIds.has(id)) continue;
-      if (!map.has(id)) map.set(id, []);
-      map.get(id)!.push(story);
-    }
-    return map;
-  }, [stories, currentUserId, friendIds, deletedIds]);
-
-  // Interest matching: friends and connections are always visible; strangers
-  // only appear when at least one interest is shared. The backend includes
-  // the requester in /nearby/, so until our own id is known we can't tell
-  // ourselves apart from strangers — render nobody for that moment instead of
-  // briefly treating the owner's zone as a locked stranger zone.
-  const visibleNearby = useMemo(() => {
-    if (currentUserId === null) return [];
-    return nearby.filter((u) => {
-      const uid = Number(u.id);
-      if (uid === currentUserId) return false;
-
-      // The server's own verdict, and it is the authority: it computes the
-      // relationship from the friend and Hi tables on every poll, and it is
-      // what puts friends in this payload at any distance in the first place.
-      //
-      // Checked *before* the local sets, because those come from a separate
-      // request that fails silently. When /friends/list/ blipped, `friendIds`
-      // stayed empty and the last line below quietly dropped every friend who
-      // happened to share no interests — the people most likely to be missed
-      // being exactly the ones the map exists to show.
-      if (u.relationship === 'friend' || u.relationship === 'connected') return true;
-      if (friendIds.has(uid) || connectionIds.has(uid)) return true;
-
-      // Strangers earn their place on the map by sharing something.
-      return (u.shared_interests?.length ?? 0) > 0;
-    });
-  }, [nearby, currentUserId, friendIds, connectionIds]);
+  // Ghost Mode: nobody sees the viewer and the viewer sees nobody. Drawn in
+  // three places here — the muted self marker, the notice, and what the story
+  // composer says it will do. The rounding that keeps the owner's own view
+  // honest lives with the position itself, in hooks/useMapLocation.
+  const ghost = useGhostMode();
 
   // Speed trails. Fed from the same list the markers render, so a person who
   // disappears from `visibleNearby` takes their trail history with them.
   const motionTrails = useMotionTrails(visibleNearby);
 
-  /** Outlines for every region zone currently on screen.
-   *
-   * The nearby payload carries region *ids*; the geometry is fetched once per
-   * region and cached across sessions, so a hundred people sharing a city cost
-   * one request between them. Held in state rather than read straight from the
-   * cache because a fetch that lands must trigger a re-render — otherwise the
-   * outline arrives and nothing draws it until the next unrelated poll. */
-  const [regionOutlines, setRegionOutlines] = useState<Map<number, ZoneRegion>>(new Map());
+  // Zone outlines, music rings and the basemap-offset notice — see
+  // hooks/useMapOverlays. The purple is passed in rather than imported there
+  // so the ring follows the live palette, the same as every other colour on
+  // this screen.
+  const overlays = useMapOverlays(visibleNearby, selfZone, displayCoords, colors.purple);
 
-  const neededRegionIds = useMemo(() => {
-    const ids = new Set<number>();
-    if (selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id) {
-      ids.add(selfZone.zone_region_id);
-    }
-    for (const u of visibleNearby) {
-      if (u.zone_active && u.zone_mode === 'region' && u.zone_region_id) ids.add(u.zone_region_id);
-    }
-    return ids;
-  }, [visibleNearby, selfZone]);
-
-  useEffect(() => {
-    let alive = true;
-    const missing = [...neededRegionIds].filter((id) => !regionOutlines.has(id));
-    if (missing.length === 0) return;
-
-    Promise.all(missing.map((id) => getRegion(id))).then((fetched) => {
-      if (!alive) return;
-      const landed = fetched.filter((r): r is ZoneRegion => r != null);
-      if (landed.length === 0) return;
-      setRegionOutlines((prev) => {
-        const next = new Map(prev);
-        for (const r of landed) next.set(r.id, r);
-        return next;
-      });
-    });
-    return () => { alive = false; };
-  }, [neededRegionIds, regionOutlines]);
-
-  /** The viewer's own zone outline, cut into drawable pieces.
-   *
-   * No mainland-China display shift here, unlike the zone-area preview: this
-   * map draws markers, clusters, trails and circles from the same coordinates,
-   * and shifting only the polygon would put your zone's border in the right
-   * street while leaving your own dot in the wrong one. That trade is worse
-   * than a uniform offset, because "am I inside it?" is the single question
-   * the outline exists to answer. See services/gcj02 and `chinaOffsetNotice`. */
-  const selfZoneRings = useMemo(() => {
-    const id = selfZone?.zone_region_id;
-    if (!selfZone?.zone_active || selfZone.zone_mode !== 'region' || !id) return [];
-    const outline = regionOutlines.get(id);
-    return outline ? ringsForDisplay(outline) : [];
-  }, [selfZone, regionOutlines]);
-
-  /** Set once the viewer is standing where the basemap disagrees with GPS.
-   *
-   * Google serves GCJ-02 tiles inside mainland China while everything Approx
-   * measures is WGS-84, so the two are a few hundred metres apart. Saying so
-   * beats drawing a zone that silently sits in the wrong street. */
-  const chinaOffsetNotice = useMemo(
-    () =>
-      displayCoords &&
-      isInMainlandChina(displayCoords.latitude, displayCoords.longitude),
-    [displayCoords],
+  // Where each marker lands, and the pooled slots the badges and leader lines
+  // are drawn from. The pools are why nothing here is ever unmounted — see
+  // PARKED_MARKERS above and hooks/useMarkerSlots.
+  const slots = useMarkerSlots(
+    visibleNearby, displayCoords, overlays.musicZones, overlays.zoneAreas, zoomDelta, mapH,
   );
-
-  /** Every music zone on screen — the viewer's own, and each friend whose
-   *  track they are allowed to hear. Assembled once so the faint ring, the
-   *  badge that labels it and the fan constraint below can never disagree
-   *  about which circles exist. */
-  const musicZones = useMemo(() => {
-    // `label` and `color` are what make one ring tellable from another. Drawn
-    // in a single colour with only a radius on the chip, two friends
-    // broadcasting near each other were two identical circles: you could see
-    // that somebody's music reached here, but not whose.
-    const zones: {
-      key: string;
-      center: GeoPoint;
-      radius: number;
-      mine?: boolean;
-      label: string;
-      color: string;
-    }[] = [];
-    // Your own ring, on the same terms as everyone else's: a track, and a music
-    // zone switched on to carry it. Off takes the circle off your map exactly
-    // as it takes it off theirs — there is no zone left for it to mark.
-    //
-    // Independent of `zone_active`, which removes the circle you appear inside
-    // and says nothing about sound. These are two different circles.
-    const selfRadius = selfMusicZoneRing(selfZone);
-    if (displayCoords && selfRadius) {
-      zones.push({
-        key: 'music-self',
-        center: displayCoords,
-        radius: selfRadius,
-        mine: true,
-        // Yours says how far it carries, not who it is — you know who you are,
-        // and where your own music stops is the one thing you cannot check by
-        // listening. Purple means "yours" everywhere else on the map.
-        label: fmtRadius(selfRadius),
-        color: colors.purple,
-      });
-    }
-    for (const u of visibleNearby) {
-      // `zone_audio_url` is the real switch: no track, no ring to label. The
-      // server only sends it to viewers allowed to hear it, so a ring drawn
-      // here is always one the viewer could walk into and play.
-      if (!(u.music_zone_radius ?? 0) || !u.zone_audio_url) continue;
-      if (u.latitude == null || u.longitude == null) continue;
-      // `zone_mode` is not consulted. A music zone is always its own circle,
-      // never a city border inherited from the map zone, so a region-mode
-      // friend's ring is as honest as anyone else's.
-      zones.push({
-        key: `music-${u.id}`,
-        center: { latitude: u.latitude, longitude: u.longitude },
-        radius: u.music_zone_radius!,
-        // Only friends are ever drawn here — the server withholds
-        // `zone_audio_url` from everyone else — so naming them reveals nothing
-        // their marker does not already caption.
-        label: `@${u.username}`,
-        color: zoneRingColor(u.username),
-      });
-    }
-    return zones;
-  }, [visibleNearby, displayCoords, selfZone, colors.purple]);
-
-  /**
-   * Every circle the eye can see, so the fan can be held inside them.
-   *
-   * This constraint exists to stop a marker being displaced out of a circle it
-   * is standing in, which is only ever a lie about a boundary the viewer can
-   * *see* — so the list is exactly the circles that get drawn, taken from
-   * `musicZones` rather than recomputed. They used to be two independent
-   * conditions and they had already drifted apart: this one asked whether the
-   * music zone was separate where the drawing asked for `zone_audio_url`, so
-   * it constrained rings that were not on screen and ignored ones that were.
-   *
-   * Region zones are deliberately absent. The fan is capped at tens of metres
-   * and no displacement that small can move anyone out of a city, so a polygon
-   * has nothing to constrain here.
-   */
-  const zoneAreas = useMemo<ZoneArea[]>(() => {
-    const areas: ZoneArea[] = [];
-    if (
-      displayCoords && selfZone?.zone_active &&
-      selfZone.zone_mode === 'radius' && (selfZone.zone_radius ?? 0) > 0
-    ) {
-      areas.push({ ...displayCoords, radius: selfZone.zone_radius });
-    }
-    // Other people's detection zones are not drawn, so they are not here: an
-    // undrawn circle has no boundary to be flung across.
-    for (const { center, radius } of musicZones) {
-      areas.push({ ...center, radius });
-    }
-    return areas;
-  }, [musicZones, displayCoords, selfZone]);
-
-  /** A badge is only worth drawing when the ring it labels is big enough on
-   *  screen to read as a ring. Zoomed out, a 200m circle is a few pixels wide
-   *  and its label would be a chip floating over nothing. */
-  const musicBadgeVisible = useCallback((radius: number) => {
-    const metersPerPx = mapH > 0 ? (zoomDelta * M_PER_DEG) / mapH : 0;
-    return metersPerPx > 0 && radius / metersPerPx >= 24;
-  }, [mapH, zoomDelta]);
-
-  /**
-   * Where every marker is drawn, and which piles became a count instead.
-   *
-   * The owner is in the input so a pile containing them is recognised as theirs:
-   * they stay put and the pile opens up around them. Before the viewport has
-   * been measured this is empty, and everyone falls back to their true point —
-   * which is exactly the old behaviour, so the first frame is never wrong.
-   */
-  const markerLayout = useMemo<MarkerLayout>(() => {
-    // latitudeDelta spans the viewport's height, so this is metres per pixel.
-    const metersPerPx = mapH > 0 ? (zoomDelta * M_PER_DEG) / mapH : 0;
-    if (metersPerPx <= 0) return { placed: new Map(), clusters: [] };
-
-    const points: FanInput[] = [];
-    if (displayCoords) {
-      points.push({ key: SELF_KEY, latitude: displayCoords.latitude, longitude: displayCoords.longitude });
-    }
-    for (const u of visibleNearby) {
-      if (u.latitude == null || u.longitude == null) continue;
-      points.push({ key: `u-${u.id}`, latitude: u.latitude, longitude: u.longitude });
-    }
-    return layoutMarkers(points, metersPerPx, zoneAreas);
-  }, [visibleNearby, displayCoords, zoomDelta, mapH, zoneAreas]);
-
-  /** Badges and leader lines the map is currently holding open.
-   *
-   * Both come and go with the zoom, and neither may be unmounted to do it — see
-   * `PARKED_MARKERS`. So each renders from a fixed run of slots, and the run
-   * only ever grows: a slot with nothing to draw parks rather than leaving.
-   * The high-water marks are state rather than refs: they are read back while
-   * rendering to size the run, and a ref read during render is what stops the
-   * compiler optimising this screen. Raising one during render re-runs this
-   * component before anything is painted, and since a mark only ever grows —
-   * bounded by the piles a screen can hold — it settles in one extra pass. */
-  const [badgeSlots, setBadgeSlots] = useState(0);
-  const [leaderSlots, setLeaderSlots] = useState(0);
-
-  /** Badge, or nothing, for each slot. Drawable filter first, so an unusable
-   *  coordinate parks its slot instead of shifting every badge after it. */
-  const drawableBadges = useMemo(
-    () => markerLayout.clusters.filter((c) => isDrawable(c.position)),
-    [markerLayout],
-  );
-  if (drawableBadges.length > badgeSlots) setBadgeSlots(drawableBadges.length);
-  const badges = useMemo(
-    () => Array.from({ length: badgeSlots }, (_, i) => drawableBadges[i] ?? null),
-    [drawableBadges, badgeSlots],
-  );
-  // A slot's identity, not its content: slot 3 is always "badge-slot-3" for
-  // the life of the screen, whichever cluster (or none) currently occupies
-  // it. The pool only grows, so this never reassigns an id already handed
-  // out — the property `key` actually needs, which the slot's own array
-  // position happens to also satisfy but does not make legible as one.
-  const badgeSlotIds = useMemo(
-    () => Array.from({ length: badgeSlots }, (_, i) => `badge-slot-${i}`),
-    [badgeSlots],
-  );
-
-  /** Leader lines: the dashes from a moved marker back to where its owner
-   *  really is, and from a nudged badge back to the pile it counts. */
-  const leaderLines = useMemo(() => {
-    const lines: [GeoPoint, GeoPoint][] = [];
-    // Both ends validated: a single bad coordinate in a Polyline is enough to
-    // bring the native map down.
-    for (const item of [...Array.from(markerLayout.placed.values()), ...markerLayout.clusters]) {
-      if (item.anchor && isDrawable(item.anchor) && isDrawable(item.position)) {
-        lines.push([item.anchor, item.position]);
-      }
-    }
-    return lines;
-  }, [markerLayout]);
-  if (leaderLines.length > leaderSlots) setLeaderSlots(leaderLines.length);
-  const leaders = useMemo(
-    () => Array.from({ length: leaderSlots }, (_, i) => leaderLines[i] ?? null),
-    [leaderLines, leaderSlots],
-  );
-  const leaderSlotIds = useMemo(
-    () => Array.from({ length: leaderSlots }, (_, i) => `leader-slot-${i}`),
-    [leaderSlots],
-  );
-
-  /** The same slot pool for the chips that label music zones.
-   *
-   * These leave the map for a reason the others do not: someone switching their
-   * music zone off. The ring is a Circle and goes cleanly, but the chip is a
-   * Marker wrapping a custom view — the one shape Fabric strands — so an
-   * unmounted chip would sit on the native map naming a zone that no longer
-   * exists. Pooled, it parks instead, and the switch removes both halves. */
-  const [musicBadgeSlots, setMusicBadgeSlots] = useState(0);
-  const drawableMusicBadges = useMemo(
-    () => musicZones.filter((z) => musicBadgeVisible(z.radius) && isDrawable(z.center)),
-    [musicZones, musicBadgeVisible],
-  );
-  if (drawableMusicBadges.length > musicBadgeSlots) setMusicBadgeSlots(drawableMusicBadges.length);
-  const musicBadges = useMemo(
-    () => Array.from({ length: musicBadgeSlots }, (_, i) => drawableMusicBadges[i] ?? null),
-    [drawableMusicBadges, musicBadgeSlots],
-  );
-  const musicBadgeSlotIds = useMemo(
-    () => Array.from({ length: musicBadgeSlots }, (_, i) => `music-badge-slot-${i}`),
-    [musicBadgeSlots],
-  );
-
-  /** Marker position for someone, falling back to their true point before the
-   *  viewport is measured on the first frame. */
-  const posFor = useCallback(
-    (key: string, fallback: GeoPoint): GeoPoint =>
-      markerLayout.placed.get(key)?.position ?? fallback,
-    [markerLayout],
-  );
-
-  // Nearby people used to generate alerts from here — "@miras is nearby ·
-  // 180m away", "@aisha shares your interests". They no longer do: being
-  // somewhere is not an event, and the map already shows who is around. The
-  // markers below are the whole of it now.
-
-  const fetchFriends = useCallback(async () => {
-    try {
-      const r = await api.get<{ friends: { id: number }[]; connections: { id: number }[] }>('/api/friends/list/');
-      setFriendIds(new Set(r.data.friends.map((u) => Number(u.id))));
-      setConnectionIds(new Set(r.data.connections.map((u) => Number(u.id))));
-    } catch {}
-  }, []);
-
-  // Zone audio is no longer the map's to play. There is no screen-level sound
-  // any more, no autoplay when you cross into someone's circle, and nothing to
-  // stop on unmount: a friend's track is loaded by the player inside their card
-  // and unloaded when that card closes. Walking into a zone is an invitation,
-  // not a command to a stranger's phone speaker.
 
   function handleHiSent() {
     fetchFriends();
@@ -2354,518 +2580,33 @@ export default function MapScreen() {
     hiToastTimer.current = setTimeout(() => setHiToast(false), 1500);
   }
 
-  /** Sharing is on and the server has no position for us yet. */
-  const [awaitingFix, setAwaitingFix] = useState(false);
-
-  const fetchMapData = useCallback(async () => {
-    try {
-      // Two anchors behind one call. Somebody sharing their location is
-      // answered from the position the server already holds for them; somebody
-      // Paused has no stored position at all, so their device's coordinate
-      // rides along with the request, answers it, and is discarded. See
-      // services/discovery.ts — the map does not need to know which it got.
-      const r = await fetchMapNearby<MapNearbyResponse>(coordsRef.current);
-      // Null means Paused with no fix yet. Nothing to draw and nothing to
-      // clear: the previous frame is still the best answer we have.
-      if (!r) return;
-      const { users, stories, meetups } = r;
-      // Stories and meetups are ModelSerializer output, so their coordinates
-      // arrive as strings and have to be coerced before they reach a Marker —
-      // see services/coords.ts. `users` is hand-assembled server-side and comes
-      // through numeric today; it goes through the same gate anyway so one
-      // serializer changing shape can't put the redbox back.
-      setNearby(withNumericCoordsList(users));
-      // `placedStories`, not the plain normaliser: this is the map, and a
-      // story with no coordinate is not a thing it can draw. Those still exist
-      // and still reach their friends — they arrive through the Chats rings,
-      // which is the surface that does not need a position. See
-      // services/stories.ts.
-      const drawable = placedStories(stories);
-      setStories(drawable);
-      drawable.forEach(s => { if (s.image) Image.prefetch(s.image); });
-      const now = Date.now();
-      setClubMeetups(
-        withNumericCoordsList(meetups).filter((e) => new Date(e.expires_at).getTime() > now),
-      );
-      setAwaitingFix(false);
-    } catch (e) {
-      // Sharing is on but no position has reached the server, and we had no
-      // fix to answer with either — so `fetchMapNearby` could not fall back to
-      // the private query. Say we are still finding it rather than leaving a
-      // map that reads as "nobody is here".
-      //
-      // No retry is started from here. The tick that called this runs again in
-      // POLL_MS and reports a position alongside the next attempt, which is
-      // the existing resume path and is bounded by construction — a retry
-      // scheduled here would be a second loop racing the first.
-      if (isLocationNotAvailable(e)) setAwaitingFix(true);
-    }
-  }, []);
-
-  function openStoryViewer(authorStories: Story[]) {
-    sheetY.set(SHEET_H);
-    setOpenUser(null);
-    setSelectedMeetup(null);
-    setOpenStories(authorStories);
-  }
-
-  async function reactToStory(storyId: number, reaction: ReactionType) {
-    try {
-      await api.post(`/api/stories/${storyId}/react/`, { reaction });
-      const applyReaction = <T extends Story>(s: T): T => {
-        if (s.id !== storyId) return s;
-        const wasActive = s.user_reaction === reaction;
-        const updated = { ...s.reactions };
-        if (s.user_reaction) updated[s.user_reaction] = Math.max(0, updated[s.user_reaction] - 1);
-        if (!wasActive) updated[reaction] = (updated[reaction] ?? 0) + 1;
-        return { ...s, reactions: updated, user_reaction: wasActive ? null : reaction };
-      };
-      // Only the master list is patched: the open viewer reads its rows out of
-      // it, so it picks the reaction up from here without a copy of its own.
-      setStories((prev) => prev.map(applyReaction));
-      await fetchMapData();
-    } catch (error: any) {
-      console.log('[Reaction] error:', error.response?.status, JSON.stringify(error.response?.data));
-    }
-  }
-
-  async function createStory(text: string, photoUri: string | null) {
-    // A position if we have one, and no position is fine. Posting a story does
-    // not require being on the map — the server drops the coordinate anyway
-    // while sharing is paused, and refusing here would only turn that into a
-    // failure the user has to decode.
-    const c = createStoryCoord ?? coordsRef.current;
-    const position = c
-      ? {
-          latitude: parseFloat(c.latitude.toFixed(6)),
-          longitude: parseFloat(c.longitude.toFixed(6)),
-        }
-      : {};
-    try {
-      const form = new FormData();
-      form.append('content', text);
-      if ('latitude' in position) form.append('latitude', String(position.latitude));
-      if ('longitude' in position) form.append('longitude', String(position.longitude));
-      if (photoUri) {
-        form.append('image', {
-          uri: photoUri,
-          name: photoUri.split('/').pop() ?? 'story.jpg',
-          type: 'image/jpeg',
-        } as any);
-      }
-      const response = await api.post('/api/stories/', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      // The POST echoes the story back through the same serializer as the map
-      // poll, so its coordinates need the same coercion — this is the one path
-      // that puts a marker on screen without going through fetchMapData first.
-      const [newStory] = normalizeStories([response.data]);
-      if (!newStory) throw new Error('Story saved but came back unreadable');
-      // Only on the map if it came back with somewhere to be. A story posted
-      // while paused is saved, is in the archive, and reaches friends through
-      // Chats — it simply has no pin, and the missing marker is the feature.
-      const [drawable] = placedStories([newStory]);
-      if (drawable) setStories(prev => [...prev, drawable]);
-      recordOwnStory(newStory);
-      setTimeout(() => fetchMapData(), 500);
-    } catch (error: any) {
-      console.log('[Story] error:', error.response?.status ?? error.message);
-      throw error;
-    }
-  }
-
-  // Self data is refetched on every focus: a fetch that failed right after
-  // login would otherwise never retry (leaving the owner's zone invisible),
-  // and changes made in Zone Setup must show up when returning to the map.
-  const loadSelf = useCallback(() => {
-    api.get<{ id: number; username: string }>('/api/users/me/')
-      .then((r) => setCurrentUserId(r.data.id))
-      .catch((e: any) => console.log(
-        '[Map] /users/me/ error:', e?.response?.status ?? e?.code ?? e?.message,
-      ));
-
-    api.get<{ username: string; profile_picture?: string }>('/api/users/profile/')
-      .then((r) => setSelfProfile({
-        username: r.data.username,
-        profile_picture: r.data.profile_picture,
-      }))
-      // The failure is worth a line; the success is not. This logged the
-      // username and the photo URL on every focus, which put a signed-in
-      // person's identity into any log anyone happened to be capturing.
-      .catch((e: any) => console.log(
-        '[Map] /users/profile/ error:', e?.response?.status ?? e?.code ?? e?.message,
-      ));
-
-    // The zone endpoint answers with either {zone_active, zone_radius, ...} or
-    // {active, ...} and may omit the radius — normalize so the owner's circle
-    // renders regardless of which shape arrives.
-    api.get<Record<string, any>>('/api/users/zone/')
-      .then((r) => {
-        const d = r.data ?? {};
-        const normalized: SelfZone = {
-          zone_active: Boolean(d.zone_active ?? d.active ?? false),
-          zone_radius: Number(d.zone_radius) > 0 ? Number(d.zone_radius) : 500,
-          // `effective_zone_mode`, not the raw one: a region evicted from the
-          // cache leaves the stored mode saying 'region' with nothing to draw.
-          zone_mode: (d.effective_zone_mode ?? d.zone_mode) === 'region' ? 'region' : 'radius',
-          zone_region_id: d.zone_region ?? null,
-          // The music zone's own radius, never the map zone's. The server used
-          // to resolve a "separate or inherited" question into `music_radius_m`
-          // for this; there is no question left to resolve.
-          music_zone_radius:
-            Number(d.music_zone_radius) > 0 ? Number(d.music_zone_radius) : 200,
-          // `!== false`, not `Boolean(...)`: on is the server's default and an
-          // older build's response has no such key. Reading a missing field as
-          // off would take the ring off the map for everyone who has not
-          // touched the switch.
-          music_zone_active: d.music_zone_active !== false,
-          has_track: Boolean(d.zone_audio_url),
-        };
-        setSelfZone(normalized);
-      })
-      .catch((e: any) => console.log(
-        '[Zone] self zone fetch error:', e?.response?.status ?? e?.code ?? e?.message,
-      ));
-
-    fetchFriends();
-  }, [fetchFriends]);
-
-  useFocusEffect(useCallback(() => { loadSelf(); }, [loadSelf]));
-
-  /**
-   * The one location subscription on this screen. The locate control and
-   * follow mode read from it rather than opening a second one — two GPS
-   * subscriptions on a screen people leave open is a real battery cost for no
-   * extra information.
+  /** Long-press writes a story where the finger landed.
    *
-   * Guarded so it can be called from both the mount effect and the
-   * permission-regained effect without ever ending up with two watchers.
-   */
-  const startWatching = useCallback(async () => {
-    if (watchRef.current || startingWatchRef.current) return;
-    startingWatchRef.current = true;
-    try {
-      // Not asked for here — this fires on every watch (re)start, including
-      // the permission-regained effect below, and re-asking on every one of
-      // those would be a dialog storm. The one place that primes and requests
-      // it is the mount effect, once, right after foreground is granted. This
-      // call only starts the OS task if that already succeeded.
-      await startBackgroundLocationUpdates();
-      const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      fixAtRef.current = init.timestamp;
-      setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
-      recordSpeed(init.coords.speed);
-      watchRef.current = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
-        (loc) => {
-          fixAtRef.current = loc.timestamp;
-          setCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-          // The platform's own fused speed, which this watcher was already
-          // receiving and discarding. Kept in a ref rather than state: it
-          // changes on every fix and nothing renders from it directly, so
-          // setting state here would re-render the whole map for nothing.
-          speedRef.current = loc.coords.speed ?? null;
-          recordSpeed(loc.coords.speed);
-        },
-      );
-    } catch (e: any) {
-      console.log('[Map] location watch failed:', e?.message);
+   *  No `if (!coords) return` guard: not having a fix — because Ghost Mode is
+   *  on, or the permission was never granted — is no longer a reason a story
+   *  cannot be written. It only means the story will not be a pin, which the
+   *  toast then says out loud. */
+  function openComposerHere() {
+    openComposerAt(coords ?? null);
+    setLocationToast(true);
+    if (locationToastTimer.current) clearTimeout(locationToastTimer.current);
+    locationToastTimer.current = setTimeout(() => setLocationToast(false), 2000);
+  }
+
+  /** The dead end's own way out. `blocked` has spent its one dialog, so the
+   *  only thing left to offer is Settings; anything else may still ask. */
+  async function allowLocation() {
+    if (permState === 'blocked') {
+      openAppSettings();
+      return;
     }
-    // Always reached — the `catch` only logs — so the re-entrancy guard is
-    // released on both paths without a `finally`, which React Compiler cannot
-    // compile and which would cost this screen its auto-memoization.
-    startingWatchRef.current = false;
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      // Primed, not cold. The sheet explains first so the one shot iOS gives a
-      // cold "Don't Allow" is not spent on a dialog nobody had context for —
-      // and, since 5.1.1(iv), that sheet has no way to defer the dialog once
-      // it is up. See components/PermissionPrimer.
-      const granted = await ensurePermission('location');
-      if (!granted) {
-        const info = await checkPermission('location');
-        setPermState(info.state);
-        return;
-      }
-      setPermState('granted');
-      await startWatching();
-
-      // **No background request here, and that absence is the fix.**
-      //
-      // This used to chain `requestPermission('locationBackground')` straight
-      // off the foreground grant, so simply opening the map asked for Always.
-      // Nobody had turned anything on; the map does not need it — everything on
-      // this screen works while the app is open — and App Review rejected it
-      // under 5.1.1(iv) as consent the app had gone looking for.
-      //
-      // Background location is still fully supported. It is now asked for from
-      // Privacy & safety, when somebody turns on "Keep sharing while Approx is
-      // closed", which is a feature that genuinely cannot work without it. See
-      // services/permissions.requestBackground.
-      //
-      // What *is* still done here is starting the task for somebody who has
-      // already granted Always on a previous run — that is honouring a choice
-      // already made, not soliciting a new one, and it never shows a dialog.
-      if (SUPPORTS_BACKGROUND_LOCATION) {
-        if ((await backgroundStatus()) === 'granted') {
-          await startBackgroundLocationUpdates();
-        }
-      }
-    })();
-
-    return () => {
-      watchRef.current?.remove();
-      watchRef.current = null;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Permission can come back mid-session — from the locate button's primer, or
-  // from the user flipping it in Settings and returning. The subscription died
-  // with the revocation, so it has to be re-armed here or follow mode would
-  // track a position that never updates again.
-  useEffect(() => {
-    if (locationGranted) startWatching();
-  }, [locationGranted, startWatching]);
-
-  const tick = useCallback(async () => {
-    const c = coordsRef.current;
-    if (!c) return;
-
-    // Without our own id the nearby list stays hidden (we couldn't filter
-    // ourselves out of it), so keep retrying the identity fetch until it lands.
-    if (currentUserIdRef.current === null) loadSelf();
-
-    await Promise.allSettled([
-      // Honours the Location sharing setting; sends nothing when paused, and
-      // the server would refuse it anyway. Speed rides along on the same
-      // request — the server buckets it into a coarse class and never stores
-      // the figure itself.
-      reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current),
-      // Independent of the line above, which is the whole point: browsing does
-      // not depend on publishing, and a paused user reaches the map through
-      // the private query instead.
-      fetchMapData(),
-    ]);
-  }, [fetchMapData, loadSelf]);
-
-  // Mirrors AppState into render-visible state, so the polling effect below
-  // can simply depend on it instead of an interval being started/stopped
-  // from inside this subscription's own callback.
-  const [appActive, setAppActive] = useState(() => AppState.currentState === 'active');
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => setAppActive(next === 'active'));
-    return () => sub.remove();
-  }, []);
-
-  // Poll on an interval while there are coords to report and the app is in
-  // the foreground; torn down and restarted whenever either condition flips,
-  // which is what pauses the tick in the background and resumes it on return.
-  useEffect(() => {
-    if (!coords || !appActive) return;
-    tick();
-    const id = setInterval(tick, POLL_MS);
-    return () => clearInterval(id);
-  }, [!!coords, appActive, tick]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Register tick as the global refresh so other screens can trigger it
-  useEffect(() => {
-    registerNearbyRefresh(tick);
-  }, [tick]);
-
-  useEffect(() => {
-    registerMeetupRemove((id) => {
-      setClubMeetups((prev) => prev.filter((m) => m.id !== id));
-    });
-  }, []);
-
+    if (await ensurePermission('location')) setPermState('granted');
+  }
 
 
   // The sheet and the story viewer used to be re-synced here after every fetch.
   // Both now read their rows out of the live lists as they render, so there is
   // nothing left to copy across.
-
-  function openSheet(user: NearbyUser) {
-    setSelectedMeetup(null);
-    setOpenUser(user);
-    sheetY.set(withSpring(0, SPRING_CFG));
-  }
-
-  function closeSheet() {
-    sheetY.set(withSpring(SHEET_H, SPRING_CFG, (done) => {
-      if (done) scheduleOnRN(setOpenUser, null);
-    }));
-  }
-
-  function openMeetupSheet(meetup: ClubMeetup) {
-    setOpenStories(null);
-    setOpenUser(null);
-    setSelectedMeetup(meetup);
-    sheetY.set(withSpring(0, SPRING_CFG));
-  }
-
-  function closeMeetupSheet() {
-    sheetY.set(withSpring(SHEET_H, SPRING_CFG, (done) => {
-      if (done) scheduleOnRN(setSelectedMeetup, null);
-    }));
-  }
-
-  // ── Locate / follow ─────────────────────────────────────────────────────────
-  //
-  // This is a camera control and nothing else. It deliberately never calls
-  // reportLocation or tick: a button that made the phone transmit its position
-  // would be a way to broadcast location while sharing is paused, which is the
-  // one thing pausing is supposed to guarantee. Recentering while paused moves
-  // the camera and sends nothing.
-  //
-  // It also reuses the map's existing watchPositionAsync subscription rather
-  // than opening its own. A second GPS subscription on a screen people leave
-  // open is a real battery cost for no new information.
-  const centerOnSelf = useCallback(
-    (target: Coordinates, resetZoom: boolean) => {
-      const map = mapRef.current;
-      if (!map) return;
-      const current = regionRef.current;
-      const zoomed = resetZoom || !current;
-      centeredOnRef.current = target;
-      map.animateToRegion(
-        {
-          ...target,
-          latitudeDelta:  zoomed ? FOCUS_DELTA : current!.latitudeDelta,
-          longitudeDelta: zoomed ? FOCUS_DELTA : current!.longitudeDelta,
-        },
-        // Both platforms treat a zero duration as an instant move, so Reduce
-        // Motion gets a real jump rather than a very fast animation.
-        reduceMotion ? 0 : RECENTER_MS,
-      );
-    },
-    [reduceMotion],
-  );
-
-  // Guarded through a ref, not through the state updater: onPanDrag fires on
-  // every frame of a drag, and announcing from inside a setState callback
-  // would repeat for each one.
-  const stopFollowing = useCallback((reason: 'gesture' | 'tap') => {
-    if (!followingRef.current) return;
-    followingRef.current = false;
-    setFollowRequested(false);
-    announce(
-      reason === 'gesture'
-        ? 'Stopped following your location, map moved'
-        : 'Stopped following your location',
-    );
-  }, []);
-
-  /**
-   * Tapping a headcount goes in far enough to break the pile up.
-   *
-   * A third of the current span per tap, so a badge over a dense spot can be
-   * opened by tapping it again rather than by guessing a zoom level. Following is
-   * released first: the camera is being sent where the user chose, and the next
-   * position fix would otherwise haul it straight back.
-   */
-  const zoomToCluster = useCallback(
-    (center: { latitude: number; longitude: number }) => {
-      const map = mapRef.current;
-      if (!map) return;
-      stopFollowing('tap');
-      const current = regionRef.current;
-      const delta = Math.max(0.0015, (current?.latitudeDelta ?? zoomDelta) / 3);
-      map.animateToRegion(
-        { ...center, latitudeDelta: delta, longitudeDelta: delta },
-        reduceMotion ? 0 : RECENTER_MS,
-      );
-    },
-    [reduceMotion, stopFollowing, zoomDelta],
-  );
-
-  // Track each new fix while following. The guard matters in approximate mode,
-  // where consecutive fixes usually round to the same point and would
-  // otherwise re-animate the camera to where it already is.
-  useEffect(() => {
-    if (!following || !displayCoords) return;
-    const last = centeredOnRef.current;
-    if (last && last.latitude === displayCoords.latitude && last.longitude === displayCoords.longitude) return;
-    centerOnSelf(displayCoords, false);
-  }, [following, displayCoords, centerOnSelf]);
-
-  async function explainUnavailable() {
-    // The primer already covers both shapes of this: the reason plus the OS
-    // dialog while we may still ask, and the reason plus Linking.openSettings()
-    // once it has been permanently refused. A second explanation of our own
-    // here would only be a worse copy of it.
-    if (await ensurePermission('location')) {
-      setPermState('granted');
-      await refreshPermissions(['location']);
-    }
-  }
-
-  /** Ask the OS for a fresh fix and feed it into the shared position state. */
-  const refreshFix = useCallback(async (): Promise<Coordinates | null> => {
-    try {
-      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const next = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
-      fixAtRef.current = fix.timestamp;
-      setCoords(next);
-      return atSharingPrecision(next);
-    } catch {
-      return null;
-    }
-  }, []);
-
-  function startFollowing(target: Coordinates) {
-    centerOnSelf(target, true);
-    // Set before the re-render: stopFollowing reads the ref, and onPanDrag can
-    // fire a frame ahead of the state update.
-    followingRef.current = true;
-    setFollowRequested(true);
-    announce('Following your location');
-  }
-
-  async function handleLocatePress() {
-    if (!locationGranted) {
-      explainUnavailable();
-      return;
-    }
-    if (following) {
-      stopFollowing('tap');
-      return;
-    }
-
-    // Move on the fix we already have. The watcher only fires every 10m, so a
-    // still user's fix is minutes old and perfectly accurate — blocking on the
-    // GPS first made the button do nothing for the second or two a fresh fix
-    // takes, which reads as broken.
-    if (displayCoords) {
-      startFollowing(displayCoords);
-      // If it really is old enough to predate a backgrounding, re-read in the
-      // background; follow mode moves the camera the moment the fix lands.
-      if (Date.now() - fixAtRef.current > STALE_FIX_MS) refreshFix();
-      return;
-    }
-
-    // Nothing to centre on at all. This is the only case that waits, and it
-    // waits rather than falling back to a hardcoded coordinate.
-    setLocating(true);
-    const target = await refreshFix();
-    setLocating(false);
-    if (!target) {
-      Alert.alert(
-        'Can’t find you yet',
-        'Approx couldn’t get a location fix. Move somewhere with a clearer view of the sky and try again.',
-      );
-      return;
-    }
-    startFollowing(target);
-  }
-
-  const locateState: LocateState =
-    !locationGranted ? 'unavailable'
-    : locating || !displayCoords ? 'locating'
-    : following ? 'following'
-    : 'off';
 
   /** The control belongs to the map, not to the states that replace it: over
    * the permission dead end it duplicates the Allow button, and over the
@@ -2903,376 +2644,49 @@ export default function MapScreen() {
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
     : undefined;
 
-  // Keep last non-null selection cached so the sheets stay mounted. Caught
-  // during render, not from an effect: the sheet has to have its content on the
-  // first painted frame, or opening it flashes an empty panel. Both conditions
-  // go false on the retry, so this settles in one extra pass.
-  if (selectedUser && selectedUser !== sheetUser) setSheetUser(selectedUser);
-  if (selectedMeetup && selectedMeetup !== sheetMeetup) setSheetMeetup(selectedMeetup);
-
   return (
     <View style={styles.container}>
       {permState && permState !== 'granted' ? (
-        // An explicit dead end with a way out, rather than a spinner that
-        // never resolves or a sentence with no action attached.
-        <View style={styles.center} accessible accessibilityRole="alert">
-          <Text style={styles.emptyTitle}>The map needs location access</Text>
-          <Text style={styles.errorText}>
-            {permState === 'blocked'
-              ? 'Location is turned off for Approx in system settings. The map can’t show anyone nearby until it’s back on.'
-              : 'Approx shows people with shared interests near you right now. Without location there’s nothing to show.'}
-          </Text>
-          <Pressable
-            onPress={async () => {
-              if (permState === 'blocked') {
-                openAppSettings();
-                return;
-              }
-              if (await ensurePermission('location')) setPermState('granted');
-            }}
-            style={({ pressed }) => [styles.emptyBtn, pressed && { opacity: 0.7 }]}
-            accessibilityRole="button"
-            accessibilityLabel={
-              permState === 'blocked' ? 'Open system settings' : 'Allow location access'
-            }
-          >
-            <Text style={styles.emptyBtnText}>
-              {permState === 'blocked' ? 'Open Settings' : 'Allow location'}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/nearby')}
-            style={({ pressed }) => [styles.emptyLink, pressed && { opacity: 0.7 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Open the nearby people list instead"
-          >
-            <Text style={styles.emptyLinkText}>See nearby people as a list</Text>
-          </Pressable>
-        </View>
+        <MapPermissionGate
+          permState={permState}
+          styles={styles}
+          onAllow={allowLocation}
+          onList={() => router.push('/nearby')}
+        />
       ) : !displayCoords ? (
         <View style={styles.center} accessible accessibilityLabel="Finding your location">
           <ActivityIndicator color={colors.teal} size="large" />
           <Text style={styles.loadingText}>Locating you…</Text>
         </View>
       ) : (
-        <MapView
-          ref={mapRef}
-          onLayout={(e) => {
-            setMapH(e.nativeEvent.layout.height);
-          }}
-          style={styles.map}
-          provider={PROVIDER_GOOGLE}
-          customMapStyle={mapStyleFor(themeMode)}
-          initialRegion={region}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
-          rotateEnabled={false}
-          pitchEnabled={false}
-          // Dragging the map is the user taking the camera back. Follow mode
-          // drops out rather than fighting the gesture and snapping away from
-          // wherever they just moved to. Pinch-zoom is not a pan, so zooming
-          // in on yourself keeps following, the way it does in Google Maps.
+        <MapCanvas
+          mapRef={mapRef}
+          styles={styles}
+          themeMode={themeMode}
+          region={region}
+          displayCoords={displayCoords}
+          colors={colors}
+          overlays={overlays}
+          slots={slots}
+          visibleNearby={visibleNearby}
+          motionTrails={motionTrails}
+          reduceMotion={reduceMotion}
+          friendIds={friendIds}
+          connectionIds={connectionIds}
+          selfProfile={selfProfile}
+          selfZone={selfZone}
+          ghost={ghost}
+          storiesByAuthor={storiesByAuthor}
+          clubMeetups={clubMeetups}
+          onMapLayout={onMapLayout}
+          onRegionChangeComplete={onRegionChangeComplete}
           onPanDrag={() => stopFollowing('gesture')}
-          onRegionChangeComplete={(r) => {
-            regionRef.current = r;
-            // Android fires this repeatedly through a continuous pinch, and each
-            // pass re-renders every marker on the map. So the layout's zoom is
-            // updated once the camera has been still for a moment, and only when
-            // it lands in a different bucket — a pinch costs one re-render at the
-            // end instead of one per frame, and a pan costs none.
-            if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current);
-            zoomSettleRef.current = setTimeout(() => {
-              const next = zoomBucket(r.latitudeDelta);
-              setZoomDelta((prev) => (next === prev ? prev : next));
-            }, ZOOM_SETTLE_MS);
-          }}
-          onLongPress={() => {
-            // No `if (!coords) return` any more. Not having a fix - because
-            // sharing is paused, or the permission was never granted - is no
-            // longer a reason a story cannot be written; it only means the
-            // story will not be a pin.
-            setCreateStoryCoord(coords ?? null);
-            setComposerOpen(true);
-            setLocationToast(true);
-            if (locationToastTimer.current) clearTimeout(locationToastTimer.current);
-            locationToastTimer.current = setTimeout(() => setLocationToast(false), 2000);
-          }}
-        >
-          {/* Other people's detection zones are deliberately not drawn.
-              A zone is a radar: it decides who *its owner* can find. Seeing a
-              stranger's radar tells you nothing you can act on — you are on it
-              or you are not, and either way the answer is already the fact that
-              they are on your screen. What it did do was fill the map with
-              overlapping teal circles, one per person, until the only thing
-              legible was the circles.
-              Your own zone is below, because that one is a tool: it is the
-              reach you are tuning when you change its size. And music zones
-              stay, because those answer a question you can act on — walk
-              inside one and you can hear what is playing. */}
-
-          {/* Music zones. Someone else's ring is drawn when the viewer is
-              allowed to hear their track; the viewer's own whenever they have
-              a music zone switched on — see `selfMusicZoneRing`. A ring means
-              "the music stops here", so a zone that has been switched off has
-              no ring, on the owner's map or anyone else's.
-              A hairline and nothing else. What identifies it as *music* is the
-              badge on its edge, not the stroke — the map already has circles in
-              this colour, and shouting with opacity would only have made a
-              louder anonymous ring. Not dashed either: `lineDashPattern` on a
-              Circle is Apple-Maps-only and this map is PROVIDER_GOOGLE, so the
-              dashes would silently never appear. */}
-          {/* Colours come from the palette, not from literals.
-              Somebody else's ring used to be a hardcoded rgba(31,199,182) —
-              the *dark* theme's teal — so on the light map it stayed a pale
-              teal thread over a near-white basemap and simply could not be
-              seen. The light palette answers `teal` with a strong orange, the
-              same colour those people's markers already use, so taking the hue
-              from `colors` fixes the contrast and makes the ring match the dots
-              it belongs to. Dark mode is unchanged. */}
-          {musicZones.map(({ key, center, radius, color }) => (
-            <Circle
-              key={key}
-              center={center}
-              radius={radius}
-              fillColor="transparent"
-              strokeColor={withAlpha(color, 0.6)}
-              strokeWidth={1.5}
-            />
-          ))}
-
-          {/* Own zone.
-              One polygon per *piece*, not per ring: a region straddling the
-              ±180 meridian is cut in two there, so it draws as the island group
-              it is instead of as a band stretched around the planet. Regions
-              that do not cross come back as a single piece, unchanged. */}
-          {selfZone?.zone_active && selfZone.zone_mode === 'region' && selfZone.zone_region_id
-            ? selfZoneRings.map((piece) => (
-                <Polygon
-                  // Keyed on where the piece starts: the split is deterministic,
-                  // so a piece keeps its identity until the region itself moves.
-                  key={`self-zone-${piece[0].latitude},${piece[0].longitude}`}
-                  coordinates={piece}
-                  fillColor={withAlpha(colors.purple, 0.05)}
-                  strokeColor={withAlpha(colors.purple, 0.35)}
-                  strokeWidth={1.5}
-                />
-              ))
-            : selfZone?.zone_active && (selfZone.zone_radius ?? 0) > 0 && (
-              <Circle
-                center={displayCoords}
-                radius={selfZone.zone_radius}
-                fillColor={withAlpha(colors.purple, 0.07)}
-                strokeColor={withAlpha(colors.purple, 0.35)}
-                strokeWidth={1.5}
-              />
-            )}
-
-          {/* The chip that says which ring is which — literally, now: a
-              friend's ring is labelled with their @name and drawn in their own
-              colour, so two overlapping circles are two people rather than one
-              anonymous smudge. Drawn after every circle so it sits on top of
-              them, and skipped when the ring is too small on screen for a label
-              to mean anything. Your own is included: where your music stops is
-              the one thing you cannot check by listening.
-              Slotted, and a spare slot goes transparent rather than unmounting
-              — see PARKED_MARKERS. A zone switched off has to take its chip
-              with its circle, and an unmounted Marker does not reliably go. */}
-          {musicBadges.map((z, i) => (
-            <MusicZoneBadge
-              key={musicBadgeSlotIds[i]}
-              center={z?.center ?? displayCoords}
-              radius={z?.radius ?? 0}
-              mine={z?.mine}
-              label={z?.label ?? ''}
-              color={z?.color ?? colors.purple}
-              parked={!z}
-            />
-          ))}
-
-          {/* Approximate sharers get a haze instead of a precise-looking pin —
-              the marker would otherwise imply accuracy the data doesn't have. */}
-          {visibleNearby.reduce<ReactNode[]>((circles, u) => {
-            if (u.location_precision === 'approximate' && u.latitude != null && u.longitude != null) {
-              circles.push(
-                <Circle
-                  key={`approx-${u.id}`}
-                  center={{ latitude: u.latitude, longitude: u.longitude }}
-                  radius={APPROX_RADIUS_M}
-                  fillColor="rgba(244,244,246,0.06)"
-                  strokeColor="rgba(244,244,246,0.18)"
-                  strokeWidth={1}
-                />,
-              );
-            }
-            return circles;
-          }, [])}
-
-          {/* Speed trails, drawn before the markers so they sit underneath and
-              read as something the avatar is leaving behind. Only ever built
-              from positions already observed — never extrapolated ahead of the
-              last known point, which on a 10s poll is already stale. */}
-          {Array.from(motionTrails.entries()).map(([id, path]) => (
-            <MotionTrail key={`trail-${id}`} path={path} reduceMotion={reduceMotion} />
-          ))}
-
-          {/* Leader lines back to the spot a moved marker really occupies.
-              Without them the fan would quietly claim that people sitting at
-              one table are tens of metres apart. Drawn under the markers.
-              Slotted, and a spare slot collapses onto the owner's own point in
-              full transparency rather than unmounting — see PARKED_MARKERS. */}
-          {leaders.map((line, i) => (
-            <Polyline
-              key={leaderSlotIds[i]}
-              coordinates={line ?? [displayCoords, displayCoords]}
-              strokeColor={line ? 'rgba(244,244,246,0.28)' : 'transparent'}
-              strokeWidth={1}
-              lineDashPattern={[3, 3]}
-              zIndex={2}
-            />
-          ))}
-
-          {visibleNearby.filter((u) => u.latitude != null && u.longitude != null).map((user) => {
-            // Absent from `placed` means this person was folded into a headcount
-            // badge. Drawing them as well would put two of them on the map — so
-            // the marker parks: transparent, untappable, still mounted. The
-            // unmount it replaces is the one that left a face behind under the
-            // badge on every pinch. See PARKED_MARKERS.
-            const layout = markerLayout.placed.get(`u-${user.id}`);
-            const truePos = { latitude: user.latitude, longitude: user.longitude };
-            const parked = !layout || !isDrawable(layout.position);
-            // Nowhere legal to stand at all: the one case still worth skipping,
-            // since a Marker needs a coordinate the native map can survive.
-            if (parked && !isDrawable(truePos)) return null;
-            const position = parked ? truePos : layout!.position;
-
-            const uid = Number(user.id);
-            const isFriend = friendIds.has(uid);
-            const isConnected = connectionIds.has(uid);
-            const color = isFriend ? COLOR_FRIEND : isConnected ? COLOR_CONNECTED : COLOR_STRANGER;
-            // Anyone you have a name for gets a face and a name plate — blue
-            // ring for a friend, orange for a connection. Strangers stay a lit
-            // point: no photo, no name, nothing to screenshot, until the Hi is
-            // mutual and they cross into the row above.
-            return isFriend || isConnected ? (
-              <AvatarMarker
-                key={user.id}
-                coordinate={position}
-                parked={parked}
-                uri={user.profile_picture}
-                username={user.username}
-                ringColor={color}
-                presence={user.presence}
-                motion={user.motion_class}
-                // Dropped when this marker shares its spot: the fan separates
-                // rings, and a name chip is wider than the ring it hangs under.
-                caption={layout?.crowded ? undefined : user.username}
-                // Friends and connections both have zone access. The tag
-                // marks a track you can play, so it follows the track rather
-                // than the map-zone switch.
-                captionTag={
-                  !layout?.crowded && (isFriend || isConnected) && user.zone_audio_url ? 'zone' : undefined
-                }
-                zIndex={Z_FRIEND}
-                onPress={() => openSheet(user)}
-              />
-            ) : (
-              <DotMarker
-                key={user.id}
-                coordinate={position}
-                parked={parked}
-                color={color}
-                presence={user.presence}
-                sharedInterests={user.shared_interests}
-                // The interest *name* is this marker's caption and the widest
-                // thing it draws — four of them stacked down a street is what
-                // made the map unreadable. The glyph inside the dot still says
-                // which interest it is, so only the word goes.
-                showCaption={!layout?.crowded}
-                zIndex={Z_STRANGER}
-                onPress={() => openSheet(user)}
-              />
-            );
-          })}
-
-          {/* No self-fuzz circle any more. It existed to stop an Approximate
-              sharer being shown a precise dot they had asked us not to publish;
-              precision is the viewer's relationship now, the owner is always on
-              the precise side of it, and a circle here would describe a
-              blurring that no longer applies to them. What a stranger sees is
-              drawn on the stranger's map, from the cell the server sends. */}
-
-          {/* Piles that could not be fanned apart without moving someone too far
-              — which is what zooming out does to a pixel-sized fan. A number
-              instead, and a tap to go in and see who.
-              Slots, not badges: zooming back in empties a slot rather than
-              removing it, because a removed badge is the one that stayed on the
-              map on top of the faces it had been standing in for. An empty slot
-              parks on the owner's own point, where it is invisible, one pixel
-              wide and deaf to taps. See PARKED_MARKERS. */}
-          {badges.map((cluster, i) => (
-            <ClusterMarker
-              key={badgeSlotIds[i]}
-              coordinate={cluster ? cluster.position : displayCoords}
-              count={cluster ? cluster.count : 0}
-              parked={!cluster}
-              onPress={cluster ? () => zoomToCluster(cluster.anchor ?? cluster.position) : undefined}
-            />
-          ))}
-
-          {/* Never moved, and never folded into a count. When someone stands
-              where you stand, they are the one who gets fanned aside — so this
-              marker, and the zone centred on it, stay exactly where you are. */}
-          <SelfMarker
-            coordinate={posFor(SELF_KEY, displayCoords)}
-            uri={selfProfile?.profile_picture}
-            username={selfProfile?.username ?? ''}
-            // Drawn muted while Paused, because the owner's own marker is the
-            // only thing on this screen that could be read as "this is what
-            // everyone else sees". While paused it is not — nobody sees it —
-            // and the map should say so where the question is being asked.
-            hidden={ghost === true}
-          />
-
-          {/* `isDrawable` as well as the numeric coercion at the boundary: the
-              two answer different questions. services/coords.ts guarantees a
-              real coordinate; this guarantees one Google's Mercator projection
-              can actually place, which stops above ±85°. People's markers have
-              always been filtered this way — stories and meetups were not, and
-              were the two that could reach the native map unchecked. */}
-          {Array.from(storiesByAuthor).reduce<ReactNode[]>((markers, [authorId, authorStories]) => {
-            if (isDrawable(authorStories[0])) {
-              // Keyed by author alone. It used to include the newest story id
-              // as well, to force a remount so a fresh story could not reuse a
-              // stale frozen snapshot — but StoryMarker already re-arms
-              // `tracksViewChanges` off that same id, so the remount bought
-              // nothing and cost a ghost: an unmounted marker never leaves the
-              // native map (see `PARKED_MARKERS`), so posting a story left the
-              // previous bubble behind next to the new one.
-              markers.push(
-                <StoryMarker
-                  key={`story-author-${authorId}`}
-                  stories={authorStories}
-                  onPress={() => openStoryViewer(authorStories)}
-                />,
-              );
-            }
-            return markers;
-          }, [])}
-
-          {/* Approved club meetup pins — one per event, above story bubbles. */}
-          {clubMeetups.reduce<ReactNode[]>((markers, meetup) => {
-            if (isDrawable(meetup)) {
-              markers.push(
-                <MeetupMarker
-                  key={`meetup-${meetup.id}`}
-                  meetup={meetup}
-                  onPress={() => openMeetupSheet(meetup)}
-                />,
-              );
-            }
-            return markers;
-          }, [])}
-        </MapView>
+          onLongPress={openComposerHere}
+          onOpenSheet={openSheet}
+          onZoomToCluster={zoomToCluster}
+          onOpenStories={openStoryViewer}
+          onOpenMeetup={openMeetupSheet}
+        />
       )}
 
       {/* Swipe right from the left edge to open the composer.
@@ -3297,141 +2711,49 @@ export default function MapScreen() {
         onList={() => router.push('/nearby')}
       />
 
-      {/* Sharing is on, the first position has not landed, and the map is
-          therefore empty for a reason that has nothing to do with who is
-          around. Stated, because an unexplained empty map reads as a broken
-          one — and because the honest answer is "not yet", not "nobody". */}
-      {chromeVisible && awaitingFix ? (
-        <View
-          style={[styles.pendingChip, { top: topInset + 52 }]}
-          accessible
-          accessibilityRole="alert"
-        >
-          <ActivityIndicator size="small" color={colors.t2} />
-          <Text style={styles.pendingChipText}>Getting your location…</Text>
-        </View>
-      ) : null}
+      <MapNotices
+        styles={styles}
+        colors={colors}
+        topInset={topInset}
+        overlayTop={overlayTop}
+        noticeTop={noticeTop}
+        pending={chromeVisible && awaitingFix}
+        ghostNotice={ghostNoticeVisible}
+        offsetNotice={!!overlays.chinaOffsetNotice && mapVisible}
+        onOpenPrivacy={() => router.push('/privacy')}
+      />
 
-      {/* Ghost Mode, which is the reason this map is empty in *both*
-          directions — and the one the screen would otherwise leave the user to
-          work out for themselves. The muted self marker says it too, but only
-          to somebody already looking at their own dot and already knowing what
-          muted means.
-
-          A route, not a write. Ghost Mode is a setting on the privacy screen,
-          and keeping the write there rather than here means one screen owns it
-          and the map cannot flip somebody's visibility as a side effect of
-          drawing itself. */}
-      {ghostNoticeVisible ? (
-        <Pressable
-          onPress={() => router.push('/privacy')}
-          style={({ pressed }) => [
-            styles.pausedNotice,
-            { top: overlayTop },
-            pressed && { opacity: 0.85 },
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Ghost Mode is on. Nobody can see you and you cannot see anyone. Opens privacy settings, where you can turn it off."
-        >
-          <IconGhost size={18} color={colors.t2} />
-          <View style={styles.pausedNoticeText}>
-            <Text style={styles.pausedNoticeTitle}>Ghost Mode is on</Text>
-            <Text style={styles.pausedNoticeSub}>
-              Nobody can see you, and you can’t see anyone. Tap to turn it off.
-            </Text>
-          </View>
-          <IconChevron size={18} color={colors.t3} />
-        </Pressable>
-      ) : null}
-
-      {/* The one place the map admits it is drawing on a shifted basemap.
-          Stated rather than silently corrected: everything here — your dot,
-          everyone else's, the zone outline — is in true GPS coordinates and
-          agrees with itself, but the tiles underneath are offset. */}
-      {chinaOffsetNotice && mapVisible ? (
-        <View
-          style={[styles.offsetNotice, { top: noticeTop }]}
-          accessible
-          accessibilityRole="alert"
-        >
-          <Text style={styles.offsetNoticeText}>{MAINLAND_CHINA_NOTICE}</Text>
-        </View>
-      ) : null}
-
-      {/* User detail sheet — kept mounted after first tap to avoid remount cost. */}
-      {sheetUser && (
-        <View
-          style={[StyleSheet.absoluteFill, { opacity: selectedUser ? 1 : 0 }]}
-          pointerEvents={selectedUser ? 'box-none' : 'none'}
-        >
-          <UserSheet
-            user={sheetUser}
-            sheetY={sheetY}
-            onDismiss={closeSheet}
-            onFriendChange={handleHiSent}
-          />
-        </View>
-      )}
-
-      {/* Club meetup detail sheet — same pre-mount strategy. */}
-      {sheetMeetup && (
-        <View
-          style={[StyleSheet.absoluteFill, { opacity: selectedMeetup ? 1 : 0 }]}
-          pointerEvents={selectedMeetup ? 'box-none' : 'none'}
-        >
-          <MeetupSheet
-            meetup={sheetMeetup}
-            sheetY={sheetY}
-            onDismiss={closeMeetupSheet}
-          />
-        </View>
-      )}
-
-      {/* Full-screen story viewer */}
-      {storyViewer && (() => {
-        const author = storyViewer.stories[0]?.author;
-        const authorId = author ? Number(author.id) : null;
-        const replyTo =
-          author && authorId !== null && authorId !== currentUserId && friendIds.has(authorId)
-            ? { id: authorId, username: author.username }
-            : null;
-        return (
-          <StoryViewer
-            stories={storyViewer.stories}
-            onClose={() => setOpenStories(null)}
-            onReact={reactToStory}
-            replyTo={replyTo}
-            currentUserId={currentUserId}
-          />
-        );
-      })()}
+      <MapSheets
+        sheetUser={sheetUser}
+        selectedUser={selectedUser}
+        sheetMeetup={sheetMeetup}
+        selectedMeetup={selectedMeetup}
+        sheetY={sheetY}
+        storyViewer={storyViewer}
+        currentUserId={currentUserId}
+        friendIds={friendIds}
+        onCloseSheet={closeSheet}
+        onCloseMeetupSheet={closeMeetupSheet}
+        onFriendChange={handleHiSent}
+        onCloseStories={closeStoryViewer}
+        onReact={reactToStory}
+      />
 
       <CreateStoryModal
         visible={composerOpen}
         locationless={ghost === true || (!createStoryCoord && !coords)}
-        onClose={() => { setComposerOpen(false); setCreateStoryCoord(null); }}
-        onPost={createStory}
+        onClose={closeComposer}
+        onPost={(text, photoUri) => createStory(text, photoUri, createStoryCoord)}
       />
 
-      {/* Hi sent toast */}
-      {hiToast && (
-        <View style={[styles.hiToast, { top: overlayTop + 52 }]} pointerEvents="none">
-          <IconHi size={16} color={colors.teal} />
-          <Text style={styles.hiToastText}>Hi sent</Text>
-        </View>
-      )}
-
-      {/* Story location toast */}
-      {locationToast && (
-        <View style={[styles.hiToast, { top: overlayTop + 52 }]} pointerEvents="none">
-          <IconPin size={16} color={colors.teal} />
-          <Text style={styles.hiToastText}>
-            {ghost === true || !coords
-              ? 'Story will be shared with friends, without a map location'
-              : 'Story will be posted at your current location'}
-          </Text>
-        </View>
-      )}
+      <MapToasts
+        styles={styles}
+        colors={colors}
+        top={overlayTop + 52}
+        hiToast={hiToast}
+        locationToast={locationToast}
+        locationless={ghost === true || !coords}
+      />
 
       {primer}
 

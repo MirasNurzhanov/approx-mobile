@@ -1,55 +1,27 @@
 # Which Expo this is
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before writing any code.
 
-This project is on **SDK 57** (React Native 0.86.3, React 19.2.3).
+This project is on **SDK 54** (React Native 0.81.5, React 19.1.0).
 
-Its history is worth knowing, because it makes stale answers cut both ways.
-The tree went 54 → 56 → 57 on 2026-08-20, was deliberately brought back to 54
-on 2026-08-21, and was moved forward to 57 again on 2026-09-04. So answers
-written against 54 are three majors *behind* this code and will not compile,
-and any 54-era source that survived the re-upgrade is a bug. The places the
-versions genuinely differ, all of which bit during one hop or the other:
+It briefly ran on SDK 57 — the tree went 54 → 56 → 57 on 2026-08-20 and was
+deliberately brought back to 54 on 2026-08-21. So there is a real hazard in
+both directions here: answers written against 56/57 are two majors *ahead* of
+this code and will not compile, and any 57-era source that survives the revert
+is a bug. The three places the versions genuinely differ, all of which bit
+during the downgrade:
 
-- **react-navigation imports.** From SDK 56 on, expo-router refuses direct
-  `@react-navigation/*` imports and throws at bundle time. Import from
-  `expo-router/react-navigation` instead. (On 54 the direct import was the
-  correct form and the re-export did not exist, which is why stale answers
-  reach for it.)
-- **`NativeTabs` parts are compound** — `NativeTabs.Trigger.Label`, `.Icon`,
-  `.Badge`, `.VectorIcon`. The standalone `Label`/`Icon`/`Badge`/`VectorIcon`
-  exports from `expo-router/unstable-native-tabs` are SDK 54 and no longer
-  exist; only `NativeTabs` itself is exported now.
-- **Tab bar icons.** `Icon` takes `sf` (iOS symbol), `xcasset`, `drawable` (a
-  bundled Android resource), **`md`** (a Material Symbols name) and `src`.
-  Priority is `sf` > `xcasset` > `src` on iOS and `drawable` > `md` > `src` on
-  Android. **There is no `androidSrc` prop** — that was SDK 54, and the
-  `androidSrc={<VectorIcon .../>}` bridge it needed is replaced by plain
-  `md="map"`.
-- **`StyleSheet.absoluteFillObject` is gone** (removed in RN 0.83+). Use
-  `StyleSheet.absoluteFill`, which is an object and spreads the same way.
-- **`ColorSchemeName` includes `'unspecified'`** from RN 0.86, so narrowing to
-  `'light' | 'dark'` needs an explicit check, not just `?? 'light'`.
-
-Two things that are configuration rather than source, both of which cost a
-while to find and neither of which is obvious from an error message:
-
-- **`tsconfig.json` must set `"types": ["jest", "node"]`.** TypeScript 6 (which
-  SDK 57 pins) no longer picks up `@types/*` automatically here, and without
-  the explicit list every test file reports ~1400 phantom errors
-  (`Cannot find name 'describe'`, `Cannot use namespace 'jest' as a value`).
-- **`expo-modules-core` must end up *hoisted*** to `node_modules/`. When npm
-  nests it under `node_modules/expo/` instead, `expo-audio`’s types cannot
-  resolve `SharedObject`, and because `skipLibCheck` hides the unresolved
-  import the only symptom is `AudioPlayer` silently losing `addListener`.
-  Do **not** fix that by adding it to `dependencies` — `expo-doctor` fails the
-  project for depending on it directly. A plain `npm install` hoisted it here;
-  `npm dedupe` did not.
-
-**`react-native-worklets` must stay mocked in `jest.setup.js`.** From 0.10 it
-initialises its native module at *import* time, so merely importing it throws
-under Jest. Only `scheduleOnRN` (the app’s whole usage) and
-`createSerializable` (which reanimated imports from it) are needed.
+- **react-navigation imports.** On 54, import `@react-navigation/native`
+  directly — that is correct and works. `expo-router/react-navigation` does not
+  exist in expo-router 6 and will not resolve. (It is the *required* form from
+  SDK 56 on, which is why stale answers reach for it.)
+- **`NativeTabs` parts are standalone exports** — `Label`, `Icon`, `Badge`,
+  `VectorIcon`, imported from `expo-router/unstable-native-tabs`. The compound
+  `NativeTabs.Trigger.Label` spelling is SDK 56+ and does not resolve here.
+- **Tab bar icons.** `Icon` takes `sf` (iOS symbol), `drawable` (a bundled
+  Android resource), `androidSrc` or `src` (image sources). There is **no `md`
+  prop** — that is SDK 56+. To reach Android with an @expo/vector-icons glyph,
+  wrap it: `androidSrc={<VectorIcon family={MaterialIcons} name="map" />}`.
 
 What did *not* change and needs no special handling: `expo-file-system` exports
 `File` from its root on 54 as well as 57, `expo` exports `useEventListener`,

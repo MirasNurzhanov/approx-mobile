@@ -1320,7 +1320,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   previewEmpty: { fontFamily: fonts.body, fontSize: type.small, color: colors.t3 },
   previewLoading: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(10,10,11,0.4)',

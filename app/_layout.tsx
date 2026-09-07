@@ -1,9 +1,10 @@
-// Through `expo-router/react-navigation`, not `@react-navigation/native`.
-// From SDK 56 on expo-router refuses direct `@react-navigation/*` imports and
-// throws at bundle time; this re-export is the supported path. It does not
-// exist in expo-router 6 (SDK 54), so this line is what breaks first if the
-// project is ever moved back.
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router/react-navigation';
+// Direct from `@react-navigation/native`, which is correct on SDK 54.
+//
+// SDK 56 is where expo-router started refusing these imports and throwing at
+// bundle time, and `expo-router/react-navigation` is the replacement there —
+// that path does not exist in expo-router 6, so it cannot be used here. If this
+// project moves forward again, this import is the first thing that breaks.
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';

@@ -18,12 +18,7 @@ function subscribe(onChange: () => void): () => void {
 }
 
 function getSnapshot(): 'light' | 'dark' {
-  // RN 0.86 widened ColorSchemeName to include 'unspecified', which is what
-  // the web Appearance shim returns before a media query has resolved. Treated
-  // the same as null: fall back to light rather than widening the return type,
-  // because every caller of this hook switches on exactly two values.
-  const scheme = Appearance.getColorScheme();
-  return scheme === 'dark' ? 'dark' : 'light';
+  return Appearance.getColorScheme() ?? 'light';
 }
 
 function getServerSnapshot(): 'light' | 'dark' {

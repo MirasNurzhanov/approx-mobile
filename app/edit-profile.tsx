@@ -624,7 +624,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   avatarInitial: { color: '#fff', fontSize: 32, fontWeight: '700' },
   avatarImage: { width: 80, height: 80, borderRadius: 40 },
   avatarUploadOverlay: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderRadius: 40,
     alignItems: 'center',

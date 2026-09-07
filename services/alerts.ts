@@ -1,6 +1,5 @@
-import { useSyncExternalStore } from 'react';
-
 import { api } from '@/services/api';
+import { getNavBadges, refreshNavBadges, resetNavBadges, useSharedNavBadges } from '@/services/navBadges';
 
 // Everything that is waiting for the user, in one place: Hi requests (formerly
 // the Chat "Pending" tab), friend requests, and story activity. The alerts
@@ -195,7 +194,8 @@ export function deriveAlerts(data: AlertsData): DerivedAlerts {
 }
 
 export async function countUnreadAlerts(): Promise<number> {
-  return deriveAlerts(await loadAlerts()).unreadCount;
+  await refreshNavBadges();
+  return getNavBadges().alerts;
 }
 
 /** Deletes every notification (story activity, club activity, …) server-side.
@@ -207,55 +207,15 @@ export async function clearAllAlerts(): Promise<void> {
 }
 
 // ─── Unread store ─────────────────────────────────────────────────────────────
-// The count has two subscribers that are on screen at the same time — the nav
-// arc's Chat badge and the Alerts tab in Chat. One shared poll rather than one
-// per hook instance, or the Chat tab would issue four requests every ten
-// seconds to answer a single question. Same shape as services/blocked.ts.
-
-const POLL_MS = 10_000;
-
-let unreadCount = 0;
-let timer: ReturnType<typeof setInterval> | null = null;
-let inFlight = false;
-const listeners = new Set<() => void>();
-
+// The alerts tab, native tab bar and wheel subscribe to the same small request.
 export function refreshAlertsCount(): void {
-  if (inFlight) return;
-  inFlight = true;
-  countUnreadAlerts()
-    .then((next) => {
-      if (next === unreadCount) return;
-      unreadCount = next;
-      listeners.forEach((l) => l());
-    })
-    .catch(() => {})
-    .finally(() => { inFlight = false; });
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  // Polling is tied to having subscribers, so no timer survives on screens
-  // that never show the count.
-  if (listeners.size === 1) {
-    refreshAlertsCount();
-    timer = setInterval(refreshAlertsCount, POLL_MS);
-  }
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0 && timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-  };
+  void refreshNavBadges();
 }
 
 export function useAlertsCount(): number {
-  return useSyncExternalStore(subscribe, () => unreadCount);
+  return useSharedNavBadges().alerts;
 }
 
-/** Drop the previous account's badge on sign-out, so the next person to use
- *  this device does not briefly see a count that was never theirs. */
 export function resetAlertsCount(): void {
-  unreadCount = 0;
-  listeners.forEach((l) => l());
+  resetNavBadges();
 }

@@ -39,6 +39,21 @@ export interface ContentActionTarget {
   /** Drop this content from whatever list it is in, right now. Called after a
    *  successful block, and after a report when the user then blocks. */
   onRemoved?: () => void;
+  /**
+   * Take this content down for everyone. Offered only when set, and callers
+   * set it only for content the viewer owns — `swift.is_mine` and nothing
+   * looser. That gate is about not offering an action that would fail; the
+   * server is what actually enforces authorship, and answers 404 to anyone
+   * else so a stranger cannot even learn the row exists.
+   *
+   * Separate from `onRemoved` on purpose, and the difference is who is
+   * affected. `onRemoved` hides something from *this* viewer's screen after a
+   * block. This deletes it for everybody, and is irreversible — which is why
+   * it gets its own confirmation below rather than sharing the block one.
+   */
+  onDelete?: () => Promise<void> | void;
+  /** What is being deleted, for the confirmation. "Swift", "story". */
+  deleteNoun?: string;
 }
 
 /** How each surface is described in the note a block sends to moderation. */
@@ -110,43 +125,104 @@ export function useContentActions() {
     );
   }, [doBlock]);
 
+  /**
+   * Confirm before taking something down for everyone.
+   *
+   * Its own dialog rather than the block one, because it is a different
+   * promise: a block is undoable from Settings and affects only what this
+   * person sees, and this is neither. The wording says both of those things —
+   * "everyone" and "cannot be undone" — because an overflow menu is exactly
+   * where a mis-tap happens, and "Delete" alone does not say which of the two
+   * destructive things in this menu it is.
+   */
+  const confirmDelete = useCallback((item: ContentActionTarget) => {
+    const noun = item.deleteNoun ?? 'post';
+    Alert.alert(
+      `Delete this ${noun}?`,
+      `It will be removed for everyone who can see it, and this cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await item.onDelete?.();
+            } catch {
+              Alert.alert(
+                'Could not delete',
+                `This ${noun} is still up. Check your connection and try again.`,
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, []);
+
   /** Open the overflow menu for one piece of content. */
   const present = useCallback((item: ContentActionTarget) => {
     const canBlock = item.authorId != null;
+    const canDelete = item.onDelete != null;
 
     const openReport = () => setReporting(item);
 
     if (Platform.OS === 'ios') {
-      const options = canBlock
-        ? ['Report', 'Block user', 'Cancel']
-        : ['Report', 'Cancel'];
+      // Built as a list so the indices cannot drift out of step with the
+      // handler below — the failure mode of a hand-numbered action sheet is
+      // "Cancel deletes your video", which is not a bug worth risking to save
+      // four lines.
+      const actions: { label: string; destructive?: boolean; run: () => void }[] = [];
+      // Your own content is not something you report, so Delete stands in its
+      // place rather than beside it.
+      if (canDelete) {
+        actions.push({
+          label: `Delete ${item.deleteNoun ?? 'post'}`,
+          destructive: true,
+          run: () => confirmDelete(item),
+        });
+      } else {
+        actions.push({ label: 'Report', run: openReport });
+        if (canBlock) {
+          actions.push({ label: 'Block user', destructive: true, run: () => confirmBlock(item) });
+        }
+      }
+
+      const options = [...actions.map((a) => a.label), 'Cancel'];
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: item.subject,
           options,
           cancelButtonIndex: options.length - 1,
-          destructiveButtonIndex: canBlock ? 1 : undefined,
+          destructiveButtonIndex: actions.findIndex((a) => a.destructive) >= 0
+            ? actions.findIndex((a) => a.destructive)
+            : undefined,
         },
-        (index) => {
-          if (index === 0) openReport();
-          else if (canBlock && index === 1) confirmBlock(item);
-        },
+        (index) => { actions[index]?.run(); },
       );
       return;
     }
 
     Alert.alert(item.subject, undefined, [
-      { text: 'Report', onPress: openReport },
-      ...(canBlock
+      ...(canDelete
         ? [{
-            text: 'Block user',
+            text: `Delete ${item.deleteNoun ?? 'post'}`,
             style: 'destructive' as const,
-            onPress: () => confirmBlock(item),
+            onPress: () => confirmDelete(item),
           }]
-        : []),
+        : [
+            { text: 'Report', onPress: openReport },
+            ...(canBlock
+              ? [{
+                  text: 'Block user',
+                  style: 'destructive' as const,
+                  onPress: () => confirmBlock(item),
+                }]
+              : []),
+          ]),
       { text: 'Cancel', style: 'cancel' as const },
     ]);
-  }, [confirmBlock]);
+  }, [confirmBlock, confirmDelete]);
 
   const sheets = (
     <ReportSheet

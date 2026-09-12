@@ -21,6 +21,7 @@ import { runBusy } from '@/services/busy';
 import { sectionise } from '@/services/interestCategories';
 import { registerProfileRefresh } from '@/services/profileRefresh';
 import { ProfileLinks } from '@/components/ProfileLinks';
+import { SwiftProfileSection } from '@/components/profile/SwiftProfileSection';
 import type { ProfileLink } from '@/services/links';
 import { ApproxNav } from '@/components/ApproxNav';
 import { ApproxMark } from '@/components/ui/ApproxMark';
@@ -51,6 +52,7 @@ import { PROFESSIONS, COUNTRIES, flagEmoji } from '@/constants/onboardingData';
 interface Profile {
   id: number;
   username: string;
+  ghost_mode?: boolean;
   bio?: string;
   links?: ProfileLink[];
   date_joined?: string;
@@ -119,6 +121,11 @@ export default function ProfileScreen() {
   const [connectionCount, setConnectionCount] = useState(_cache?.connectionCount ?? 0);
   const [loading, setLoading] = useState(_cache === null);
   const [refreshing, setRefreshing] = useState(false);
+  const [swiftRefreshKey, setSwiftRefreshKey] = useState(0);
+  /** Lights the ring on the avatar. Reported up by SwiftProfileSection
+   *  rather than fetched again — see its `onCountChange`. */
+  const [swiftCount, setSwiftCount] = useState(0);
+  const [profileVerified, setProfileVerified] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   // Mirrors of the state above, updated alongside it, so fetchAll can read
@@ -129,16 +136,20 @@ export default function ProfileScreen() {
   const profileRef = useRef(profile);
   const friendCountRef = useRef(friendCount);
   const connectionCountRef = useRef(connectionCount);
+  const fetchSequence = useRef(0);
 
   const fetchAll = useCallback(async () => {
+    const sequence = ++fetchSequence.current;
     const [profileRes, friendsRes] = await Promise.allSettled([
       api.get<Profile>('/api/users/profile/'),
       api.get<FriendList>('/api/friends/list/'),
     ]);
+    if (sequence !== fetchSequence.current) return;
     const p = profileRes.status === 'fulfilled' ? profileRes.value.data : profileRef.current;
     let fc = friendCountRef.current;
     let cc = connectionCountRef.current;
     if (profileRes.status === 'fulfilled') {
+      setProfileVerified(true);
       setProfile(p);
       profileRef.current = p;
     }
@@ -157,7 +168,9 @@ export default function ProfileScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      setProfileVerified(false);
       fetchAll().finally(() => setLoading(false));
+      return () => { fetchSequence.current += 1; setProfileVerified(false); };
     }, [fetchAll])
   );
 
@@ -182,6 +195,7 @@ export default function ProfileScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    setSwiftRefreshKey((value) => value + 1);
     // Promise `.finally`, as on the focus effect above: same guarantee that the
     // spinner stops on rejection, but React Compiler can compile it — a
     // `try/finally` statement makes it bail on this whole screen.
@@ -256,7 +270,16 @@ export default function ProfileScreen() {
         {/* Hero */}
         <View style={styles.hero}>
           <Pressable onPress={pickImage} disabled={uploading} style={styles.avatarWrap}>
-            <Avatar uri={profile?.profile_picture} name={profile?.username} size="xl" />
+            {/* The ring says "there are Swifts here". Tapping still opens the
+                photo picker, which is what the camera badge below promises and
+                what this control has always done — the way in to the Swifts
+                themselves is the gallery further down the page. */}
+            <Avatar
+              uri={profile?.profile_picture}
+              name={profile?.username}
+              size="xl"
+              swiftRing={swiftCount > 0}
+            />
             {uploading ? (
               <View style={styles.avatarOverlay}>
                 <ActivityIndicator color="#fff" size="small" />
@@ -314,6 +337,8 @@ export default function ProfileScreen() {
             <Text style={styles.statLabel}>Friends</Text>
           </View>
         </Card>
+
+        {profile && profileVerified && <SwiftProfileSection creatorId={profile.id} canView isOwner ghostMode={profile.ghost_mode} refreshKey={swiftRefreshKey} onCountChange={setSwiftCount} />}
 
         {/* Interests, grouped the same way the pickers group them. A profile
             with thirty picks used to be one undifferentiated wall of chips;

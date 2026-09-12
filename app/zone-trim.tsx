@@ -21,7 +21,9 @@ import { ZonePlayer } from '@/components/ZonePlayer';
 import { fonts, radius, type } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { contentColumn, useLayoutSize } from '@/hooks/useLayout';
 import { fmtTime, trackTitle } from '@/services/zoneAudio';
+import { messageFor } from '@/services/zoneArea';
 
 // Which part of the track goes round and round.
 //
@@ -54,6 +56,7 @@ export default function ZoneTrimScreen() {
   const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
+  const layout = useLayoutSize();
 
   const [zone, setZone] = useState<ZoneState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,9 +117,11 @@ export default function ZoneTrimScreen() {
     }, () => setSaving(false)).catch((e: any) =>
       Alert.alert(
         'Could not save the loop',
-        e?.response?.data?.zone_track_end_ms?.[0] ??
-        e?.response?.data?.detail ??
-        'Please try again.',
+        // `zone_track_end_ms` carries both loop refusals — a window that ends
+        // before it starts, and one too short to be a loop rather than a
+        // stutter. `zone_track_start_ms` is listed after it only for a
+        // field-level error on the start itself; the loop rule never names it.
+        messageFor(e, { prefer: ['zone_track_end_ms', 'zone_track_start_ms'] }),
       ),
     );
   }
@@ -153,7 +158,11 @@ export default function ZoneTrimScreen() {
       </ScreenHeader>
 
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
+        contentContainerStyle={[
+          styles.scroll,
+          contentColumn(layout),
+          { paddingHorizontal: layout.gutter, paddingBottom: bottom + 40 },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {!url ? (
@@ -284,7 +293,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   headerSpacer: { width: 40, alignItems: 'flex-end' },
 
-  scroll: { paddingHorizontal: 20, paddingTop: 20, gap: 16 },
+  // See app/zone.tsx — gutter and column cap come from the layout.
+  scroll: { paddingTop: 20, gap: 16 },
 
   emptyCard: {
     backgroundColor: colors.surface,

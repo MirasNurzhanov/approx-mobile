@@ -156,6 +156,7 @@ function makeSwift(id: number, overrides: Partial<Swift> = {}): Swift {
     view_count: 0,
     viewer_liked: false,
     viewer_reposted: false,
+  viewer_saved: false,
     viewer_viewed: false,
     location_available: true,
     is_mine: false,

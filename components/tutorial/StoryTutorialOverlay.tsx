@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { Button } from '@/components/ui/Button';
+import { useNavContentPadding } from '@/hooks/useNavMetrics';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { fonts, lightColors } from '@/constants/theme';
 
@@ -41,7 +42,19 @@ function scrimPath(width: number, height: number, cx: number, cy: number, r: num
 
 export function StoryTutorialOverlay({ onDismiss }: { onDismiss: () => void }) {
   const { width, height } = useWindowDimensions();
-  const { top, bottom } = useSafeAreaInsets();
+  const { top } = useSafeAreaInsets();
+  // Lifts the panel clear of whichever nav is drawn. "Got it" used to sit at
+  // `bottom: 0`, which is underneath the nav — and the nav wins the touch on
+  // every style: iOS bar style is a real UITabBar that UIKit draws outside
+  // this view tree, where no zIndex here can reach it, and the wheel's root
+  // absorbs every touch across its whole rectangle so its arc does not pan the
+  // map. Either way the button rendered but could not be pressed, leaving a
+  // first-run overlay with no way out.
+  //
+  // Through `useNavContentPadding` rather than the geometry constants, because
+  // the wheel's arc is roughly 200pt tall against the capsule's 62 — a fixed
+  // number is right for at most one nav style.
+  const navPad = useNavContentPadding(24);
   const reduceMotion = useReduceMotion();
   const holeR = Math.min(width, height) * HOLE_RATIO;
   // Upper right rather than screen centre: the owner's own avatar sits at the
@@ -97,7 +110,7 @@ export function StoryTutorialOverlay({ onDismiss }: { onDismiss: () => void }) {
         👇
       </Animated.Text>
 
-      <View style={[styles.panel, { paddingBottom: bottom + 24 }]}>
+      <View style={[styles.panel, { paddingBottom: navPad }]}>
         <Text style={styles.text}>
           Press and hold anywhere on the map for 2 seconds to post a story
         </Text>

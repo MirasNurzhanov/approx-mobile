@@ -7,6 +7,10 @@ import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
 import { getInstallId } from './device';
 import { resetOwnMotion } from './ownMotion';
+import { resetPositionSmoothing } from './positionSmoothing';
+import { clearRouteCache } from './routing';
+import { resetTravelCalibration } from './travelCalibration';
+import { resetPinnedPlaces } from './pinnedPlaces';
 import { resetNotificationPrefs } from './notificationPrefs';
 import { resetLocationDisclosure } from './locationDisclosure';
 import { resetPrivacy } from './privacy';
@@ -108,6 +112,8 @@ export async function performSignOut(): Promise<void> {
   // refetch on focus; left running, every one of those calls 401s during
   // teardown and drags the api layer's forced-logout path in with it.
   beginSessionEnd();
+  // Invalidate coordinate-keyed routes immediately, before any logout awaits.
+  clearRouteCache();
 
   const [accessToken, refresh] = await Promise.all([
     AsyncStorage.getItem('access_token').catch(() => null),
@@ -163,6 +169,14 @@ export async function performSignOut(): Promise<void> {
   // without ever having read it.
   await resetLocationDisclosure().catch(() => {});
   await resetArchive().catch(() => {});
+  // Pinned places, in memory and on disk. A pin off a Swift is a coordinate one
+  // account was shown after asking for it — see services/pinnedPlaces — and it
+  // has no business being on the next account'''s map, or on their phone.
+  await resetPinnedPlaces().catch(() => {});
+  // How long journeys take *for this person, where they go*. Ratios rather
+  // than places, but derived from journeys they asked about — so the next
+  // account on this phone starts from the constants, not from these.
+  await resetTravelCalibration().catch(() => {});
   // City outlines are public geometry, not private data — but they are keyed
   // to the cities the previous account chose, and the next one should not
   // inherit them.
@@ -177,6 +191,11 @@ export async function performSignOut(): Promise<void> {
   // starting in "driving" — with nearby prompts quietly suppressed for someone
   // who is sitting still.
   resetOwnMotion();
+  // The last account's position, and the interval still interpolating it. The
+  // map's own unmount clears this too, but sign-out can happen from anywhere —
+  // and a module-level timer left running is the one piece of this teardown
+  // that would keep working after the screen it belongs to is gone.
+  resetPositionSmoothing();
   // Whether the *previous* account had agreed to the Terms says nothing about
   // the next one. Leaving a `false` here would walk a new sign-in straight
   // past the gate.

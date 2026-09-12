@@ -12,7 +12,7 @@
 // fetch, which does not depend on it. Browsing is not publishing.
 
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -22,6 +22,7 @@ import { fetchMapNearby, isLocationNotAvailable } from '@/services/discovery';
 import { reportLocation } from '@/services/location';
 import type { ClubMeetup, MapNearbyResponse, NearbyUser, SelfZone } from '@/services/mapTypes';
 import { registerMeetupRemove, registerNearbyRefresh } from '@/services/nearbyRefresh';
+import { useGhostMode } from '@/services/privacy';
 import {
   normalizeStories,
   placedStories,
@@ -31,6 +32,7 @@ import {
 } from '@/services/stories';
 
 const POLL_MS = 10_000;
+const NO_PEOPLE: NearbyUser[] = [];
 
 export interface MapData {
   nearby: NearbyUser[];
@@ -62,6 +64,8 @@ export function useMapData(
   /** Whether there is a position to report at all — drives the poll on and off. */
   hasCoords: boolean,
 ): MapData {
+  const ghost = useGhostMode();
+  const privacyVersion = useRef(0);
   const [nearby, setNearby]           = useState<NearbyUser[]>([]);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [friendIds, setFriendIds]     = useState<Set<number>>(new Set());
@@ -77,6 +81,16 @@ export function useMapData(
   // `coordsRef` is the same arrangement one level up, in useMapLocation.
   useEffect(() => { currentUserIdRef.current = currentUserId; });
 
+  // Clear old people on every privacy transition, including leaving Ghost
+  // Mode. Leaving it must fetch a current audience, never restore a cache.
+  // The render gate below applies immediately, before this effect runs.
+  useEffect(() => {
+    privacyVersion.current += 1;
+    setNearby([]);
+    setStories(previous => previous.filter(s => Number(s.author.id) === currentUserIdRef.current));
+    return () => { privacyVersion.current += 1; };
+  }, [ghost]);
+
   const fetchFriends = useCallback(async () => {
     try {
       const r = await api.get<{ friends: { id: number }[]; connections: { id: number }[] }>('/api/friends/list/');
@@ -89,6 +103,7 @@ export function useMapData(
   const [awaitingFix, setAwaitingFix] = useState(false);
 
   const fetchMapData = useCallback(async () => {
+    const version = privacyVersion.current;
     try {
       // Two anchors behind one call. Somebody sharing their location is
       // answered from the position the server already holds for them; somebody
@@ -96,6 +111,7 @@ export function useMapData(
       // rides along with the request, answers it, and is discarded. See
       // services/discovery.ts — the map does not need to know which it got.
       const r = await fetchMapNearby<MapNearbyResponse>(coordsRef.current);
+      if (version !== privacyVersion.current) return;
       // Null means Paused with no fix yet. Nothing to draw and nothing to
       // clear: the previous frame is still the best answer we have.
       if (!r) return;
@@ -105,13 +121,15 @@ export function useMapData(
       // see services/coords.ts. `users` is hand-assembled server-side and comes
       // through numeric today; it goes through the same gate anyway so one
       // serializer changing shape can't put the redbox back.
-      setNearby(withNumericCoordsList(users));
+      setNearby(ghost === false ? withNumericCoordsList(users) : []);
       // `placedStories`, not the plain normaliser: this is the map, and a
       // story with no coordinate is not a thing it can draw. Those still exist
       // and still reach their friends — they arrive through the Chats rings,
       // which is the surface that does not need a position. See
       // services/stories.ts.
-      const drawable = placedStories(stories);
+      const drawable = placedStories(stories).filter(
+        s => ghost === false || Number(s.author.id) === currentUserIdRef.current,
+      );
       setStories(drawable);
       drawable.forEach(s => { if (s.image) Image.prefetch(s.image); });
       const now = Date.now();
@@ -120,6 +138,7 @@ export function useMapData(
       );
       setAwaitingFix(false);
     } catch (e) {
+      if (version !== privacyVersion.current) return;
       // Sharing is on but no position has reached the server, and we had no
       // fix to answer with either — so `fetchMapNearby` could not fall back to
       // the private query. Say we are still finding it rather than leaving a
@@ -133,7 +152,7 @@ export function useMapData(
     }
     // `coordsRef` is a parameter now rather than a local, so it has to be
     // listed. It never changes identity — the effect still runs exactly once.
-  }, [coordsRef]);
+  }, [coordsRef, ghost]);
 
   async function reactToStory(storyId: number, reaction: ReactionType) {
     try {
@@ -343,14 +362,20 @@ export function useMapData(
     });
   }, []);
 
+  // Unknown privacy is also hidden. Every consumer (pins, trails, music zones
+  // and sheets) receives the same gated lists rather than its own UI check.
+  const visibleStories = useMemo(() => (
+    ghost === false ? stories : stories.filter(s => Number(s.author.id) === currentUserId)
+  ), [ghost, stories, currentUserId]);
+
   return {
-    nearby,
+    nearby: ghost === false ? nearby : NO_PEOPLE,
     currentUserId,
     friendIds,
     connectionIds,
     selfProfile,
     selfZone,
-    stories,
+    stories: visibleStories,
     clubMeetups,
     awaitingFix,
     fetchFriends,

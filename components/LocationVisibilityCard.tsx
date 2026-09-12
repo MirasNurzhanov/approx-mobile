@@ -127,8 +127,8 @@ export function LocationVisibilityCard({ settings, saving, onGhostChange }: Prop
 
       <Text style={styles.explainer}>
         {ghost
-          ? 'Nobody can see you on the map, and you cannot see anyone either — Ghost Mode works both ways. Everything else keeps working: your clubs, your messages, and the places you can join.'
-          : 'People nearby can see you on the map. Friends see exactly where you are; everyone else sees a rough area of about 500m, and you do not have to choose between them.'}
+          ? 'Ghost Mode works both ways: nobody can see you on the map, and you cannot see other people. Your profile details and Swifts are hidden from everyone, including friends. You can still manage your uploads and analytics, use clubs and send messages.'
+          : 'People nearby can see you on the map. Friends see exactly where you are; everyone else sees a rough area of about 500m. Turn on Ghost Mode to hide your profile details and Swifts from everyone, including friends.'}
       </Text>
 
       {/* ── The one action ── */}

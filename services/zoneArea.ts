@@ -485,3 +485,87 @@ export async function resetRegionCache(): Promise<void> {
     // Best effort — a stale outline is shared public geometry, not a leak.
   }
 }
+
+// ─── Errors ───────────────────────────────────────────────────────────────────
+const GENERIC_SAVE_ERROR = 'Please try again.';
+/** Long enough for the longest message the zone serializer writes, short enough
+ *  that a stack trace or an HTML page cannot arrive as an alert body. */
+const MAX_SERVER_MESSAGE = 300;
+
+/** The most useful sentence in a DRF error body — and only when the server
+ *  meant it for a person.
+ *
+ * It used to read three keys — `zone_radius`, `zone_region`, `detail` — and
+ * fall through to "Please try again." for everything else. A validation error
+ * on any *other* field was therefore invisible, and that is not hypothetical:
+ * a 400 on `latitude` is what "Could not save. Please try again." meant for
+ * every city and district save until the anchor stopped being a DecimalField.
+ * An error naming a field nobody reads is worse than no error, because it looks
+ * like a network blip and gets retried forever.
+ *
+ * **Only 4xx bodies are read.** A 4xx from this API is a refusal someone wrote
+ * wording for: "You can only cover a place you are in", "A zone cannot be
+ * smaller than 50m". A 5xx is an accident, and whatever text rides along with
+ * one is addressed to whoever reads the logs — an exception message, a proxy's
+ * boilerplate, a database error naming a column. None of that belongs in an
+ * alert: it cannot be acted on, and it discloses more about the inside of the
+ * server than a save dialog should. So 5xx gets the shrug, which is also the
+ * honest thing to say about it — there is nothing the user can change.
+ *
+ * The same reasoning covers a body that is a string: an HTML error page from a
+ * proxy or Django's own 500 handler, never a message for this screen.
+ *
+ * Lives here rather than on the screen so it can be tested as what it is: a
+ * pure function over an axios error, with no React around it. Every screen on
+ * the zone endpoint shares it — the area picker, the music screen and the loop
+ * trimmer all PATCH `/api/users/zone/` and all used to read a key or two and
+ * shrug at the rest.
+ *
+ * @param prefer field names this screen has written wording for, tried in
+ *   order before `detail` and before the general sweep. A screen that shows
+ *   "A zone cannot be smaller than 50m" next to the dial wants that sentence
+ *   ahead of whatever else the body happens to carry.
+ * @param fallback what to say when the body offers nothing usable. Defaults to
+ *   "Please try again."; an upload wants its own.
+ */
+export function messageFor(
+  error: any,
+  { prefer = [], fallback = GENERIC_SAVE_ERROR }: {
+    prefer?: string[];
+    fallback?: string;
+  } = {},
+): string {
+  const status = error?.response?.status;
+  // No response at all is a network failure; 5xx is ours and not theirs.
+  if (typeof status !== 'number' || status < 400 || status >= 500) return fallback;
+
+  const data = error.response.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return fallback;
+
+  const usable = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const text = value.trim();
+    if (!text || text.length > MAX_SERVER_MESSAGE) return null;
+    // An HTML body that slipped through with a JSON content type.
+    if (text.startsWith('<')) return null;
+    return text;
+  };
+
+  /** DRF writes a field error as a list of strings and `detail` as a bare one,
+   *  so both shapes have to be read wherever a key is looked up. */
+  const at = (key: string): string | null => {
+    const value = data[key];
+    return usable(value) ?? (Array.isArray(value) ? usable(value[0]) : null);
+  };
+
+  for (const key of [...prefer, 'detail']) {
+    const text = at(key);
+    if (text) return text;
+  }
+
+  for (const key of Object.keys(data)) {
+    const text = at(key);
+    if (text) return text;
+  }
+  return fallback;
+}

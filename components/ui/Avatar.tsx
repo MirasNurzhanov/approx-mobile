@@ -49,6 +49,20 @@ interface AvatarProps {
    * friend with a story indistinguishable from a connection without one.
    */
   storyRing?: boolean
+  /**
+   * Draws the outermost ring, meaning "this person has Swifts".
+   *
+   * A third ring rather than a second colour on the story one, for the same
+   * reason `storyRing` is separate from the tier ring: each answers a
+   * different question, and merging any two makes a person with one thing to
+   * open indistinguishable from a person with the other. Outermost because it
+   * is the least time-critical of the three — a story expires in 24h, a Swift
+   * does not.
+   *
+   * Purple, not teal: teal already means "live story" on this exact control,
+   * and two concentric teal rings would read as one thick one.
+   */
+  swiftRing?: boolean
 }
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
@@ -61,6 +75,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   storyRing: {
     borderWidth: 2,
     borderColor: colors.teal,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swiftRing: {
+    borderWidth: 2,
+    borderColor: colors.purple,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -80,6 +100,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
 
 export function Avatar({
   uri, name, size = 'md', active = false, ringColor, presence, storyRing = false,
+  swiftRing = false,
 }: AvatarProps) {
   const { colors } = useTheme()
   const styles = makeStyles(colors)
@@ -120,11 +141,9 @@ export function Avatar({
     </View>
   )
 
-  if (!storyRing) return inner
-
-  // Wrapped rather than restyled, so a story ring costs nothing anywhere it is
-  // not asked for and the avatar underneath keeps whatever ring it had.
-  return (
+  // Each ring wraps the last, so one costs nothing where it is not asked for
+  // and the avatar underneath keeps whatever ring it already had.
+  const withStory = storyRing ? (
     <View
       style={[
         styles.storyRing,
@@ -132,6 +151,23 @@ export function Avatar({
       ]}
     >
       {inner}
+    </View>
+  ) : inner
+
+  if (!swiftRing) return withStory
+
+  // Sized off whatever it is wrapping, so a Swift ring sits just outside a
+  // story ring when there is one and just outside the avatar when there is not
+  // — rather than leaving a gap the width of a ring that was never drawn.
+  const outer = dim + (storyRing ? 20 : 12)
+  return (
+    <View
+      style={[
+        styles.swiftRing,
+        { width: outer, height: outer, borderRadius: outer / 2 },
+      ]}
+    >
+      {withStory}
     </View>
   )
 }

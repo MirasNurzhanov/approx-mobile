@@ -1,12 +1,11 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
     KeyboardAvoidingView,
-    Linking,
     Modal,
     Platform,
     Pressable,
@@ -27,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureDetector } from 'react-native-gesture-handler';
 
 import { ApproxNav } from '@/components/ApproxNav';
+import { PinNoteEditor } from '@/components/PinNoteEditor';
 import { STORY_LIKE } from '@/components/storyReactions';
 import { StoryViewer } from '@/components/StoryViewer';
 import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay';
@@ -35,8 +35,10 @@ import { Button } from '@/components/ui/Button';
 import { GlassBackdrop, GlassSurface } from '@/components/ui/GlassSurface';
 import { useSheetDrag } from '@/components/ui/useSheetDrag';
 import {
+    IconBookmark,
     IconCalendar,
     IconCamera,
+    IconCheck,
     IconChevron,
     IconClose,
     IconEyeOff,
@@ -49,6 +51,7 @@ import {
     IconLocateOff,
     IconLock,
     IconMusic,
+    IconPencil,
     IconPeople,
     IconPin,
     IconSearch,
@@ -70,10 +73,11 @@ import {
 import { fonts, radius, type, withAlpha } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
-import { useNavAlignedRight, useNavClearance } from '@/hooks/useNavMetrics';
+import { useNavAlignedRight, useNavClearance, useNavContentPadding } from '@/hooks/useNavMetrics';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
+import { DirectionsSheet } from '@/components/DirectionsSheet';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 // `PermissionState` explicitly, not the DOM global of the same name — that one
 // is 'granted' | 'denied' | 'prompt', so leaving it unimported makes the
@@ -91,6 +95,16 @@ import { useMotionTrails } from '@/hooks/useMotionTrails';
 import { useStoryComposer } from '@/hooks/useStoryComposer';
 import { useStoryTutorial } from '@/hooks/useStoryTutorial';
 import { useVisiblePeople } from '@/hooks/useVisiblePeople';
+import {
+    MAX_PINS,
+    pinIdFor,
+    pinMeetup,
+    setPinnedNote,
+    unpinPlace,
+    usePinnedPlaces,
+    type PinnedPlace,
+} from '@/services/pinnedPlaces';
+import { useSmoothedPosition } from '@/services/positionSmoothing';
 import { useGhostMode } from '@/services/privacy';
 import { fmtRadius, trackTitle } from '@/services/zoneAudio';
 import { MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
@@ -156,6 +170,10 @@ const Z_FRIEND = 5;
 const Z_CLUSTER = 6;
 const Z_STORY   = 7;
 const Z_MEETUP  = 8;
+/** Above the meetup pins it can sit on top of. A pinned place is the one thing
+ *  on this map the viewer put there themselves, so when two markers land on the
+ *  same spot theirs is the one that should be tappable. */
+const Z_PIN     = 9;
 
 // ─── PARKED_MARKERS ───────────────────────────────────────────────────────────
 /*
@@ -664,6 +682,13 @@ function SelfMarker({ coordinate, uri, username, hidden = false }: {
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+
+  // Where the dot is drawn: the smoothed position when there is one, and the
+  // laid-out coordinate until the first fix has been through the smoother.
+  // Falling back rather than waiting matters on the very first frame, when a
+  // cached position can put the marker on screen before any fix has landed.
+  const smoothed = useSmoothedPosition();
+  const drawnAt = smoothed ?? coordinate;
   // Same shape as AvatarMarker: the load state carries the uri it belongs to,
   // so changing your own picture is not a reset an effect has to perform.
   // Seeded from `loadedAvatars`, same as AvatarMarker — without it, a remount
@@ -704,9 +729,15 @@ function SelfMarker({ coordinate, uri, username, hidden = false }: {
 
   return (
     <Marker
-      coordinate={coordinate}
+      coordinate={drawnAt}
       anchor={{ x: 0.5, y: 0.5 }}
       zIndex={Z_SELF}
+      // Unchanged by the smoothing, and worth saying why: this is what the
+      // marker *looks like*, not where it is. Moving a Marker's coordinate
+      // does not re-rasterize its view, so a position arriving fifteen times a
+      // second costs a native coordinate update and nothing else. Flipping
+      // this to true for the movement would redraw the avatar every frame —
+      // the memory shape services/markerLayout.ts has scars from.
       tracksViewChanges={!imageReady || settling}
     >
       <View style={[styles.selfHalo, hidden && styles.selfHaloHidden]}>
@@ -1010,10 +1041,17 @@ function LocateButton({
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
 function TopBar({
   nearby,
+  pinCount,
+  onPinned,
   onZoneMusic,
   onSearch,
   onList,
 }: {
+  /** How many places this viewer has pinned. The bookmark button is drawn only
+   *  when there is at least one: an empty list behind a permanent button is a
+   *  fourth control on a bar that already has three, bought with nothing. */
+  pinCount: number;
+  onPinned: () => void;
   nearby: number;
   onZoneMusic: () => void;
   onSearch: () => void;
@@ -1040,6 +1078,20 @@ function TopBar({
       </GlassSurface>
 
       <View style={styles.topSpacer} />
+
+      {pinCount > 0 && (
+        <Pressable
+          onPress={onPinned}
+          style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Pinned places, ${pinCount} saved`}
+          accessibilityHint="Opens the places you saved from Swifts and meetups"
+        >
+          <GlassBackdrop />
+          <IconBookmark size={20} color={colors.t2} filled />
+        </Pressable>
+      )}
 
       {/* Markers on a map cannot be focused or read. This is the same data as
           a linear list — the non-visual equivalent of the map itself. */}
@@ -1310,16 +1362,30 @@ function CreateStoryModal({ visible, locationless, onClose, onPost }: CreateStor
 }
 
 // ─── Meetup Marker ────────────────────────────────────────────────────────────
-function MeetupMarker({ meetup, onPress }: { meetup: ClubMeetup; onPress: () => void }) {
+function MeetupMarker({ meetup, pinned, onPress }: {
+  meetup: ClubMeetup;
+  /** The viewer said they are going. Drawn as a corner on the pin rather than
+   *  a second marker at the same coordinate — see `PinnedLayer`, which leaves
+   *  a pinned meetup to this marker for as long as the event is still on the
+   *  map at all. */
+  pinned?: boolean;
+  onPress: () => void;
+}) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+  // The corner is part of the frozen bitmap, so pinning has to re-arm tracking
+  // or the marker keeps drawing the picture it took before the press.
+  const { settling } = useMarkerSettle(`${meetup.id}|${pinned}`);
   return (
     <Marker
       coordinate={{ latitude: meetup.latitude, longitude: meetup.longitude }}
       anchor={{ x: 0.5, y: 1 }}
-      tracksViewChanges={false}
+      tracksViewChanges={settling}
       zIndex={Z_MEETUP}
       onPress={onPress}
+      accessibilityLabel={
+        pinned ? `${meetup.title}. You are going.` : meetup.title
+      }
     >
       <View style={styles.meetupMarkerWrap}>
         <View style={styles.meetupMarkerBubble}>
@@ -1328,6 +1394,11 @@ function MeetupMarker({ meetup, onPress }: { meetup: ClubMeetup; onPress: () => 
           ) : (
             <IconCalendar size={18} color="#fff" />
           )}
+          {pinned ? (
+            <View style={styles.goingCorner}>
+              <IconBookmark size={10} color={colors.purple} filled />
+            </View>
+          ) : null}
         </View>
         <View style={styles.meetupMarkerTail} />
       </View>
@@ -1338,35 +1409,37 @@ function MeetupMarker({ meetup, onPress }: { meetup: ClubMeetup; onPress: () => 
 // ─── Meetup Sheet ─────────────────────────────────────────────────────────────
 function MeetupSheet({
   meetup,
+  pinned,
+  onToggleGoing,
   sheetY,
   onDismiss,
 }: {
   meetup: ClubMeetup;
+  pinned: boolean;
+  onToggleGoing: (meetup: ClubMeetup) => Promise<void>;
   sheetY: SharedValue<number>;
   onDismiss: () => void;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { bottom } = useSafeAreaInsets();
+  const navPad = useNavContentPadding(16);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.get() }] }));
   // `onDismiss` is the screen's own `closeMeetupSheet`, so a dragged dismiss
   // and a backdrop tap run the same teardown — see `useSheetDrag`.
   const drag = useSheetDrag({ sheetY, height: SHEET_H, onDismiss, spring: SPRING_CFG });
+  const [saving, setSaving] = useState(false);
+  const [directionsOpen, setDirectionsOpen] = useState(false);
 
-  function openDirections() {
-    const label = encodeURIComponent(meetup.title);
-    const url = Platform.OS === 'ios'
-      ? `maps://0,0?q=${label}@${meetup.latitude},${meetup.longitude}`
-      : `geo:${meetup.latitude},${meetup.longitude}?q=${meetup.latitude},${meetup.longitude}(${label})`;
-    Linking.openURL(url).catch(() => {
-      Linking.openURL(`https://maps.google.com/maps?q=${meetup.latitude},${meetup.longitude}`);
-    });
+  function toggleGoing() {
+    if (saving) return;
+    setSaving(true);
+    void runBusy(() => onToggleGoing(meetup), () => setSaving(false));
   }
 
   return (
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
-      <Animated.View style={[styles.sheet, { paddingBottom: bottom + 16 }, animStyle]}>
+      <Animated.View style={[styles.sheet, { paddingBottom: navPad }, animStyle]}>
         {/* The whole grab area, not just the 36x4 bar: a 4pt-tall drag target
             is unusable, so the detector wraps a padded row and the bar inside
             it is what you see. */}
@@ -1415,8 +1488,342 @@ function MeetupSheet({
           ) : null}
         </View>
 
-        <Button label="Get Directions" variant="primary" size="md" fullWidth onPress={openDirections} />
+        {/* Going first, directions second: the decision comes before the
+            journey, and it is the one of the two that leaves something behind
+            on the map. */}
+        <View style={styles.sheetActionRow}>
+          <View style={styles.sheetActionCell}>
+            <Button
+              label={pinned ? 'Going' : "I'm going"}
+              variant={pinned ? 'secondary' : 'primary'}
+              size="md"
+              fullWidth
+              loading={saving}
+              icon={pinned ? IconCheck : IconBookmark}
+              onPress={toggleGoing}
+              accessibilityLabel={
+                pinned
+                  ? 'Going. Tap to remove this meetup from your map.'
+                  : 'I am going. Pins this meetup to your map.'
+              }
+            />
+          </View>
+          <View style={styles.sheetActionCell}>
+            <Button
+              label="Directions"
+              variant="secondary"
+              size="md"
+              fullWidth
+              onPress={() => setDirectionsOpen(true)}
+              accessibilityLabel={
+                `Directions to ${meetup.title}. Travel times by car, on foot, by bike and on transit.`
+              }
+            />
+          </View>
+        </View>
       </Animated.View>
+
+      <DirectionsSheet
+        visible={directionsOpen}
+        target={{
+          latitude: meetup.latitude,
+          longitude: meetup.longitude,
+          title: meetup.title,
+          placeName: meetup.location_name ?? undefined,
+        }}
+        onClose={() => setDirectionsOpen(false)}
+      />
+    </>
+  );
+}
+
+
+// ─── Pinned places ────────────────────────────────────────────────────────────
+/*
+ * The places the viewer saved for themselves — see services/pinnedPlaces.
+ *
+ * Two sources, one marker: where a Swift was made, and a meetup they said they
+ * are going to. They are drawn together because on a map they are the same
+ * thing — somewhere you decided you want to be able to find again — and are
+ * told apart by tint and glyph rather than by shape, so the map does not grow
+ * a third pin silhouette.
+ */
+
+/** Teal for a place off a Swift, purple for a meetup — each keeping the colour
+ *  its source already has on this map, so a pin never introduces a hue that
+ *  means nothing anywhere else. */
+function pinTint(place: PinnedPlace, colors: ColorPalette): string {
+  return place.kind === 'meetup' ? colors.purple : colors.teal;
+}
+
+function PinnedMarker({ place, parkedAt, parked, onPress }: {
+  place: PinnedPlace | null;
+  /** Where an empty slot sits: the viewer's own position, the same as every
+   *  other parked slot on this map. Somewhere real and on screen, rather than
+   *  the null island a `{ 0, 0 }` fallback would strand it at. */
+  parkedAt: GeoPoint;
+  /** Nothing to draw in this slot. Parked rather than unmounted — see
+   *  PARKED_MARKERS. Unpinning is rare, but it is exactly the case Fabric
+   *  strands: a custom view inside a Marker, removed while the map is alive,
+   *  which would leave the pin on screen after the user deleted it. */
+  parked: boolean;
+  onPress: (place: PinnedPlace) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const { settling } = useMarkerSettle(`${place?.id ?? 'none'}|${parked}`);
+  const tint = place ? pinTint(place, colors) : colors.teal;
+
+  // A parked slot still needs somewhere to be: the position it held went with
+  // the pin, so it sits on the viewer under a transparent, untappable, 1pt
+  // view.
+  const coordinate = place
+    ? { latitude: place.latitude, longitude: place.longitude }
+    : parkedAt;
+
+  return (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 1 }}
+      tracksViewChanges={settling}
+      zIndex={Z_PIN}
+      opacity={parked ? 0 : 1}
+      onPress={parked || !place ? undefined : () => onPress(place)}
+      accessibilityLabel={parked || !place ? undefined : `Pinned: ${place.title}`}
+    >
+      {parked || !place ? (
+        <View style={styles.parkedMarker} />
+      ) : (
+        <View style={styles.pinnedMarkerWrap}>
+          <View style={[styles.pinnedMarkerBubble, { borderColor: tint }]}>
+            {place.kind === 'meetup'
+              ? <IconCalendar size={16} color={tint} />
+              : <IconBookmark size={16} color={tint} filled />}
+          </View>
+          <View style={[styles.pinnedMarkerTail, { borderColor: tint }]} />
+        </View>
+      )}
+    </Marker>
+  );
+}
+
+/**
+ * Every pin, out of a slot pool that grows and never shrinks.
+ *
+ * `liveMeetupIds` is what stops a meetup the viewer is going to being drawn
+ * twice while it is still on the map in its own right: `MeetupMarker` keeps
+ * that one and wears the bookmark corner. The pin appears here the moment the
+ * event drops out of the nearby feed — which is the case this feature is for,
+ * since a meetup you are travelling to is by definition not near you yet.
+ */
+function PinnedLayer({ places, liveMeetupIds, parkedAt, onOpenPin }: {
+  places: PinnedPlace[];
+  liveMeetupIds: Set<number>;
+  parkedAt: GeoPoint;
+  onOpenPin: (place: PinnedPlace) => void;
+}) {
+  const [slotCount, setSlotCount] = useState(0);
+
+  const drawable = useMemo(
+    () => places.filter(
+      (p) => isDrawable(p) && !(p.kind === 'meetup' && liveMeetupIds.has(p.source_id)),
+    ),
+    [places, liveMeetupIds],
+  );
+  if (drawable.length > slotCount) setSlotCount(drawable.length);
+
+  const slots = useMemo(
+    () => Array.from({ length: slotCount }, (_, i) => drawable[i] ?? null),
+    [drawable, slotCount],
+  );
+  // Slot identity, not content: slot 3 is "pin-slot-3" for the life of the
+  // screen, whichever pin (or none) is currently in it. Same rule as the
+  // headcount badges — see hooks/useMarkerSlots.
+  const slotIds = useMemo(
+    () => Array.from({ length: slotCount }, (_, i) => `pin-slot-${i}`),
+    [slotCount],
+  );
+
+  return (
+    <>
+      {/* A Swift whose creator shares an approximate position was snapped to a
+          ~500m cell before it was ever stored, so the pin marks a cell and the
+          circle says so. Circles leave the native map cleanly, unlike the
+          markers above them, so these are not pooled. */}
+      {drawable.reduce<ReactNode[]>((circles, place) => {
+        if (place.precision === 'approximate') {
+          circles.push(
+            <Circle
+              key={`pin-approx-${place.id}`}
+              center={{ latitude: place.latitude, longitude: place.longitude }}
+              radius={APPROX_RADIUS_M}
+              fillColor="rgba(31,199,182,0.10)"
+              strokeColor="rgba(31,199,182,0.45)"
+              strokeWidth={1}
+            />,
+          );
+        }
+        return circles;
+      }, [])}
+
+      {slots.map((place, i) => (
+        <PinnedMarker
+          key={slotIds[i]}
+          place={place}
+          parkedAt={parkedAt}
+          parked={!place}
+          onPress={onOpenPin}
+        />
+      ))}
+    </>
+  );
+}
+
+/** What the card calls the pin. Both halves are worth saying: where it came
+ *  from, and — for a meetup — that pinning it was a decision to go. */
+function pinKindLabel(place: PinnedPlace): string {
+  return place.kind === 'meetup' ? 'MEETUP · GOING' : 'FROM A SWIFT';
+}
+
+function PinnedSheet({ place, sheetY, onDismiss, onUnpin }: {
+  place: PinnedPlace;
+  sheetY: SharedValue<number>;
+  onDismiss: () => void;
+  onUnpin: (place: PinnedPlace) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const navPad = useNavContentPadding(16);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sheetY.get() }] }));
+  const drag = useSheetDrag({ sheetY, height: SHEET_H, onDismiss, spring: SPRING_CFG });
+  const tint = pinTint(place, colors);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [directionsOpen, setDirectionsOpen] = useState(false);
+
+  return (
+    <>
+      <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
+      <Animated.View style={[styles.sheet, { paddingBottom: navPad }, animStyle]}>
+        <GestureDetector gesture={drag}>
+          <View style={styles.sheetGrab}>
+            <View style={styles.sheetHandle} />
+          </View>
+        </GestureDetector>
+
+        <View style={styles.sheetHead}>
+          <View style={[styles.pinnedSheetGlyph, { borderColor: tint }]}>
+            {place.kind === 'meetup'
+              ? <IconCalendar size={22} color={tint} />
+              : <IconBookmark size={22} color={tint} filled />}
+          </View>
+          <View style={styles.sheetHeadBody}>
+            <Text style={styles.sheetName} numberOfLines={2}>{place.title}</Text>
+            <Text style={[styles.pinnedKindLabel, { color: tint }]} numberOfLines={1}>
+              {pinKindLabel(place)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.meetupDetailBlock}>
+          {place.subtitle ? (
+            <View style={styles.meetupDetailRow}>
+              <IconPeople size={14} color={colors.t3} />
+              <Text style={styles.meetupDetailText} numberOfLines={1}>{place.subtitle}</Text>
+            </View>
+          ) : null}
+          {place.event_datetime ? (
+            <View style={styles.meetupDetailRow}>
+              <IconCalendar size={14} color={colors.t3} />
+              <Text style={styles.meetupDetailText}>{fmtDateTime(place.event_datetime)}</Text>
+            </View>
+          ) : null}
+          {place.place_name ? (
+            <View style={styles.meetupDetailRow}>
+              <IconPin size={14} color={colors.t3} />
+              <Text style={styles.meetupDetailText} numberOfLines={2}>{place.place_name}</Text>
+            </View>
+          ) : null}
+          {place.precision === 'approximate' ? (
+            <Text style={styles.meetupDescription}>
+              This creator shares their location approximately, so the circle is
+              the area rather than an exact spot.
+            </Text>
+          ) : null}
+        </View>
+
+        {/* The note sits between what the place *is* and what you can do with
+            it, because that is what it answers: why this one was worth
+            keeping. Tapping it opens the editor either way — an empty block
+            that only invites writing would be a control that changes meaning
+            once used. */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.pinNoteBlock,
+            !place.note && styles.pinNoteEmpty,
+            pressed && { opacity: 0.7 },
+          ]}
+          onPress={() => setNoteOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            place.note
+              ? `Your note: ${place.note}. Tap to edit or remove it.`
+              : `Add a note about ${place.title}`
+          }
+        >
+          <IconPencil size={14} color={place.note ? colors.t3 : colors.teal} />
+          <Text
+            style={[styles.pinNoteText, !place.note && styles.pinNoteAddText]}
+            numberOfLines={4}
+          >
+            {place.note || 'Add a note'}
+          </Text>
+        </Pressable>
+
+        <View style={styles.sheetActionRow}>
+          <View style={styles.sheetActionCell}>
+            <Button
+              label="Directions"
+              variant="primary"
+              size="md"
+              fullWidth
+              onPress={() => setDirectionsOpen(true)}
+              accessibilityLabel={
+                `Directions to ${place.title}. Travel times by car, on foot, by bike and on transit.`
+              }
+            />
+          </View>
+          <View style={styles.sheetActionCell}>
+            <Button
+              label="Remove pin"
+              variant="secondary"
+              size="md"
+              fullWidth
+              onPress={() => onUnpin(place)}
+              accessibilityLabel={`Remove ${place.title} from your map`}
+            />
+          </View>
+        </View>
+      </Animated.View>
+
+      <DirectionsSheet
+        visible={directionsOpen}
+        target={{
+          latitude: place.latitude,
+          longitude: place.longitude,
+          title: place.title,
+          placeName: place.place_name,
+          approximate: place.precision === 'approximate',
+        }}
+        onClose={() => setDirectionsOpen(false)}
+      />
+
+      <PinNoteEditor
+        visible={noteOpen}
+        placeTitle={place.title}
+        note={place.note}
+        onClose={() => setNoteOpen(false)}
+        onSave={(text) => { void setPinnedNote(place.id, text); }}
+      />
     </>
   );
 }
@@ -1661,7 +2068,7 @@ function UserSheet({
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const router = useRouter();
-  const { bottom } = useSafeAreaInsets();
+  const navPad = useNavContentPadding(16);
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetY.get() }],
   }));
@@ -1722,7 +2129,7 @@ function UserSheet({
   return (
     <>
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
-      <Animated.View style={[styles.sheet, { paddingBottom: bottom + 16 }, animStyle]}>
+      <Animated.View style={[styles.sheet, { paddingBottom: navPad }, animStyle]}>
         <GestureDetector gesture={drag}>
           <View style={styles.sheetGrab}>
             <View style={styles.sheetHandle} />
@@ -2088,6 +2495,13 @@ function PeopleLayer({
           marker, and the zone centred on it, stay exactly where you are. */}
       <SelfMarker
         coordinate={posFor(SELF_KEY, displayCoords)}
+        // The same point, moved continuously rather than in ten-metre hops —
+        // see services/positionSmoothing. Passed alongside the laid-out
+        // coordinate rather than replacing it so that the layout stays the
+        // authority on *where* this marker belongs (it is the one marker that
+        // is never fanned aside) while the smoother decides only how it gets
+        // there. Subscribed inside SelfMarker, so a new interpolated position
+        // re-renders one marker and not this whole layer.
         uri={selfProfile?.profile_picture}
         username={selfProfile?.username ?? ''}
         // Drawn muted while Paused, because the owner's own marker is the
@@ -2100,13 +2514,39 @@ function PeopleLayer({
   );
 }
 
-/** Pins for things rather than people: story bubbles and club meetups. */
-function PinsLayer({ storiesByAuthor, clubMeetups, onOpenStories, onOpenMeetup }: {
+/** Pins for things rather than people: story bubbles, club meetups, and the
+ *  places the viewer saved for themselves. */
+function PinsLayer({
+  storiesByAuthor, clubMeetups, pinnedPlaces, displayCoords,
+  onOpenStories, onOpenMeetup, onOpenPin,
+}: {
   storiesByAuthor: Map<number, Story[]>;
   clubMeetups: ClubMeetup[];
+  pinnedPlaces: PinnedPlace[];
+  /** Where an empty pin slot parks — see `PinnedMarker`. */
+  displayCoords: GeoPoint;
   onOpenStories: (stories: Story[]) => void;
   onOpenMeetup: (meetup: ClubMeetup) => void;
+  onOpenPin: (place: PinnedPlace) => void;
 }) {
+  /** Which meetups are on the map in their own right, so `PinnedLayer` can
+   *  leave those to `MeetupMarker` instead of stacking a second pin on them. */
+  const liveMeetupIds = useMemo(
+    () => new Set(clubMeetups.map((m) => m.id)),
+    [clubMeetups],
+  );
+  /** And which of them the viewer is going to, which is what puts the bookmark
+   *  corner on the meetup's own marker. */
+  const goingMeetupIds = useMemo(
+    () => new Set(
+      pinnedPlaces.reduce<number[]>((ids, p) => {
+        if (p.kind === 'meetup') ids.push(p.source_id);
+        return ids;
+      }, []),
+    ),
+    [pinnedPlaces],
+  );
+
   return (
     <>
       {/* `isDrawable` as well as the numeric coercion at the boundary: the
@@ -2142,12 +2582,20 @@ function PinsLayer({ storiesByAuthor, clubMeetups, onOpenStories, onOpenMeetup }
             <MeetupMarker
               key={`meetup-${meetup.id}`}
               meetup={meetup}
+              pinned={goingMeetupIds.has(meetup.id)}
               onPress={() => onOpenMeetup(meetup)}
             />,
           );
         }
         return markers;
       }, [])}
+
+      <PinnedLayer
+        places={pinnedPlaces}
+        liveMeetupIds={liveMeetupIds}
+        parkedAt={displayCoords}
+        onOpenPin={onOpenPin}
+      />
     </>
   );
 }
@@ -2165,9 +2613,9 @@ function MapCanvas({
   mapRef, styles, themeMode, region, displayCoords, colors,
   overlays, slots, visibleNearby, motionTrails, reduceMotion,
   friendIds, connectionIds, selfProfile, selfZone, ghost,
-  storiesByAuthor, clubMeetups,
+  storiesByAuthor, clubMeetups, pinnedPlaces,
   onMapLayout, onRegionChangeComplete, onPanDrag, onLongPress,
-  onOpenSheet, onZoomToCluster, onOpenStories, onOpenMeetup,
+  onOpenSheet, onZoomToCluster, onOpenStories, onOpenMeetup, onOpenPin,
 }: {
   mapRef: React.RefObject<MapView | null>;
   styles: MapStyles;
@@ -2187,6 +2635,7 @@ function MapCanvas({
   ghost: boolean | null | undefined;
   storiesByAuthor: Map<number, Story[]>;
   clubMeetups: ClubMeetup[];
+  pinnedPlaces: PinnedPlace[];
   onMapLayout: (height: number) => void;
   onRegionChangeComplete: (region: Region) => void;
   onPanDrag: () => void;
@@ -2195,6 +2644,7 @@ function MapCanvas({
   onZoomToCluster: (center: GeoPoint) => void;
   onOpenStories: (stories: Story[]) => void;
   onOpenMeetup: (meetup: ClubMeetup) => void;
+  onOpenPin: (place: PinnedPlace) => void;
 }) {
   return (
     <MapView
@@ -2249,8 +2699,11 @@ function MapCanvas({
       <PinsLayer
         storiesByAuthor={storiesByAuthor}
         clubMeetups={clubMeetups}
+        pinnedPlaces={pinnedPlaces}
+        displayCoords={displayCoords}
         onOpenStories={onOpenStories}
         onOpenMeetup={onOpenMeetup}
+        onOpenPin={onOpenPin}
       />
     </MapView>
   );
@@ -2387,20 +2840,30 @@ function MapNotices({
 
 /** The two panels and the full-screen viewer that can cover the map. */
 function MapSheets({
-  sheetUser, selectedUser, sheetMeetup, selectedMeetup, sheetY,
-  storyViewer, currentUserId, friendIds,
-  onCloseSheet, onCloseMeetupSheet, onFriendChange, onCloseStories, onReact,
+  sheetUser, selectedUser, sheetMeetup, selectedMeetup, sheetPin, selectedPin, sheetY,
+  storyViewer, currentUserId, friendIds, goingToMeetup,
+  onCloseSheet, onCloseMeetupSheet, onClosePinSheet, onToggleGoing, onUnpin,
+  onFriendChange, onCloseStories, onReact,
 }: {
   sheetUser: NearbyUser | null;
   selectedUser: NearbyUser | null;
   sheetMeetup: ClubMeetup | null;
   selectedMeetup: ClubMeetup | null;
+  sheetPin: PinnedPlace | null;
+  selectedPin: PinnedPlace | null;
   sheetY: SharedValue<number>;
   storyViewer: { stories: Story[] } | null;
   currentUserId: number | null;
   friendIds: Set<number>;
+  /** Whether the meetup in the open card is one the viewer said they are
+   *  going to. Passed in rather than read here so the sheet and the marker
+   *  answer it from the same list. */
+  goingToMeetup: boolean;
   onCloseSheet: () => void;
   onCloseMeetupSheet: () => void;
+  onClosePinSheet: () => void;
+  onToggleGoing: (meetup: ClubMeetup) => Promise<void>;
+  onUnpin: (place: PinnedPlace) => void;
   onFriendChange: () => void;
   onCloseStories: () => void;
   onReact: (storyId: number, reaction: ReactionType) => Promise<void>;
@@ -2439,8 +2902,25 @@ function MapSheets({
         >
           <MeetupSheet
             meetup={sheetMeetup}
+            pinned={goingToMeetup}
+            onToggleGoing={onToggleGoing}
             sheetY={sheetY}
             onDismiss={onCloseMeetupSheet}
+          />
+        </View>
+      )}
+
+      {/* Pinned place card — same pre-mount strategy again. */}
+      {sheetPin && (
+        <View
+          style={[StyleSheet.absoluteFill, { opacity: selectedPin ? 1 : 0 }]}
+          pointerEvents={selectedPin ? 'box-none' : 'none'}
+        >
+          <PinnedSheet
+            place={sheetPin}
+            sheetY={sheetY}
+            onDismiss={onClosePinSheet}
+            onUnpin={onUnpin}
           />
         </View>
       )}
@@ -2522,13 +3002,19 @@ export default function MapScreen() {
     stories, clubMeetups, awaitingFix, fetchFriends, reactToStory, createStory,
   } = useMapData(coordsRef, speedRef, !!coords);
 
+  // The places this viewer saved — where a Swift was made, and the meetups
+  // they said they are going to. On-device and account-scoped; see
+  // services/pinnedPlaces for why they are not on the server.
+  const pinnedPlaces = usePinnedPlaces();
+
   // Which panel is open over the map, and the spring that opens it — see
   // hooks/useMapSheets. Given the live lists so an open sheet follows each poll.
   const {
-    sheetY, selectedUser, selectedMeetup, storyViewer, sheetUser, sheetMeetup,
+    sheetY, selectedUser, selectedMeetup, selectedPin, storyViewer,
+    sheetUser, sheetMeetup, sheetPin,
     openSheet, closeSheet, openMeetupSheet, closeMeetupSheet,
-    openStoryViewer, closeStoryViewer,
-  } = useMapSheets(nearby, stories);
+    openPinSheet, closePinSheet, openStoryViewer, closeStoryViewer,
+  } = useMapSheets(nearby, stories, pinnedPlaces);
 
   // The story composer and the left-edge swipe that opens it.
   const { composerOpen, createStoryCoord, composeEdge, openComposerAt, closeComposer } =
@@ -2575,6 +3061,51 @@ export default function MapScreen() {
   const slots = useMarkerSlots(
     visibleNearby, displayCoords, overlays.musicZones, overlays.zoneAreas, zoomDelta, mapH,
   );
+
+  /** Whether the meetup whose card is open is one the viewer is going to.
+   *  Read off the same list the markers use, so the card and the pin on the
+   *  map can never disagree about it. */
+  const goingToMeetup = !!sheetMeetup
+    && pinnedPlaces.some((p) => p.kind === 'meetup' && p.source_id === sheetMeetup.id);
+
+  /** "I'm going", and its undo.
+   *
+   *  Lives on the screen rather than inside the sheet so the meetup card and
+   *  anything else that grows the same button later share one implementation
+   *  of what going means — a pin, and nothing sent anywhere. */
+  async function toggleGoing(meetup: ClubMeetup) {
+    const pinned = pinnedPlaces.some(
+      (p) => p.kind === 'meetup' && p.source_id === meetup.id,
+    );
+    if (pinned) {
+      await unpinPlace(pinIdFor('meetup', meetup.id));
+      return;
+    }
+    const result = await pinMeetup({
+      meetupId: meetup.id,
+      latitude: meetup.latitude,
+      longitude: meetup.longitude,
+      title: meetup.title,
+      clubName: meetup.club_name,
+      locationName: meetup.location_name,
+      eventDatetime: meetup.event_datetime,
+      expiresAt: meetup.expires_at,
+    });
+    if (!result.ok && result.reason === 'limit') {
+      Alert.alert(
+        'Your map is full',
+        `You can keep ${MAX_PINS} pinned places. Remove one to add this meetup.`,
+      );
+    }
+  }
+
+  /** Dismiss first, then remove. The card is read back out of the pin list, so
+   *  removing it while it is still on screen would blank the panel mid-slide —
+   *  `useMapSheets` keeps the opened row for exactly this reason. */
+  function handleUnpin(place: PinnedPlace) {
+    closePinSheet();
+    void unpinPlace(place.id);
+  }
 
   function handleHiSent() {
     fetchFriends();
@@ -2632,7 +3163,8 @@ export default function MapScreen() {
   // full-screen viewer covers them with a backdrop, so anything left drawn
   // underneath is visible-but-dead rather than merely hidden.
   const chromeVisible =
-    mapVisible && !selectedUser && !selectedMeetup && !storyViewer && !composerOpen;
+    mapVisible && !selectedUser && !selectedMeetup && !selectedPin
+    && !storyViewer && !composerOpen;
 
   // The strip directly under the top bar, where the map's notices sit.
   const overlayTop = topInset + 52 + (awaitingFix ? 46 : 0);
@@ -2681,6 +3213,7 @@ export default function MapScreen() {
           ghost={ghost}
           storiesByAuthor={storiesByAuthor}
           clubMeetups={clubMeetups}
+          pinnedPlaces={pinnedPlaces}
           onMapLayout={onMapLayout}
           onRegionChangeComplete={onRegionChangeComplete}
           onPanDrag={() => stopFollowing('gesture')}
@@ -2689,6 +3222,7 @@ export default function MapScreen() {
           onZoomToCluster={zoomToCluster}
           onOpenStories={openStoryViewer}
           onOpenMeetup={openMeetupSheet}
+          onOpenPin={openPinSheet}
         />
       )}
 
@@ -2709,6 +3243,8 @@ export default function MapScreen() {
       {/* Top bar */}
       <TopBar
         nearby={visibleNearby.length}
+        pinCount={pinnedPlaces.length}
+        onPinned={() => router.push('/pinned')}
         onZoneMusic={() => router.push('/zone')}
         onSearch={() => router.push('/search')}
         onList={() => router.push('/nearby')}
@@ -2731,12 +3267,18 @@ export default function MapScreen() {
         selectedUser={selectedUser}
         sheetMeetup={sheetMeetup}
         selectedMeetup={selectedMeetup}
+        sheetPin={sheetPin}
+        selectedPin={selectedPin}
         sheetY={sheetY}
         storyViewer={storyViewer}
         currentUserId={currentUserId}
         friendIds={friendIds}
+        goingToMeetup={goingToMeetup}
         onCloseSheet={closeSheet}
         onCloseMeetupSheet={closeMeetupSheet}
+        onClosePinSheet={closePinSheet}
+        onToggleGoing={toggleGoing}
+        onUnpin={handleUnpin}
         onFriendChange={handleHiSent}
         onCloseStories={closeStoryViewer}
         onReact={reactToStory}
@@ -3245,7 +3787,15 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // ── Sheet ──
-  backdrop: { backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 150 },
+  //
+  // Both of these sit *below* the nav (zIndex 100 / elevation 10), which is the
+  // rule everywhere: nothing covers the bar. They used to be 150 and 200, which
+  // put the scrim and the card over it.
+  //
+  // Android orders siblings by `elevation` independently of `zIndex`, so a
+  // layer that must stay under the nav has to lose on both — see LocateButton,
+  // which has the same note for the opposite reason.
+  backdrop: { backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 60, elevation: 6 },
   sheet: {
     position: 'absolute',
     bottom: 0,
@@ -3261,8 +3811,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: 20,
     paddingTop: 10,
-    zIndex: 200,
-    elevation: 20,
+    zIndex: 70,
+    elevation: 7,
     backgroundColor: colors.surface,
   },
   /** The draggable strip across the top of a sheet.
@@ -3692,6 +4242,99 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     marginTop: -7,
     borderBottomRightRadius: 3,
   },
+
+  /** The "you are going" corner on a meetup's own marker. Overlaps the bubble's
+   *  top-right rather than sitting beside it, so the marker keeps its width and
+   *  the fan-out arithmetic in services/markerLayout still holds. */
+  goingCorner: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.purple,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Pinned places ──
+  pinnedMarkerWrap: { alignItems: 'center' },
+  /** A held place, not a person and not an event: the surface colour with the
+   *  source's tint as an outline, so a pin reads as something the viewer put
+   *  there rather than as another thing the map found. */
+  pinnedMarkerBubble: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
+  /** The point of the teardrop: a rotated square showing two of its sides, so
+   *  the outline runs unbroken around the whole marker. */
+  pinnedMarkerTail: {
+    width: 10,
+    height: 10,
+    backgroundColor: colors.surface,
+    transform: [{ rotate: '45deg' }],
+    marginTop: -6,
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+    borderBottomRightRadius: 2,
+  },
+  pinnedSheetGlyph: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    backgroundColor: colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinnedKindLabel: {
+    fontFamily: fonts.body,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginTop: 3,
+  },
+  /** What the viewer wrote about this place. Quiet by design — it is their
+   *  own handwriting on somebody else's map, not a second title. */
+  pinNoteBlock: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 12,
+    marginBottom: 14,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface2,
+  },
+  /** Empty, it is an invitation rather than content: dashed, and in the accent
+   *  the rest of the app uses for "you can do something here". */
+  pinNoteEmpty: {
+    borderStyle: 'dashed',
+    borderColor: colors.tealLine,
+    backgroundColor: 'transparent',
+  },
+  pinNoteText: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.t1,
+  },
+  pinNoteAddText: { color: colors.teal, fontWeight: '600' },
+
+  /** Two buttons on one line. `Button` takes no style of its own, so each one
+   *  is full-width inside a flexed cell rather than flexed itself. */
+  sheetActionRow: { flexDirection: 'row', gap: 10 },
+  sheetActionCell: { flex: 1 },
 
   // ── Meetup sheet ──
   meetupSheetEmblem: {

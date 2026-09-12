@@ -252,7 +252,7 @@ export default function RegisterScreen() {
               agreement by going through Google would be the whole point of the
               checkbox undone. */}
           <SocialAuthButtons
-            disabled={submitting || !acceptedTerms}
+            disabled={submitting}
             acceptedTerms={acceptedTerms}
           />
         </View>

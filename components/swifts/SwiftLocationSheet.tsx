@@ -1,14 +1,19 @@
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { IconClose, IconGlobe, IconPin } from '@/components/ui/icons';
+import { IconBookmark, IconClose, IconGlobe, IconPin } from '@/components/ui/icons';
 import { mapStyleFor } from '@/constants/mapStyle';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { runBusy } from '@/services/busy';
 import { isInMainlandChina, MAINLAND_CHINA_NOTICE } from '@/services/gcj02';
+import {
+  MAX_PINS, pinIdFor, pinSwiftLocation, unpinPlace, useIsPinned,
+} from '@/services/pinnedPlaces';
 import type { SwiftLocation } from '@/services/swifts';
 
 /**
@@ -29,6 +34,16 @@ import type { SwiftLocation } from '@/services/swifts';
  * to a ~500m cell before it is ever stored (`users.visibility.snap_coordinates`).
  * Drawing a pin on that would state a precision nobody granted, so an
  * approximate reveal draws a circle the size of the cell and says so in words.
+ *
+ * ## Pinning
+ *
+ * The one thing that outlives this sheet, and only when the viewer asks for it:
+ * "Pin to my map" writes the place into services/pinnedPlaces, which is
+ * on-device and cleared with the account. The lifetime rule above is about the
+ * app quietly keeping a coordinate it was lent; a person deciding to save a
+ * place they were shown is the thing the button exists to do. The pin travels
+ * as far as the viewer's own map and no further — the creator is told the
+ * location was looked up, which the sheet already says, and nothing else.
  */
 
 const APPROX_RADIUS_M = 500;
@@ -43,12 +58,16 @@ interface Props {
   loading: boolean;
   error: string | null;
   authorName: string;
+  /** Which Swift this location belongs to — the pin's identity, so pinning the
+   *  same one twice is one pin and un-pinning finds it again on a later watch.
+   *  Null disables pinning rather than pinning something anonymous. */
+  swiftId?: number | null;
   onClose: () => void;
   onRetry: () => void;
 }
 
 export function SwiftLocationSheet({
-  visible, location, loading, error, authorName, onClose, onRetry,
+  visible, location, loading, error, authorName, swiftId = null, onClose, onRetry,
 }: Props) {
   const { colors, themeMode } = useTheme();
   const styles = makeStyles(colors);
@@ -73,6 +92,35 @@ export function SwiftLocationSheet({
     // the places this whole design keeps it out of.
     onClose();
     router.push('/(tabs)/map');
+  }
+
+  const pinned = useIsPinned('swift', swiftId);
+  const [pinning, setPinning] = useState(false);
+
+  function togglePinned() {
+    if (pinning || swiftId === null || !point) return;
+    setPinning(true);
+    void runBusy(async () => {
+      if (pinned) {
+        await unpinPlace(pinIdFor('swift', swiftId));
+        return;
+      }
+      const result = await pinSwiftLocation({
+        swiftId,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        placeName: location?.place_name,
+        authorName,
+        precision: approximate ? 'approximate' : 'exact',
+        capturedAt: location?.captured_at,
+      });
+      if (!result.ok && result.reason === 'limit') {
+        Alert.alert(
+          'Your map is full',
+          `You can keep ${MAX_PINS} pinned places. Remove one to save this.`,
+        );
+      }
+    }, () => setPinning(false));
   }
 
   const capturedOn = location?.captured_at
@@ -178,15 +226,52 @@ export function SwiftLocationSheet({
                 looked this up.
               </Text>
 
-              <Pressable
-                style={styles.mapBtn}
-                onPress={handleOpenMap}
-                accessibilityRole="button"
-                accessibilityLabel="Open the Approx map"
-              >
-                <IconGlobe size={18} color={colors.t1} />
-                <Text style={styles.mapBtnLabel}>Open the map</Text>
-              </Pressable>
+              <View style={styles.footerActions}>
+                {swiftId !== null ? (
+                  <Pressable
+                    style={[styles.mapBtn, styles.footerAction, pinned && styles.mapBtnOn]}
+                    onPress={togglePinned}
+                    disabled={pinning}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: pinned, busy: pinning }}
+                    accessibilityLabel={
+                      pinned
+                        ? 'Pinned to your map. Tap to remove.'
+                        : 'Pin this place to your map'
+                    }
+                    // Said out loud because a pin is the one thing here that
+                    // outlasts the sheet, and where it goes is the question a
+                    // reader of this screen has earned an answer to.
+                    accessibilityHint="Saved on this phone only."
+                  >
+                    {pinning ? (
+                      <ActivityIndicator size="small" color={colors.teal} />
+                    ) : (
+                      <IconBookmark
+                        size={18}
+                        color={pinned ? colors.teal : colors.t1}
+                        filled={pinned}
+                      />
+                    )}
+                    <Text
+                      style={[styles.mapBtnLabel, pinned && styles.mapBtnLabelOn]}
+                      numberOfLines={1}
+                    >
+                      {pinned ? 'Pinned' : 'Pin to my map'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+
+                <Pressable
+                  style={[styles.mapBtn, styles.footerAction]}
+                  onPress={handleOpenMap}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open the Approx map"
+                >
+                  <IconGlobe size={18} color={colors.t1} />
+                  <Text style={styles.mapBtnLabel} numberOfLines={1}>Open the map</Text>
+                </Pressable>
+              </View>
             </View>
           </>
         ) : (
@@ -263,6 +348,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     lineHeight: 17,
     color: colors.teal,
   },
+  footerActions: { flexDirection: 'row', gap: 10 },
+  footerAction: { flex: 1 },
   mapBtn: {
     marginTop: 10,
     flexDirection: 'row',
@@ -275,6 +362,13 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.bg,
   },
+  /** Pinned reads as a state, not a second button: the same shape with the
+   *  accent behind it, so the pair still looks like one row of controls. */
+  mapBtnOn: {
+    borderColor: colors.tealLine,
+    backgroundColor: colors.tealTint,
+  },
+  mapBtnLabelOn: { color: colors.teal },
   mapBtnLabel: {
     fontFamily: fonts.body,
     fontWeight: '600',

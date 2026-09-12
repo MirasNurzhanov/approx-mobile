@@ -29,6 +29,8 @@ import {
   revealSwiftLocation,
   setSwiftLiked,
   setSwiftReposted,
+  setSwiftSaved,
+  deleteSwift,
   SwiftLocationUnavailable,
   type Swift,
   type SwiftLocation,
@@ -340,6 +342,30 @@ export function SwiftsFeed() {
       });
   }, [patchSwift]);
 
+  /**
+   * Save / un-save, optimistically.
+   *
+   * No `reportSwiftSignal`, unlike a like or a repost, and that is the whole
+   * difference between a shortlist and a signal: saving a video to watch later
+   * must not feed the recommender, or the private shelf quietly becomes a
+   * public endorsement of everything on it.
+   *
+   * No counter to move either, so the rollback only has to put one boolean
+   * back. The request itself is idempotent — the server keeps one row per
+   * (swift, viewer) behind a unique constraint — so a double tap cannot end up
+   * with two entries no matter which order the responses land in.
+   */
+  const handleToggleSave = useCallback((id: number, saved: boolean) => {
+    setSwifts((prev) => prev.map((s) => (
+      s.id === id ? { ...s, viewer_saved: saved } : s
+    )));
+    setSwiftSaved(id, saved).catch(() => {
+      setSwifts((prev) => prev.map((s) => (
+        s.id === id ? { ...s, viewer_saved: !saved } : s
+      )));
+    });
+  }, []);
+
   const handleCommentCount = useCallback((swiftId: number, delta: number) => {
     setSwifts((prev) => prev.map((s) => (
       s.id === swiftId
@@ -420,6 +446,20 @@ export function SwiftsFeed() {
       onRemoved: () => setSwifts((prev) => prev.filter(
         (s) => s.author.id !== swift.author.id,
       )),
+      // Only your own. `is_mine` is the server's word for it, carried on the
+      // row — not a client-side comparison of ids that a stale profile could
+      // get wrong.
+      ...(swift.is_mine ? {
+        deleteNoun: 'Swift',
+        onDelete: async () => {
+          await deleteSwift(swift.id);
+          // Dropped from the list only after the request succeeds. Removing it
+          // optimistically would show the video gone and then have to put it
+          // back on a failure, which reads as the delete having silently
+          // undone itself.
+          setSwifts((prev) => prev.filter((s) => s.id !== swift.id));
+        },
+      } : {}),
     });
   }, [present]);
   const handleToggleMute = useCallback(() => setMuted((m) => !m), []);
@@ -494,6 +534,7 @@ export function SwiftsFeed() {
               onToggleMute={handleToggleMute}
               onToggleLike={handleToggleLike}
               onToggleRepost={handleToggleRepost}
+              onToggleSave={handleToggleSave}
               onComment={handleComment}
               onMore={handleMore}
             />
@@ -547,6 +588,7 @@ export function SwiftsFeed() {
         loading={activeReveal !== null && !activeReveal.location && !activeReveal.error}
         error={activeReveal?.error ?? null}
         authorName={activeReveal?.authorName ?? ''}
+        swiftId={activeReveal?.swiftId ?? null}
         onClose={closeReveal}
         onRetry={() => {
           const swift = swifts.find((s) => s.id === activeReveal?.swiftId);

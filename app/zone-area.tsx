@@ -10,6 +10,8 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,18 +21,20 @@ import MapView, { Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
-import { reportLocation } from '@/services/location';
+import { atSharingPrecision, reportLocation } from '@/services/location';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { Card } from '@/components/ui/Card';
 import { mapStyleFor } from '@/constants/mapStyle';
 import { fonts, radius as themeRadius, type } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { MAX_TEXT_COLUMN, useLayoutSize } from '@/hooks/useLayout';
 import { shiftForDisplay, wgs84ToGcj02 } from '@/services/gcj02';
 import {
   formatRadius,
   getRegion,
   kindLabel,
+  messageFor,
   regionBoxContains,
   regionForPoint,
   regionViewport,
@@ -119,9 +123,20 @@ async function currentCoords(): Promise<Fix | null> {
     const { status } = await Location.getForegroundPermissionsAsync();
     if (status !== 'granted') return null;
     const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    // At the precision this device transmits, not the raw double.
+    //
+    // `getCurrentPositionAsync` hands back an IEEE-754 double that stringifies
+    // to its full 17 significant digits — `43.238015199999996`. Every other
+    // call site already passes coordinates through `atSharingPrecision` on the
+    // way out (see services/location.ts); this screen was the one that did not,
+    // and it sent them to a serializer that counted digits. Rounding here
+    // rather than at the send keeps the number the preview draws identical to
+    // the one the server validates, which is the property that stops "you are
+    // not in this district" from ever being a rounding disagreement.
+    //
+    // 6 decimals is ~11cm. Nothing about a district boundary turns on less.
     const coords = {
-      latitude: fix.coords.latitude,
-      longitude: fix.coords.longitude,
+      ...atSharingPrecision(fix.coords),
       accuracy: fix.coords.accuracy ?? null,
     };
     // Still best effort, and no longer load-bearing.
@@ -181,7 +196,10 @@ function ModeTabs({ mode, onChange, disabled }: {
   const styles = makeStyles(colors);
   return (
     <View style={styles.tabs} accessibilityRole="tablist">
-      {(['radius', 'region'] as const).map((key) => {
+      {/* Place first, because it is the default now — the tab order is the
+          only thing on this screen that says which of the two is the normal
+          answer, and a circle nobody chose was never it. See `adoptZone`. */}
+      {(['region', 'radius'] as const).map((key) => {
         const active = mode === key;
         return (
           <Pressable
@@ -216,7 +234,7 @@ function ModeTabs({ mode, onChange, disabled }: {
 type Viewport = { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number };
 
 /** The shape being edited, drawn on a map that cannot be touched. */
-function ZonePreview({ mapRef, themeMode, mode, region, coords, previewCoords, previewViewport, previewRings, radiusM, outline }: {
+function ZonePreview({ mapRef, themeMode, mode, region, coords, previewCoords, previewViewport, previewRings, radiusM, outline, style }: {
   mapRef: React.RefObject<MapView | null>;
   themeMode: 'dark' | 'light';
   mode: ZoneMode;
@@ -227,11 +245,14 @@ function ZonePreview({ mapRef, themeMode, mode, region, coords, previewCoords, p
   previewRings: { latitude: number; longitude: number }[][];
   radiusM: number;
   outline: Region | null;
+  /** Overrides the fixed 200pt height. On a regular width the preview is a
+   *  column of its own and fills it, rather than being a band at the top. */
+  style?: StyleProp<ViewStyle>;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   return (
-    <View style={styles.preview}>
+    <View style={[styles.preview, style]}>
       {coords || region ? (
         <MapView
           ref={mapRef}
@@ -807,8 +828,17 @@ export default function ZoneAreaScreen() {
   const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
+  // Re-reads on every fold, so opening the phone mid-edit moves the map into
+  // its own column rather than waiting for a remount that never comes.
+  const layout = useLayoutSize();
+  const split = layout.isRegularWidth;
 
-  const [mode, setMode] = useState<ZoneMode>('radius');
+  // Starts on Place, which is what the server now defaults to — otherwise the
+  // screen shows the Radius tab for the moment before `/api/users/zone/`
+  // answers, and a person whose zone is their city watches it flick away from
+  // a dial they never set. `adoptZone` corrects it either way; this only
+  // decides which of the two is on screen first.
+  const [mode, setMode] = useState<ZoneMode>('region');
   const [radiusM, setRadiusM] = useState(500);
   const [region, setRegion] = useState<RegionSummary | null>(null);
   /** Whether the zone re-points itself as the user moves. Defaults off, which
@@ -845,7 +875,17 @@ export default function ZoneAreaScreen() {
     // polygon types land on the Place tab, and which one it was is
     // recoverable from the region itself, so nothing is lost collapsing
     // them here.
-    setMode(z.zone_type !== 'circle' && z.zone_region ? 'region' : 'radius');
+    //
+    // Keyed on `zone_type` **alone**, deliberately. It used to also require
+    // `zone_region`, which was right when the default was a circle and a
+    // polygon type could not exist without a boundary. It is wrong now: a new
+    // account defaults to CITY with no region until its first location report
+    // resolves one (users/models, migration 0036), and the old test sent
+    // exactly those people to the Radius tab — landing them on the option
+    // they had not chosen, and showing a 500m dial as if it were their zone.
+    // With no region the Place tab shows its "use my city" buttons, which is
+    // the right thing to be looking at while the city is still being found.
+    setMode(z.zone_type !== 'circle' ? 'region' : 'radius');
     setRadiusM(z.zone_radius && z.zone_radius > 0 ? z.zone_radius : 500);
     if (z.zone_region_detail) setRegion(z.zone_region_detail);
     setFollowsLocation(!!z.zone_follows_location);
@@ -908,13 +948,9 @@ export default function ZoneAreaScreen() {
       revert();
       const data = e?.response?.data;
       if (onError?.(data)) return;
-      Alert.alert(
-        'Could not save',
-        data?.zone_radius?.[0] ??
-        data?.zone_region?.[0] ??
-        data?.detail ??
-        'Please try again.',
-      );
+      Alert.alert('Could not save', messageFor(e, {
+        prefer: ['zone_radius', 'zone_region'],
+      }));
     });
   }
 
@@ -1191,6 +1227,87 @@ export default function ZoneAreaScreen() {
 
   const regionMissing = mode === 'region' && !region;
 
+  // ── Layout ─────────────────────────────────────────────────────────────────
+  // Two arrangements of the same three pieces, chosen by how much width there
+  // is and by nothing else — not by orientation, which an unfolded iPhone Duo
+  // does not report meaningfully, and not by a device check.
+  //
+  //   compact  the phone layout, unchanged: a band of map, then the controls
+  //            under it, all in one scroll.
+  //   regular  the map takes a column and *stays* — it is the thing being
+  //            edited, and on a folded-open display there is finally room for
+  //            it to be visible while you work rather than scrolling away the
+  //            moment you reach for the dial. The controls get their own
+  //            column and their own scroll.
+  //
+  // The pieces themselves are built once and placed twice, so the two poses
+  // cannot drift apart in behaviour — and so unfolding mid-edit re-parents the
+  // very same elements, which is what keeps the selected place, the typed
+  // query and the slider position from resetting across the transition.
+  const preview = (
+    <ZonePreview
+      mapRef={mapRef}
+      themeMode={themeMode}
+      mode={mode}
+      region={region}
+      coords={coords}
+      previewCoords={previewCoords}
+      previewViewport={previewViewport}
+      previewRings={previewRings}
+      radiusM={radiusM}
+      outline={outline}
+      style={split ? styles.previewSplit : undefined}
+    />
+  );
+
+  const tabs = <ModeTabs mode={mode} onChange={commitMode} disabled={saving} />;
+
+  const controls = (
+    <>
+      {mode === 'radius' ? (
+        <RadiusCard
+          radiusM={radiusM}
+          saving={saving}
+          onChange={setRadiusM}
+          onCommit={commitRadius}
+        />
+      ) : (
+        <PlaceCard
+          region={region}
+          follows={followsLocation}
+          followStale={followStale}
+          locating={locating}
+          saving={saving}
+          lookupError={search.lookupError}
+          choices={search.choices}
+          choicesFor={search.choicesFor}
+          query={search.query}
+          results={results}
+          searching={searching}
+          searchError={searchError}
+          coords={coords}
+          onClearRegion={clearRegion}
+          onTrace={traceMyPlace}
+          // Two handlers, one function: a place found *around you* keeps
+          // following, a place found *by name* pins. See `commitRegion`.
+          onPickRegion={(next) => commitRegion(next, true)}
+          onPickSearched={(next) => commitRegion(next, false)}
+          onToggleFollow={commitFollows}
+          onQueryChange={(query) => dispatchSearch({ type: 'queryChanged', query })}
+        />
+      )}
+
+      {regionMissing && (
+        <View style={styles.notice}>
+          <Ionicons name="information-circle-outline" size={16} color={colors.t2} />
+          <Text style={styles.noticeText}>
+            Pick a place to switch. Until then your zone stays a {formatRadius(radiusM)} circle.
+          </Text>
+        </View>
+      )}
+    </>
+  );
+
   return (
     <View style={styles.root}>
       <ScreenHeader title="Zone Size">
@@ -1205,69 +1322,40 @@ export default function ZoneAreaScreen() {
         </View>
       </ScreenHeader>
 
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-      >
-        <ModeTabs mode={mode} onChange={commitMode} disabled={saving} />
-
-        <ZonePreview
-          mapRef={mapRef}
-          themeMode={themeMode}
-          mode={mode}
-          region={region}
-          coords={coords}
-          previewCoords={previewCoords}
-          previewViewport={previewViewport}
-          previewRings={previewRings}
-          radiusM={radiusM}
-          outline={outline}
-        />
-
-        {mode === 'radius' ? (
-          <RadiusCard
-            radiusM={radiusM}
-            saving={saving}
-            onChange={setRadiusM}
-            onCommit={commitRadius}
-          />
-        ) : (
-          <PlaceCard
-            region={region}
-            follows={followsLocation}
-            followStale={followStale}
-            locating={locating}
-            saving={saving}
-            lookupError={search.lookupError}
-            choices={search.choices}
-            choicesFor={search.choicesFor}
-            query={search.query}
-            results={results}
-            searching={searching}
-            searchError={searchError}
-            coords={coords}
-            onClearRegion={clearRegion}
-            onTrace={traceMyPlace}
-            // Two handlers, one function: a place found *around you* keeps
-            // following, a place found *by name* pins. See `commitRegion`.
-            onPickRegion={(next) => commitRegion(next, true)}
-            onPickSearched={(next) => commitRegion(next, false)}
-            onToggleFollow={commitFollows}
-            onQueryChange={(query) => dispatchSearch({ type: 'queryChanged', query })}
-          />
-        )}
-
-        {regionMissing && (
-          <View style={styles.notice}>
-            <Ionicons name="information-circle-outline" size={16} color={colors.t2} />
-            <Text style={styles.noticeText}>
-              Pick a place to switch. Until then your zone stays a {formatRadius(radiusM)} circle.
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+      {split ? (
+        <View
+          style={[
+            styles.split,
+            { paddingHorizontal: layout.gutter, paddingBottom: bottom + 24 },
+          ]}
+        >
+          <View style={styles.splitMap}>{preview}</View>
+          <ScrollView
+            style={styles.splitControls}
+            contentContainerStyle={styles.splitControlsContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          >
+            {tabs}
+            {controls}
+          </ScrollView>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={[
+            styles.scroll,
+            { paddingHorizontal: layout.gutter, paddingBottom: bottom + 40 },
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          {tabs}
+          {preview}
+          {controls}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -1288,7 +1376,17 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   headerTitle: { fontFamily: fonts.display, fontSize: type.body, fontWeight: '600', color: colors.t1 },
   headerSpacer: { width: 40, alignItems: 'center' },
 
-  scroll: { paddingHorizontal: 20, gap: 16 },
+  // `paddingHorizontal` is supplied by the layout's gutter, which widens on a
+  // regular width so content is not flush against a much larger bezel.
+  scroll: { gap: 16 },
+
+  /** Regular width: map column and controls column, side by side. */
+  split: { flex: 1, flexDirection: 'row', gap: 20 },
+  /** The map takes the larger share — it is the thing being edited, and a
+   *  boundary is worth more pixels than the controls that pick it. */
+  splitMap: { flex: 1.15 },
+  splitControls: { flex: 1, maxWidth: MAX_TEXT_COLUMN },
+  splitControlsContent: { gap: 16, paddingBottom: 24 },
 
   tabs: {
     flexDirection: 'row',
@@ -1310,6 +1408,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   tabLabel: { fontFamily: fonts.body, fontSize: type.small, fontWeight: '600', color: colors.t2 },
   tabLabelActive: { color: colors.bg },
 
+  /** The compact band. `previewSplit` below replaces the fixed height when the
+   *  preview becomes a column. */
   preview: {
     height: 200,
     borderRadius: themeRadius.l,
@@ -1318,6 +1418,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  /** `height: undefined` undoes the 200pt band rather than fighting it — a
+   *  fixed height and `flex: 1` together leave the map short on tall displays. */
+  previewSplit: { height: undefined, flex: 1 },
   previewEmpty: { fontFamily: fonts.body, fontSize: type.small, color: colors.t3 },
   previewLoading: {
     ...StyleSheet.absoluteFillObject,

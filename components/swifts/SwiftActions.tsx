@@ -7,6 +7,7 @@ import {
   SwiftMoreIcon,
   SwiftMuteIcon,
   SwiftRepostIcon,
+  SwiftSaveIcon,
   SwiftSoundIcon,
   type SwiftIconComponent,
 } from '@/components/swifts/icons';
@@ -51,6 +52,9 @@ export interface SwiftActionsProps {
   commentCount: number;
   isReposted: boolean;
   repostCount: number;
+  /** On this viewer's shortlist. No count beside it: saving is private, so
+   *  there is no public number to show and none that could be leaked. */
+  isSaved: boolean;
   /** The creator turned reposts off; the control is hidden rather than inert. */
   allowReposts: boolean;
   allowComments: boolean;
@@ -59,6 +63,7 @@ export interface SwiftActionsProps {
   onLike: () => void;
   onComment: () => void;
   onRepost: () => void;
+  onSave: () => void;
   onMore: () => void;
   onToggleMute: () => void;
   /** Distance from the bottom, worked out by the caller from the nav arc. */
@@ -112,9 +117,9 @@ function ActionButton({
 
 function SwiftActionsImpl({
   locationAvailable, revealState, onRevealLocation,
-  isLiked, likeCount, commentCount, isReposted, repostCount,
+  isLiked, likeCount, commentCount, isReposted, repostCount, isSaved,
   allowReposts, allowComments,
-  muted, onLike, onComment, onRepost, onMore, onToggleMute, bottom,
+  muted, onLike, onComment, onRepost, onSave, onMore, onToggleMute, bottom,
 }: SwiftActionsProps) {
   const { colors } = useTheme();
 
@@ -162,6 +167,20 @@ function SwiftActionsImpl({
           onPress={onRepost}
         />
       )}
+
+      {/* No count, and always shown. A shortlist is private, so unlike
+          reposts there is no creator switch that can turn it off and no
+          number whose absence would say anything. */}
+      <ActionButton
+        Glyph={SwiftSaveIcon}
+        on={isSaved}
+        onColor={colors.teal}
+        accessibilityLabel={isSaved ? 'Remove from saved' : 'Save'}
+        accessibilityHint={isSaved
+          ? 'Takes this Swift off your saved list'
+          : 'Keeps this Swift on your profile, visible only to you'}
+        onPress={onSave}
+      />
 
       {/* Only when this viewer could actually reveal it. A Swift whose
           location they could never see draws nothing, so the control's

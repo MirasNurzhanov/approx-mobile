@@ -25,6 +25,7 @@ import { IconClose, IconInfo, IconLock, IconMusic, IconSound, IconUpload } from 
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { contentColumn, useLayoutSize } from '@/hooks/useLayout';
 import { AppleMusicError, clearAppleZoneTrack } from '@/services/appleMusic';
 import {
   refreshPrivacy,
@@ -32,7 +33,7 @@ import {
   type Audience,
 } from '@/services/privacy';
 import { fmtRadius, fmtTime, trackTitle } from '@/services/zoneAudio';
-import { RADIUS_MAX_M, RADIUS_MIN_M } from '@/services/zoneArea';
+import { messageFor, RADIUS_MAX_M, RADIUS_MIN_M } from '@/services/zoneArea';
 
 // The music your zone carries: what plays, who is allowed to hear it, and a way
 // to listen to it yourself before anyone else does.
@@ -497,6 +498,7 @@ export default function ZoneScreen() {
   const styles = makeStyles(colors);
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
+  const layout = useLayoutSize();
 
   const [zone, setZone] = useState<ZoneState>({ zone_active: true, zone_radius: 500 });
   /** Name of the file this session uploaded — nicer than the URL it became. */
@@ -572,7 +574,13 @@ export default function ZoneScreen() {
       setZone(r.data);
     }, () => setSaving(false)).catch((e: any) => {
       setZone(previous);
-      Alert.alert('Could not save', e?.response?.data?.detail ?? 'Please try again.');
+      // `music_zone_radius` first: it is the only field on this screen the
+      // server writes wording for, and its message names the limit the dial
+      // just crossed. Everything else this endpoint can refuse — a loop window,
+      // an incomplete zone — is still worth showing rather than shrugging at.
+      Alert.alert('Could not save', messageFor(e, {
+        prefer: ['music_zone_radius', 'zone_region'],
+      }));
     });
   }
 
@@ -625,7 +633,14 @@ export default function ZoneScreen() {
       setZone(r.data);
       setUploadName(asset.name.replace(/\.[a-z0-9]{2,4}$/i, ''));
     } catch (e: any) {
-      Alert.alert('Upload failed', e?.response?.data?.detail ?? 'Could not upload that file.');
+      // `zone_audio` carries the refusal for a file the server will not take —
+      // wrong type, too long. A 413 from the proxy in front of it arrives as
+      // HTML with no JSON at all, which is exactly what `messageFor` declines
+      // to read out loud, so that lands on the fallback below.
+      Alert.alert('Upload failed', messageFor(e, {
+        prefer: ['zone_audio'],
+        fallback: 'Could not upload that file.',
+      }));
     }
     // Reached on both paths: the `catch` alerts and stops there.
     setUploadPct(null);
@@ -705,7 +720,11 @@ export default function ZoneScreen() {
       </ScreenHeader>
 
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: bottom + 40 }]}
+        contentContainerStyle={[
+          styles.scroll,
+          contentColumn(layout),
+          { paddingHorizontal: layout.gutter, paddingBottom: bottom + 40 },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Adding and removing the zone on the map lives in Settings → Zone on
@@ -797,7 +816,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
   headerSpacer: { width: 32, alignItems: 'flex-end' },
 
-  scroll: { paddingHorizontal: 20, paddingTop: 20 },
+  // Horizontal padding comes from the layout gutter; the column is capped
+  // and centred so a folded-open display gets a readable width, not a stretch.
+  scroll: { paddingTop: 20 },
 
   // ── Zone is off ──
   offNote: {

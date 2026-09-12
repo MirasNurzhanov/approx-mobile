@@ -63,6 +63,7 @@ import { fonts } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useNavStyle } from '@/context/NavStyleContext';
 import { useTheme } from '@/context/ThemeContext';
+import { contentColumn, useLayoutSize } from '@/hooks/useLayout';
 
 const FEEDBACK_EMAIL = 'nurdauletaskar551@gmail.com';
 // Same inbox today, a different label on purpose: App Review asks for
@@ -408,20 +409,12 @@ function LegalSection() {
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>LEGAL &amp; SAFETY</Text>
 
-      {/* The zero-tolerance statement, in the app rather than only in the
-          linked document. App Review looks for it, and so does anybody
-          wondering whether reporting something here achieves anything. */}
-      <Card style={styles.legalCard}>
-        <Text style={styles.legalTitle}>Zero tolerance</Text>
-        <Text style={styles.legalBody}>
-          Objectionable content and abusive users are not tolerated on Approx.
-          Anything you post can be reported by anyone who sees it, any account
-          can be blocked, and reports are reviewed by a person. Content that
-          breaks the guidelines is removed and the accounts behind it are
-          suspended or banned.
-        </Text>
-      </Card>
-
+      {/* The zero-tolerance statement used to sit here as its own card. It is
+          still shown — at sign-up, by `TermsAgreement`, and by `TermsGate` to
+          anybody who has not agreed to the current version — which is where
+          App Review is looking for it. This screen keeps the part that is
+          actionable rather than declarative: the guidelines themselves, the
+          blocked-users list, and a way to report a safety concern. */}
       <Card style={styles.rowsCard}>
         <SettingsRow
           icon={IconShield}
@@ -542,6 +535,7 @@ export default function SettingsScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { logout, confirmLogout, isSigningOut } = useAuth();
   const { top } = useSafeAreaInsets();
+  const layout = useLayoutSize();
   const scrollProps = useScrollHandler();
   const navPadding = useNavContentPadding();
 
@@ -727,7 +721,11 @@ export default function SettingsScreen() {
   return (
     <View style={styles.root}>
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: navPadding }]}
+        contentContainerStyle={[
+          styles.scroll,
+          contentColumn(layout),
+          { paddingHorizontal: layout.gutter, paddingTop: top + 20, paddingBottom: navPadding },
+        ]}
         showsVerticalScrollIndicator={false}
         {...scrollProps}
       >
@@ -790,7 +788,8 @@ export default function SettingsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 20 },
+  // See app/zone.tsx — gutter and column cap come from the layout.
+  scroll: {},
 
   // Header
   header: {
@@ -852,19 +851,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   settingsRight: { flexDirection: 'row', alignItems: 'center' },
   rowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rowTrailingText: { fontFamily: fonts.body, fontSize: 13, color: colors.t3 },
-  legalCard: { marginBottom: 10, gap: 6 },
-  legalTitle: {
-    fontFamily: fonts.display,
-    fontWeight: '700',
-    fontSize: 15,
-    color: colors.t1,
-  },
-  legalBody: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.t2,
-  },
   legalFootnote: {
     fontFamily: fonts.body,
     fontSize: 12,

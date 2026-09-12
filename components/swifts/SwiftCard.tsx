@@ -87,6 +87,7 @@ export interface SwiftCardProps {
   onToggleMute: () => void;
   onToggleLike: (id: number, liked: boolean) => void;
   onToggleRepost: (id: number, reposted: boolean) => void;
+  onToggleSave: (id: number, saved: boolean) => void;
   onComment: (swift: Swift) => void;
   onMore: (swift: Swift) => void;
 }
@@ -105,6 +106,7 @@ function SwiftCardImpl({
   onToggleMute,
   onToggleLike,
   onToggleRepost,
+  onToggleSave,
   onComment,
   onMore,
 }: SwiftCardProps) {
@@ -271,6 +273,10 @@ function SwiftCardImpl({
     () => onToggleRepost(swift.id, !swift.viewer_reposted),
     [onToggleRepost, swift.id, swift.viewer_reposted],
   );
+  const handleSave = useCallback(
+    () => onToggleSave(swift.id, !swift.viewer_saved),
+    [onToggleSave, swift.id, swift.viewer_saved],
+  );
   const handleComment = useCallback(() => onComment(swift), [onComment, swift]);
   const handleMore = useCallback(() => onMore(swift), [onMore, swift]);
 
@@ -386,6 +392,7 @@ function SwiftCardImpl({
         likeCount={swift.like_count}
         commentCount={swift.comment_count}
         isReposted={swift.viewer_reposted}
+        isSaved={swift.viewer_saved}
         repostCount={swift.repost_count}
         allowReposts={swift.allow_reposts && !swift.is_mine}
         allowComments={swift.allow_comments}
@@ -393,6 +400,7 @@ function SwiftCardImpl({
         onLike={handleLike}
         onComment={handleComment}
         onRepost={handleRepost}
+        onSave={handleSave}
         onMore={handleMore}
         onToggleMute={onToggleMute}
         bottom={navClearance + 18}

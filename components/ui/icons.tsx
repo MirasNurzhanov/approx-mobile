@@ -1015,3 +1015,30 @@ export function IconVolume({ size = 24, color = colors.t2 }: IconProps) {
     </Svg>
   )
 }
+
+/** A walking figure, for the travel-mode picker. Deliberately not `IconHiking`
+ *  — that one is a mountain, which reads as "a hike" rather than "on foot". */
+export function IconWalk({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={13.2} cy={4.6} r={1.7} />
+        <Path d="M13.4 8.2l-3 1.7-1.3 3.6M13.4 8.2l1.9 1.4 1.5 2.9M13.4 8.2l-.6 5.4 2.3 2.6.9 4.1M12.8 13.6l-2.9 2.6-1.5 3.9" />
+      </G>
+    </Svg>
+  )
+}
+
+/** A bus, for the transit mode. A bus rather than a train because it is the
+ *  vehicle every city in the app's reach actually has. */
+export function IconTransit({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M5.5 16.5V6.2a2 2 0 012-2h9a2 2 0 012 2v10.3M5.5 16.5h13M5.5 9.2h13M7.5 16.5v2.2M16.5 16.5v2.2" />
+      </G>
+      <Circle cx={8.4} cy={13.3} r={1} fill={color} />
+      <Circle cx={15.6} cy={13.3} r={1} fill={color} />
+    </Svg>
+  )
+}

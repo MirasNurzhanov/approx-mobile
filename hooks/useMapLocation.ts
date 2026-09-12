@@ -12,8 +12,9 @@
 // Keeping the transmit out of this file is what makes that checkable.
 
 import * as Location from 'expo-location';
+import { useIsFocused } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 import type MapView from 'react-native-maps';
 import type { Region } from 'react-native-maps';
 
@@ -23,11 +24,18 @@ import { atSharingPrecision, type Coordinates } from '@/services/location';
 import type { GeoPoint } from '@/services/markerLayout';
 import { recordSpeed } from '@/services/ownMotion';
 import {
-  backgroundStatus,
+  getSmoothedPosition,
+  pushFix,
+  resetPositionSampleClock,
+  resetPositionSmoothing,
+  setSmoothingActive,
+  setSmoothingReduceMotion,
+  subscribeToSmoothedPosition,
+} from '@/services/positionSmoothing';
+import {
   bindForegroundRefresh,
   check as checkPermission,
   refreshPermissions,
-  SUPPORTS_BACKGROUND_LOCATION,
   usePermissionStore,
   type PermissionState,
 } from '@/services/permissions';
@@ -113,6 +121,13 @@ export function useMapLocation(
   ensurePermission: (key: 'location') => Promise<boolean>,
 ): MapLocation {
   const reduceMotion = useReduceMotion();
+  const focused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  const screenActive = focused && appActive;
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => setAppActive(state === 'active'));
+    return () => subscription.remove();
+  }, []);
 
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [permState, setPermState] = useState<PermissionState | null>(null);
@@ -134,18 +149,25 @@ export function useMapLocation(
   const [mapH, setMapH] = useState(0);
   /** Debounce for the above — see `onRegionChangeComplete`. */
   const zoomSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settledZoomRef = useRef(zoomBucket(0.012));
+  const pendingZoomRef = useRef<number | null>(null);
   useEffect(() => () => { if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current); }, []);
   /** The position the camera was last sent to, so a fix that rounds to the
    * same approximate point doesn't re-issue an animation. */
   const centeredOnRef = useRef<Coordinates | null>(null);
+  const recenterUntilRef = useRef(0);
   /** When `coords` was last measured, not when it was last rendered. */
   const fixAtRef = useRef(0);
+  const fixClock = useRef({ offset: Date.now() - performance.now(), generation: 0 });
   /** Latest platform speed estimate, in m/s; null when it has none. A ref, not
    * state — it changes on every fix and only the next poll reads it. */
   const speedRef = useRef<number | null>(null);
   const followingRef = useRef(false);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
-  const startingWatchRef = useRef(false);
+  const trackingVersion = useRef(0);
+  const trackingActive = useRef(false);
+  const locateVersion = useRef(0);
+  const permissionPrompted = useRef(false);
   // Mirrors state for the polling and location callbacks. This hook is called
   // before the ones that read `coordsRef`, so on any commit where both run this
   // effect lands first.
@@ -188,105 +210,119 @@ export function useMapLocation(
   // holds the moment the permission drops. Only the ref mirror — read by
   // `stopFollowing`, which both gestures and taps reach after a commit — waits
   // for the effect. The handlers that need it sooner still set it themselves.
-  const following = followRequested && locationGranted;
+  const following = followRequested && locationGranted && screenActive;
   useEffect(() => { followingRef.current = following; });
 
-  /**
-   * The one location subscription on this screen. The locate control and
-   * follow mode read from it rather than opening a second one — two GPS
-   * subscriptions on a screen people leave open is a real battery cost for no
-   * extra information.
-   *
-   * Guarded so it can be called from both the mount effect and the
-   * permission-regained effect without ever ending up with two watchers.
-   */
-  const startWatching = useCallback(async () => {
-    if (watchRef.current || startingWatchRef.current) return;
-    startingWatchRef.current = true;
-    try {
-      // Not asked for here — this fires on every watch (re)start, including
-      // the permission-regained effect below, and re-asking on every one of
-      // those would be a dialog storm. The one place that primes and requests
-      // it is the mount effect, once, right after foreground is granted. This
-      // call only starts the OS task if that already succeeded.
-      await startBackgroundLocationUpdates();
-      const init = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      fixAtRef.current = init.timestamp;
-      setCoords({ latitude: init.coords.latitude, longitude: init.coords.longitude });
-      recordSpeed(init.coords.speed);
-      watchRef.current = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
-        (loc) => {
-          fixAtRef.current = loc.timestamp;
-          setCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-          // The platform's own fused speed, which this watcher was already
-          // receiving and discarding. Kept in a ref rather than state: it
-          // changes on every fix and nothing renders from it directly, so
-          // setting state here would re-render the whole map for nothing.
-          speedRef.current = loc.coords.speed ?? null;
-          recordSpeed(loc.coords.speed);
-        },
-      );
-    } catch (e: any) {
-      console.log('[Map] location watch failed:', e?.message);
+  // GPS timestamps use wall time, unlike drawing/recenter deadlines. Rebase
+  // ordering after a clock correction, retaining the position already drawn.
+  const syncFixClock = useCallback(() => {
+    const offset = Date.now() - performance.now();
+    if (Math.abs(offset - fixClock.current.offset) > 5_000) {
+      fixClock.current = { offset, generation: fixClock.current.generation + 1 };
+      fixAtRef.current = 0;
+      resetPositionSampleClock();
     }
-    // Always reached — the `catch` only logs — so the re-entrancy guard is
-    // released on both paths without a `finally`, which React Compiler cannot
-    // compile and which would cost this screen its auto-memoization.
-    startingWatchRef.current = false;
+    return fixClock.current.generation;
   }, []);
 
+  // Every input path uses the same validation and timestamp ordering. A slow
+  // one-shot read must not move a marker backwards after a newer watch fix.
+  const acceptFix = useCallback((fix: Location.LocationObject): Coordinates | null => {
+    syncFixClock();
+    const next = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
+    if (!Number.isFinite(fix.timestamp) || fix.timestamp <= fixAtRef.current
+      || Math.abs(Date.now() - fix.timestamp) > STALE_FIX_MS
+      || !pushFix(next, fix.timestamp)) return null;
+    fixAtRef.current = fix.timestamp;
+    coordsRef.current = next;
+    setCoords(next);
+    const speed = fix.coords.speed;
+    speedRef.current = typeof speed === 'number' && Number.isFinite(speed) && speed >= 0 ? speed : null;
+    recordSpeed(speedRef.current);
+    return atSharingPrecision(next);
+  }, [syncFixClock]);
+
+  // Prime the foreground request once, while the map is visible. Background
+  // permission is still requested only by the existing explicit sharing control.
   useEffect(() => {
-    (async () => {
-      // Primed, not cold. The sheet explains first so the one shot iOS gives a
-      // cold "Don't Allow" is not spent on a dialog nobody had context for —
-      // and, since 5.1.1(iv), that sheet has no way to defer the dialog once
-      // it is up. See components/PermissionPrimer.
-      const granted = await ensurePermission('location');
-      if (!granted) {
+    if (!screenActive || permissionPrompted.current) return;
+    permissionPrompted.current = true;
+    let cancelled = false;
+    void ensurePermission('location').then(async granted => {
+      if (cancelled) return;
+      if (granted) setPermState('granted');
+      else {
         const info = await checkPermission('location');
-        setPermState(info.state);
-        return;
+        if (!cancelled) setPermState(info.state);
       }
-      setPermState('granted');
-      await startWatching();
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [screenActive, ensurePermission]);
 
-      // **No background request here, and that absence is the fix.**
-      //
-      // This used to chain `requestPermission('locationBackground')` straight
-      // off the foreground grant, so simply opening the map asked for Always.
-      // Nobody had turned anything on; the map does not need it — everything on
-      // this screen works while the app is open — and App Review rejected it
-      // under 5.1.1(iv) as consent the app had gone looking for.
-      //
-      // Background location is still fully supported. It is now asked for from
-      // Privacy & safety, when somebody turns on "Keep sharing while Approx is
-      // closed", which is a feature that genuinely cannot work without it. See
-      // services/permissions.requestBackground.
-      //
-      // What *is* still done here is starting the task for somebody who has
-      // already granted Always on a previous run — that is honouring a choice
-      // already made, not soliciting a new one, and it never shows a dialog.
-      if (SUPPORTS_BACKGROUND_LOCATION) {
-        if ((await backgroundStatus()) === 'granted') {
-          await startBackgroundLocationUpdates();
+  // Tabs stay mounted. Stop the foreground watcher and drawing timer on blur,
+  // background or revocation; the separately consented background task keeps
+  // its existing lifecycle. An asynchronously created watcher is removed even
+  // when its creation finishes after this effect has already been cleaned up.
+  useEffect(() => {
+    const version = ++trackingVersion.current;
+    let disposed = false;
+    trackingActive.current = screenActive && locationGranted;
+    setSmoothingActive(trackingActive.current);
+    const current = () => !disposed && version === trackingVersion.current;
+
+    if (trackingActive.current) {
+      // A newly created watcher is a new acquisition session. The lifecycle
+      // generation excludes old callbacks even if the device clock went back.
+      fixAtRef.current = 0;
+      fixClock.current = {
+        offset: Date.now() - performance.now(), generation: fixClock.current.generation + 1,
+      };
+      resetPositionSampleClock();
+      void (async () => {
+        const permission = await checkPermission('location');
+        if (!current()) return;
+        if (permission.state !== 'granted') {
+          setPermState(permission.state);
+          void refreshPermissions(['location']).catch(() => {});
+          return;
         }
-      }
-    })();
-
+        // Starting a previously permitted background task must not delay the
+        // map's first fix. This helper never asks for a new permission.
+        void startBackgroundLocationUpdates().catch(() => {});
+        const clock = syncFixClock();
+        void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+          .then(fix => {
+            if (current() && syncFixClock() === clock) acceptFix(fix);
+          }).catch(() => {});
+        const subscription = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
+          fix => { if (current()) acceptFix(fix); },
+        );
+        if (current()) watchRef.current = subscription;
+        else subscription.remove();
+      })().catch(() => {});
+    }
+    if (!locationGranted) {
+      coordsRef.current = null;
+      fixAtRef.current = 0;
+      speedRef.current = null;
+      setCoords(null);
+      setFollowRequested(false);
+      resetPositionSmoothing();
+    }
     return () => {
+      disposed = true;
+      trackingVersion.current += 1;
+      trackingActive.current = false;
+      locateVersion.current += 1;
+      setLocating(false);
       watchRef.current?.remove();
       watchRef.current = null;
+      setSmoothingActive(false);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [screenActive, locationGranted, acceptFix, syncFixClock]);
 
-  // Permission can come back mid-session — from the locate button's primer, or
-  // from the user flipping it in Settings and returning. The subscription died
-  // with the revocation, so it has to be re-armed here or follow mode would
-  // track a position that never updates again.
-  useEffect(() => {
-    if (locationGranted) startWatching();
-  }, [locationGranted, startWatching]);
+  useEffect(() => () => { resetPositionSmoothing(); }, []);
 
   // ── Locate / follow ─────────────────────────────────────────────────────────
   //
@@ -300,6 +336,7 @@ export function useMapLocation(
       const current = regionRef.current;
       const zoomed = resetZoom || !current;
       centeredOnRef.current = target;
+      recenterUntilRef.current = performance.now() + (reduceMotion ? 0 : RECENTER_MS);
       map.animateToRegion(
         {
           ...target,
@@ -318,6 +355,10 @@ export function useMapLocation(
   // every frame of a drag, and announcing from inside a setState callback
   // would repeat for each one.
   const stopFollowing = useCallback((reason: 'gesture' | 'tap') => {
+    // A gesture also cancels a locate waiting for its first fix. The fix may
+    // still update the dot, but must not take the camera back from the user.
+    locateVersion.current += 1;
+    setLocating(false);
     if (!followingRef.current) return;
     followingRef.current = false;
     setFollowRequested(false);
@@ -351,15 +392,54 @@ export function useMapLocation(
     [reduceMotion, stopFollowing, zoomDelta],
   );
 
-  // Track each new fix while following. The guard matters in approximate mode,
-  // where consecutive fixes usually round to the same point and would
-  // otherwise re-animate the camera to where it already is.
+  // Reduce Motion is an instruction not to animate, and a glide is animation.
+  // Mirrored into the smoother rather than branched on at each draw, so the
+  // marker and the camera cannot end up disagreeing about it.
   useEffect(() => {
-    if (!following || !displayCoords) return;
-    const last = centeredOnRef.current;
-    if (last && last.latitude === displayCoords.latitude && last.longitude === displayCoords.longitude) return;
-    centerOnSelf(displayCoords, false);
-  }, [following, displayCoords, centerOnSelf]);
+    if (reduceMotion) recenterUntilRef.current = 0;
+    setSmoothingReduceMotion(reduceMotion);
+  }, [reduceMotion]);
+
+  /**
+   * Keep the camera on the smoothed position while following.
+   *
+   * A subscription and a direct `setCamera`, not a `useEffect` on a piece of
+   * state — this fires around fifteen times a second and going through React
+   * would re-render the whole map screen for each one.
+   *
+   * `setCamera`, not `animateToRegion`, and that is the other half of the fix.
+   * Per-fix animations can overlap when GPS updates arrive in bursts. Their
+   * actual cadence varies by device; 450 ms animations do not overlap a
+   * steady 600 ms cadence. Continuous centers also remove the pauses between
+   * separated animations without changing the GPS sampling settings.
+   *
+   * Only `center` is passed. A `Partial<Camera>` leaves everything else alone,
+   * so the zoom, pitch and heading the user set are not quietly reset fifteen
+   * times a second.
+   */
+  useEffect(() => {
+    if (!following) return;
+    const move = () => {
+      const map = mapRef.current;
+      const next = getSmoothedPosition();
+      if (!followingRef.current || !trackingActive.current || !map || !next
+        || performance.now() < recenterUntilRef.current) return;
+      const at = atSharingPrecision(next);
+      const last = centeredOnRef.current;
+      // Standing still, the same point arrives repeatedly as the fix wobbles
+      // under the rounding. Moving the camera to where it already is costs a
+      // native call per frame and, on Android, an onRegionChange for each.
+      if (last && last.latitude === at.latitude && last.longitude === at.longitude) return;
+      centeredOnRef.current = at;
+      map.setCamera({ center: at });
+    };
+    move();
+    // Let the explicit locate animation finish before streaming centers;
+    // otherwise the first smoothed fix cancels the user's requested zoom.
+    const resume = setTimeout(move, Math.max(0, recenterUntilRef.current - performance.now()));
+    const unsubscribe = subscribeToSmoothedPosition(move);
+    return () => { clearTimeout(resume); unsubscribe(); };
+  }, [following, reduceMotion]);
 
   const explainUnavailable = useCallback(async () => {
     // The primer already covers both shapes of this: the reason plus the OS
@@ -374,19 +454,21 @@ export function useMapLocation(
 
   /** Ask the OS for a fresh fix and feed it into the shared position state. */
   const refreshFix = useCallback(async (): Promise<Coordinates | null> => {
+    const version = trackingVersion.current;
+    if (!trackingActive.current) return null;
+    const clock = syncFixClock();
     try {
       const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const next = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
-      fixAtRef.current = fix.timestamp;
-      setCoords(next);
-      return atSharingPrecision(next);
+      if (version !== trackingVersion.current || !trackingActive.current) return null;
+      if (syncFixClock() !== clock) return coordsRef.current ? atSharingPrecision(coordsRef.current) : null;
+      return acceptFix(fix) ?? (coordsRef.current ? atSharingPrecision(coordsRef.current) : null);
     } catch {
       return null;
     }
-  }, []);
+  }, [acceptFix, syncFixClock]);
 
   const startFollowing = useCallback((target: Coordinates) => {
-    centerOnSelf(target, true);
+    centerOnSelf(getSmoothedPosition() ?? target, true);
     // Set before the re-render: stopFollowing reads the ref, and onPanDrag can
     // fire a frame ahead of the state update.
     followingRef.current = true;
@@ -395,6 +477,7 @@ export function useMapLocation(
   }, [centerOnSelf]);
 
   const handleLocatePress = useCallback(async () => {
+    if (!screenActive) return;
     if (!locationGranted) {
       explainUnavailable();
       return;
@@ -419,7 +502,11 @@ export function useMapLocation(
     // Nothing to centre on at all. This is the only case that waits, and it
     // waits rather than falling back to a hardcoded coordinate.
     setLocating(true);
+    const version = trackingVersion.current;
+    const locate = ++locateVersion.current;
     const target = await refreshFix();
+    if (version !== trackingVersion.current || locate !== locateVersion.current
+      || !trackingActive.current) return;
     setLocating(false);
     if (!target) {
       Alert.alert(
@@ -430,7 +517,7 @@ export function useMapLocation(
     }
     startFollowing(target);
   }, [
-    locationGranted, following, displayCoords,
+    screenActive, locationGranted, following, displayCoords,
     explainUnavailable, stopFollowing, startFollowing, refreshFix,
   ]);
 
@@ -449,10 +536,18 @@ export function useMapLocation(
     // updated once the camera has been still for a moment, and only when
     // it lands in a different bucket — a pinch costs one re-render at the
     // end instead of one per frame, and a pan costs none.
+    const next = zoomBucket(r.latitudeDelta);
+    if (next === pendingZoomRef.current) return;
     if (zoomSettleRef.current) clearTimeout(zoomSettleRef.current);
+    zoomSettleRef.current = null;
+    pendingZoomRef.current = null;
+    if (next === settledZoomRef.current) return;
+    pendingZoomRef.current = next;
     zoomSettleRef.current = setTimeout(() => {
-      const next = zoomBucket(r.latitudeDelta);
-      setZoomDelta((prev) => (next === prev ? prev : next));
+      zoomSettleRef.current = null;
+      pendingZoomRef.current = null;
+      settledZoomRef.current = next;
+      setZoomDelta(next);
     }, ZOOM_SETTLE_MS);
   }, []);
 

@@ -115,6 +115,9 @@ export interface Swift {
   view_count: number;
   viewer_liked: boolean;
   viewer_reposted: boolean;
+  /** On this viewer's shortlist. Private: there is no matching count,
+   *  because a saved-by number would leak a list nobody may read. */
+  viewer_saved: boolean;
   viewer_viewed: boolean;
 
   /** Whether to draw the reveal button. Never a coordinate. */
@@ -224,6 +227,57 @@ export async function setSwiftReposted(id: number, reposted: boolean): Promise<n
     ? await api.post<{ repost_count: number }>(`/api/swifts/${id}/repost/`)
     : await api.delete<{ repost_count: number }>(`/api/swifts/${id}/repost/`);
   return data?.repost_count ?? 0;
+}
+
+/**
+ * Put a Swift on the viewer's shortlist, or take it off.
+ *
+ * Returns nothing but the new state, because there is nothing else to return:
+ * saving moves no public counter, unlike a like or a repost. That is the whole
+ * difference between a bookmark and a signal.
+ *
+ * Safe to call twice. The server holds one row per (swift, viewer) — a unique
+ * constraint, not a check — so a double tap, a retry on a flaky connection, or
+ * the same Swift saved from the feed and from its detail screen all collapse to
+ * one entry. Callers do not need to guard against it.
+ */
+export async function setSwiftSaved(id: number, saved: boolean): Promise<boolean> {
+  const { data } = saved
+    ? await api.post<{ saved: boolean }>(`/api/swifts/${id}/save/`)
+    : await api.delete<{ saved: boolean }>(`/api/swifts/${id}/save/`);
+  return data?.saved ?? saved;
+}
+
+/**
+ * Take a Swift down for everyone.
+ *
+ * Author only — the server answers 404 to anybody else rather than 403, so a
+ * stranger cannot even learn the Swift exists. The client still gates the menu
+ * on `is_mine`, which is about not offering an action that would fail, not
+ * about enforcement.
+ *
+ * A soft delete server-side: the row survives so the location-reveal audit,
+ * the comments and the likes outlive it — the audit especially is worth more
+ * after a Swift comes down than before. Every read path filters it out, so it
+ * is gone from the product, and there is no undo in the app.
+ */
+export async function deleteSwift(id: number): Promise<void> {
+  await api.delete(`/api/swifts/${id}/`);
+}
+
+/**
+ * The viewer's shortlist, newest save first.
+ *
+ * Shorter than what was saved, sometimes: a Swift made private or taken down
+ * since it was saved drops out. The bookmark survives on the server — nothing
+ * is deleted from under anyone — but the list only ever shows what can still
+ * be watched.
+ */
+export async function fetchSavedSwifts(limit = 20, offset = 0): Promise<SwiftPage> {
+  const { data } = await api.get<SwiftPage>('/api/swifts/saved/', {
+    params: { limit, offset },
+  });
+  return { count: data?.count ?? 0, results: data?.results ?? [] };
 }
 
 /**

@@ -28,6 +28,9 @@ import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { clubsApi } from '@/services/clubs';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
+import {
+  MAX_PINS, pinIdFor, pinMeetup, unpinPlace, useIsPinned,
+} from '@/services/pinnedPlaces';
 import { useContentActions } from '@/components/ContentActions';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
@@ -50,6 +53,10 @@ interface MeetupProposal {
   latitude?: number;
   longitude?: number;
   status: ProposalStatus;
+  /** When the event stops existing — the same field the map filters on. Read
+   *  here so a meetup pinned from the chat drops off the viewer's map at the
+   *  same moment as one pinned from the map itself. */
+  expires_at?: string;
 }
 
 interface ClubMessage {
@@ -267,6 +274,7 @@ const STATUS_COLORS: Record<ProposalStatus, { bg: string; text: string }> = {
 function ProposalCard({
   proposal,
   proposerUsername,
+  clubName,
   viewerIsOwner,
   viewerIsProposer,
   onApprove,
@@ -276,6 +284,7 @@ function ProposalCard({
 }: {
   proposal: MeetupProposal;
   proposerUsername?: string;
+  clubName?: string;
   viewerIsOwner: boolean;
   viewerIsProposer: boolean;
   onApprove: (id: number) => void;
@@ -288,6 +297,48 @@ function ProposalCard({
   const statusColor = STATUS_COLORS[proposal.status] ?? STATUS_COLORS.pending;
   const isActioning = actioningId === proposal.id;
   const canDelete = viewerIsOwner || viewerIsProposer;
+
+  // ── Going ────────────────────────────────────────────────────────────────
+  // Saying you are going pins the meetup to your own map and does nothing else
+  // — no RSVP, nothing the club or the proposer can see. That is the whole
+  // feature deliberately: an attendance list is a different thing to build,
+  // and this button should not quietly become one. See services/pinnedPlaces.
+  //
+  // Offered on approved proposals only, because a pending one is not on
+  // anybody's map yet, and only when it has somewhere to be.
+  const going = useIsPinned('meetup', proposal.id);
+  const [saving, setSaving] = useState(false);
+  const canAttend =
+    proposal.status === 'approved'
+    && typeof proposal.latitude === 'number'
+    && typeof proposal.longitude === 'number';
+
+  function toggleGoing() {
+    if (saving || !canAttend) return;
+    setSaving(true);
+    void runBusy(async () => {
+      if (going) {
+        await unpinPlace(pinIdFor('meetup', proposal.id));
+        return;
+      }
+      const result = await pinMeetup({
+        meetupId: proposal.id,
+        latitude: proposal.latitude as number,
+        longitude: proposal.longitude as number,
+        title: proposal.title,
+        clubName,
+        locationName: proposal.location_name,
+        eventDatetime: proposal.event_datetime,
+        expiresAt: proposal.expires_at,
+      });
+      if (!result.ok && result.reason === 'limit') {
+        Alert.alert(
+          'Your map is full',
+          `You can keep ${MAX_PINS} pinned places. Remove one to add this meetup.`,
+        );
+      }
+    }, () => setSaving(false));
+  }
 
   function confirmDelete() {
     Alert.alert(
@@ -340,6 +391,40 @@ function ProposalCard({
         ) : null}
         <Text style={cardStyles.proposer}>Proposed by @{proposerUsername ?? 'member'}</Text>
       </View>
+
+      {/* Going — approved meetups the viewer could actually get to */}
+      {canAttend && (
+        <View style={cardStyles.actions}>
+          <Pressable
+            style={[cardStyles.goingBtn, going && cardStyles.goingBtnOn, saving && cardStyles.actionBtnDisabled]}
+            onPress={toggleGoing}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityState={{ selected: going, busy: saving }}
+            accessibilityLabel={
+              going
+                ? 'Going. Tap to remove this meetup from your map.'
+                : 'I am going. Pins this meetup to your map.'
+            }
+            accessibilityHint="Saved to your own map only — the club is not told."
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.teal} />
+            ) : (
+              <>
+                <Ionicons
+                  name={going ? 'bookmark' : 'bookmark-outline'}
+                  size={14}
+                  color={going ? colors.teal : colors.t2}
+                />
+                <Text style={[cardStyles.goingBtnText, going && cardStyles.goingBtnTextOn]}>
+                  {going ? 'Going · pinned to your map' : "I'm going"}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      )}
 
       {/* Owner actions — pending only */}
       {viewerIsOwner && proposal.status === 'pending' && (
@@ -399,6 +484,21 @@ const makeCardStyles = (colors: ColorPalette) => StyleSheet.create({
   desc: { fontFamily: fonts.body, fontSize: 13, color: colors.t2, lineHeight: 19, marginTop: 4 },
   proposer: { fontFamily: fonts.body, fontSize: 11, color: colors.t3, marginTop: 6 },
 
+  goingBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface2,
+  },
+  goingBtnOn: { borderColor: colors.tealLine, backgroundColor: colors.tealTint },
+  goingBtnText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.t2 },
+  goingBtnTextOn: { color: colors.teal },
   actions: {
     flexDirection: 'row',
     gap: 10,
@@ -466,11 +566,12 @@ function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
 }
 
 /** One message: a meetup proposal card, or an ordinary bubble. */
-function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerIsOwner, actioningId, onApprove, onReject, onDelete, onReport }: {
+function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, clubName, viewerIsOwner, actioningId, onApprove, onReject, onDelete, onReport }: {
   item: ClubMessage;
   isMine: boolean;
   hydratedItem: ClubMessage;
   showSenderHeader: boolean;
+  clubName?: string;
   viewerIsOwner: boolean;
   actioningId: number | null;
   onApprove: (id: number) => void;
@@ -487,6 +588,7 @@ function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerI
         <ProposalCard
           proposal={item.proposal}
           proposerUsername={hydratedItem.sender_username}
+          clubName={clubName}
           viewerIsOwner={viewerIsOwner}
           viewerIsProposer={isMine}
           onApprove={onApprove}
@@ -1291,6 +1393,7 @@ export default function ClubChatScreen() {
                 isMine={isMine}
                 hydratedItem={hydrate(item)}
                 showSenderHeader={!isMine && (!prevMsg || prevMsg.sender_id !== item.sender_id)}
+                clubName={name}
                 viewerIsOwner={viewerIsOwner}
                 actioningId={actioningEventId}
                 onApprove={handleApprove}

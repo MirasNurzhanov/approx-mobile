@@ -24,7 +24,7 @@
         ],
         "NSCameraUsageDescription": "Approx uses the camera to record Swift videos and take photos for your stories and chat messages. Nothing is captured until you press record or the shutter.",
         "NSMicrophoneUsageDescription": "Approx uses the microphone to record sound with your Swift videos. Audio is only captured while you are recording, and only in the video you choose to publish.",
-        "NSPhotoLibraryUsageDescription": "Approx lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Approx never reads your library."
+        "NSPhotoLibraryUsageDescription": "Approx lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared \u2014 Approx never reads your library."
       }
     },
     "android": {
@@ -66,9 +66,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "You asked Approx to keep sharing while the app is closed. Only while you are sharing, Approx keeps your position current in the background so people nearby see where you are and you are told when someone is close. It stops the moment you turn that switch off, choose Paused, or close Approx. This is optional, and nothing else in Approx asks for it.",
-          "locationAlwaysPermission": "You asked Approx to keep sharing while the app is closed. Only while you are sharing, Approx keeps your position current in the background so people nearby see where you are and you are told when someone is close. It stops the moment you turn that switch off, choose Paused, or close Approx. This is optional, and nothing else in Approx asks for it.",
-          "locationWhenInUsePermission": "Approx uses your location to show you people nearby who share your interests. Sharing starts Paused every time you open Approx: while it is Paused your location answers only your own searches and is never saved or shown to anyone. You are shown to other people only after you choose Live or Approximate yourself, on a screen explaining what that means, and it ends when you choose Paused or close Approx.",
+          "locationAlwaysAndWhenInUsePermission": "Only if you turn on \"Keep sharing while Approx is closed\". Approx then keeps your position current in the background, so people nearby still see where you are and you are told when someone is close. The same rules apply: friends see your exact position, everyone else an area of about 500 metres. It stops when you turn that switch off or turn on Ghost Mode. This is optional and nothing else in Approx asks for it.",
+          "locationAlwaysPermission": "Only if you turn on \"Keep sharing while Approx is closed\". Approx then keeps your position current in the background, so people nearby still see where you are and you are told when someone is close. The same rules apply: friends see your exact position, everyone else an area of about 500 metres. It stops when you turn that switch off or turn on Ghost Mode. This is optional and nothing else in Approx asks for it.",
+          "locationWhenInUsePermission": "Approx shows you people nearby who share your interests, and shows you to them. Friends see your exact position; everyone else sees an approximate area of about 500 metres, never your precise location. Nothing is shared until you have read a screen explaining this. Ghost Mode, in Privacy & safety, turns it off in both directions at any time, and your position is hidden from everyone once it is more than 15 minutes old.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
@@ -78,7 +78,7 @@
         "expo-image-picker",
         {
           "cameraPermission": "Approx uses the camera to record Swift videos and take photos for your stories and chat messages. Nothing is captured until you press record or the shutter.",
-          "photosPermission": "Approx lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared — Approx never reads your library.",
+          "photosPermission": "Approx lets you choose an existing photo for your profile picture, a story, or a chat message. Only the photo you pick is shared \u2014 Approx never reads your library.",
           "microphonePermission": "Approx uses the microphone to record sound with your Swift videos. Audio is only captured while you are recording, and only in the video you choose to publish."
         }
       ],

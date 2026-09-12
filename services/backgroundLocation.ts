@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
 
 import { api } from './api';
 import { reportLocation } from './location';
@@ -31,6 +32,17 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
   BACKGROUND_LOCATION_TASK,
   async ({ data, error }) => {
     if (error) {
+      // iOS can temporarily lack a location fix at startup. Core Location keeps
+      // trying; skip this event without opening LogBox or restarting tracking.
+      // SDK 54 exposes the NSError domain only in its description.
+      const isLocationUnknown =
+        Platform.OS === 'ios' &&
+        (error.code === 0 || error.code === '0') &&
+        /^Error Domain=kCLErrorDomain Code=0(?:\s|$)/.test(error.message);
+      if (isLocationUnknown) {
+        console.log('[BG Location] location temporarily unavailable; waiting for next update');
+        return;
+      }
       console.error('[BG Location] task error:', error.message);
       return;
     }

@@ -15,7 +15,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const lifecycle = useRef(0);
-  const latest = useRef(0);
+  const latest = useRef<number | null>(null);
   const syncing = useRef(false);
   const syncAgain = useRef(false);
   const olderBusy = useRef(false);
@@ -42,9 +42,9 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
         );
         if (!result || lifecycle.current !== epoch) return;
         const incoming = result.rows.map(normaliseMessage);
-        latest.current = Math.max(latest.current, ...incoming.map(row => Number(row.id)), 0);
+        latest.current = Math.max(latest.current ?? 0, ...incoming.map(row => Number(row.id)), 0);
         setMessages(previous => mergeMessages(previous, incoming));
-        if (!boundary) setNextBefore(result.firstPage.next_before);
+        if (boundary === null) setNextBefore(result.firstPage.next_before);
         setHistoryError(null);
       } while (syncAgain.current && lifecycle.current === epoch);
     } catch {
@@ -56,7 +56,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
 
   useEffect(() => {
     lifecycle.current += 1;
-    latest.current = 0;
+    latest.current = null;
     syncing.current = false;
     syncAgain.current = false;
     olderBusy.current = false;
@@ -76,6 +76,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
     onMessage: data => {
       let raw: RawDirectMessage;
       try { raw = JSON.parse(data); } catch { return; }
+      if (!raw || typeof raw !== 'object') return;
       if (raw.type === 'error') {
         if (raw.client_id) setMessages(rows => failMessage(rows, raw.client_id!, raw.detail));
         return;

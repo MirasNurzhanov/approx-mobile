@@ -905,7 +905,7 @@ function useClubChat(
   const currentUserIdRef = useRef<number | null>(null);
   const senderCache = useRef<Map<number, { username: string; avatar?: string }>>(new Map());
   const lifecycle = useRef(0);
-  const latestSnapshot = useRef(0);
+  const latestSnapshot = useRef<number | null>(null);
   const syncing = useRef(false);
   const syncAgain = useRef(false);
   const flatListRef = useRef<FlatList>(null);
@@ -951,8 +951,8 @@ function useClubChat(
         const incoming = result.rows.map(row => normalise(row));
         incoming.forEach(cacheSender);
         setMessages(previous => mergeMessages(previous, incoming));
-        if (!latestSnapshot.current) setHasMore(result.firstPage.has_more);
-        latestSnapshot.current = Math.max(latestSnapshot.current, ...incoming.map(row => Number(row.id)), 0);
+        if (latestSnapshot.current === null) setHasMore(result.firstPage.has_more);
+        latestSnapshot.current = Math.max(latestSnapshot.current ?? 0, ...incoming.map(row => Number(row.id)), 0);
       } while (syncAgain.current && epoch === lifecycle.current);
     } catch {
       if (epoch === lifecycle.current) Alert.alert('Messages not refreshed', 'Reconnect or reopen the chat to try again.');
@@ -963,7 +963,7 @@ function useClubChat(
 
   useEffect(() => {
     lifecycle.current += 1;
-    latestSnapshot.current = 0;
+    latestSnapshot.current = null;
     syncing.current = false;
     setMessages([]);
     setLoading(true);
@@ -993,7 +993,7 @@ function useClubChat(
     // reason: it used to return out of the `try`, which only a `finally` could
     // have caught.
     setLoadingMore(false);
-  }, [clubId, loadingMore, hasMore, messages]);
+  }, [clubId, loadingMore, hasMore, messages, cacheSender]);
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     if (e.nativeEvent.contentOffset.y < 60 && hasMore && !loadingMore) loadOlderMessages();

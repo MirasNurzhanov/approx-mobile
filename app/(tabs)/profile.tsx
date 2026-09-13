@@ -21,7 +21,8 @@ import { runBusy } from '@/services/busy';
 import { sectionise } from '@/services/interestCategories';
 import { registerProfileRefresh } from '@/services/profileRefresh';
 import { ProfileLinks } from '@/components/ProfileLinks';
-import { SwiftProfileSection } from '@/components/profile/SwiftProfileSection';
+import { SwiftProfileSectionView } from '@/components/profile/SwiftProfileSection';
+import { useCreatorSwifts } from '@/components/profile/useCreatorSwifts';
 import type { ProfileLink } from '@/services/links';
 import { ApproxNav } from '@/components/ApproxNav';
 import { ApproxMark } from '@/components/ui/ApproxMark';
@@ -122,11 +123,9 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(_cache === null);
   const [refreshing, setRefreshing] = useState(false);
   const [swiftRefreshKey, setSwiftRefreshKey] = useState(0);
-  /** Lights the ring on the avatar. Reported up by SwiftProfileSection
-   *  rather than fetched again — see its `onCountChange`. */
-  const [swiftCount, setSwiftCount] = useState(0);
   const [profileVerified, setProfileVerified] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const mine = useCreatorSwifts(profile?.id ?? 0, profile !== null && profileVerified, 6, swiftRefreshKey);
 
   // Mirrors of the state above, updated alongside it, so fetchAll can read
   // current values without closing over the state itself — closing over it
@@ -278,7 +277,7 @@ export default function ProfileScreen() {
               uri={profile?.profile_picture}
               name={profile?.username}
               size="xl"
-              swiftRing={swiftCount > 0}
+              swiftRing={mine.count > 0}
             />
             {uploading ? (
               <View style={styles.avatarOverlay}>
@@ -338,7 +337,7 @@ export default function ProfileScreen() {
           </View>
         </Card>
 
-        {profile && profileVerified && <SwiftProfileSection creatorId={profile.id} canView isOwner ghostMode={profile.ghost_mode} refreshKey={swiftRefreshKey} onCountChange={setSwiftCount} />}
+        {profile && profileVerified && <SwiftProfileSectionView creatorId={profile.id} canView isOwner ghostMode={profile.ghost_mode} refreshKey={swiftRefreshKey} mine={mine} />}
 
         {/* Interests, grouped the same way the pickers group them. A profile
             with thirty picks used to be one undifferentiated wall of chips;

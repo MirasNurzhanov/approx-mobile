@@ -67,9 +67,12 @@ const mockPlayers: { id: number; play: jest.Mock; pause: jest.Mock; source: unkn
 
 jest.mock('expo-video', () => ({
   useVideoPlayer: (source: unknown) => {
-    const React = require('react');
+    const React = jest.requireActual<typeof import('react')>('react');
     // One player per card instance, matching the real hook's lifetime.
-    const ref = React.useRef<any>(null);
+    const ref = React.useRef<(typeof mockPlayers)[number] & {
+      currentTime: number; duration: number; volume: number; muted: boolean;
+      loop: boolean; status: string; timeUpdateEventInterval: number;
+    } | null>(null);
     if (!ref.current) {
       ref.current = {
         id: mockPlayers.length,

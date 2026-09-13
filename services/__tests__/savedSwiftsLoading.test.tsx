@@ -102,3 +102,44 @@ describe('an empty shortlist is still allowed to be empty', () => {
     expect(frames.at(-1)?.error).toBeTruthy();
   });
 });
+
+describe('request completion guards', () => {
+  function latest() {
+    const frame = frames.at(-1);
+    if (!frame) throw new Error('Expected a mounted hook');
+    return frame;
+  }
+  it('clears pagination loading after rejection and allows retry', async () => {
+    mockFetch.mockResolvedValueOnce({ count: 2, results: [{ id: 1 }] });
+    let tree!: ReactTestRenderer;
+    act(() => { tree = create(<Probe enabled />); });
+    await act(async () => { mockFocusEffect.mock.calls.at(-1)[0](); });
+    mockFetch.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { await latest().loadMore(); });
+    expect(frames.at(-1)?.loadingMore).toBe(false);
+    expect(frames.at(-1)?.error).toBe('Could not load more saved Swifts. Try again.');
+    mockFetch.mockResolvedValueOnce({ count: 2, results: [{ id: 2 }] });
+    await act(async () => { await latest().loadMore(); });
+    expect(frames.at(-1)?.items.map(item => item.id)).toEqual([1, 2]);
+    expect(frames.at(-1)?.loadingMore).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('does not let an older request clear a newer refresh loading flag', async () => {
+    let rejectOld!: (error: Error) => void;
+    let resolveNew!: (page: { count: number; results: never[] }) => void;
+    mockFetch.mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject; }));
+    mockFetch.mockReturnValueOnce(new Promise((resolve) => { resolveNew = resolve; }));
+    let tree!: ReactTestRenderer;
+    act(() => { tree = create(<Probe enabled />); });
+    act(() => { mockFocusEffect.mock.calls.at(-1)[0](); });
+    let refresh!: Promise<void>;
+    act(() => { refresh = latest().refresh(); });
+    await act(async () => { rejectOld(new Error('older request failed')); });
+    expect(frames.at(-1)?.loading).toBe(true);
+    expect(frames.at(-1)?.error).toBeNull();
+    await act(async () => { resolveNew({ count: 0, results: [] }); await refresh; });
+    expect(frames.at(-1)?.loading).toBe(false);
+    act(() => tree.unmount());
+  });
+});

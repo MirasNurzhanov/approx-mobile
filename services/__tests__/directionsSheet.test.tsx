@@ -211,6 +211,28 @@ describe('which mode is selected first', () => {
     expect(openSpy.mock.calls[0][0]).toContain('travelmode=transit');
   });
 
+  it('derives a fresh default when the destination changes', async () => {
+    const tree = await render(sheet({ ...metresNorth(9_000), title: 'The airport' }));
+    await press(pressableLabelled(tree, 'Transit,'));
+    await act(async () => {
+      tree.update(<AppThemeProvider>{sheet({ ...metresNorth(700), title: 'Corner shop' })}</AppThemeProvider>);
+    });
+    await press(pressableLabelled(tree, 'Open walk directions'));
+    expect(openSpy.mock.calls[0][0]).toContain('travelmode=walking');
+  });
+
+  it('discards an old choice when the same destination is reopened', async () => {
+    const target = { ...metresNorth(700), title: 'Corner shop' };
+    const tree = await render(sheet(target));
+    await press(pressableLabelled(tree, 'Transit,'));
+    await act(async () => {
+      tree.update(<AppThemeProvider><DirectionsSheet visible={false} target={target} onClose={() => {}} /></AppThemeProvider>);
+    });
+    await act(async () => { tree.update(<AppThemeProvider>{sheet(target)}</AppThemeProvider>); });
+    await press(pressableLabelled(tree, 'Open walk directions'));
+    expect(openSpy.mock.calls[0][0]).toContain('travelmode=walking');
+  });
+
   it('opens Google Maps, not a search link', async () => {
     const tree = await render(sheet({ ...metresNorth(9_000), title: 'The airport' }));
     await press(pressableLabelled(tree, 'Open drive directions'));

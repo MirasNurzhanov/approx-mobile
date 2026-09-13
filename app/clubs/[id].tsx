@@ -178,12 +178,13 @@ function MembersSection({ members, canManage, isCreator, currentUserId, onInvite
   );
 }
 
-function InviteModal({ visible, query, results, searching, invitingIds, bottom, onQueryChange, onClearQuery, onInvite, onDismiss }: {
+function InviteModal({ visible, query, results, searching, invitingIds, invitedIds, bottom, onQueryChange, onClearQuery, onInvite, onDismiss }: {
   visible: boolean;
   query: string;
   results: InviteUser[];
   searching: boolean;
   invitingIds: Set<number>;
+  invitedIds: Set<number>;
   bottom: number;
   onQueryChange: (q: string) => void;
   onClearQuery: () => void;
@@ -242,14 +243,14 @@ function InviteModal({ visible, query, results, searching, invitingIds, bottom, 
                 <Avatar uri={user.profile_picture} name={user.username} size="sm" />
                 <Text style={styles.inviteUsername} numberOfLines={1}>@{user.username}</Text>
                 <Pressable
-                  style={[styles.inviteBtn, invitingIds.has(user.id) && styles.inviteBtnBusy]}
+                  style={[styles.inviteBtn, (invitingIds.has(user.id) || invitedIds.has(user.id)) && styles.inviteBtnBusy]}
                   onPress={() => onInvite(user)}
-                  disabled={invitingIds.has(user.id)}
+                  disabled={invitingIds.has(user.id) || invitedIds.has(user.id)}
                 >
                   {invitingIds.has(user.id) ? (
                     <ActivityIndicator size="small" color={colors.bg} />
                   ) : (
-                    <Text style={styles.inviteBtnText}>Invite</Text>
+                    <Text style={styles.inviteBtnText}>{invitedIds.has(user.id) ? 'Invited' : 'Invite'}</Text>
                   )}
                 </Pressable>
               </View>
@@ -271,12 +272,13 @@ function InviteModal({ visible, query, results, searching, invitingIds, bottom, 
  * rest is between the modal and the server — so it lives here rather than as
  * six more pieces of state on a screen that already has plenty.
  */
-function useClubInvite(clubId: number, members: ClubMember[], onInvited: () => Promise<void>) {
+function useClubInvite(clubId: number, members: ClubMember[]) {
   const [visible, setVisible] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<InviteUser[]>([]);
   const [searching, setSearching] = useState(false);
   const [invitingIds, setInvitingIds] = useState<Set<number>>(new Set());
+  const [invitedIds, setInvitedIds] = useState<Set<number>>(new Set());
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function search(q: string) {
@@ -308,11 +310,12 @@ function useClubInvite(clubId: number, members: ClubMember[], onInvited: () => P
   async function onInvite(user: InviteUser) {
     setInvitingIds((prev) => new Set(prev).add(user.id));
     try {
+      // An invitation waits for their answer, so the roster does not change yet.
       await clubsApi.invite(clubId, user.id);
-      await onInvited();
-      setResults((prev) => prev.filter((u) => u.id !== user.id));
+      setInvitedIds((prev) => new Set(prev).add(user.id));
     } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not invite user.');
+      const detail = e?.response?.status === 404 ? 'This person can’t be invited.' : e?.response?.data?.detail;
+      Alert.alert('Error', detail ?? 'Could not invite user.');
     }
     // Reached on both paths: the `catch` alerts and stops there.
     setInvitingIds((prev) => { const s = new Set(prev); s.delete(user.id); return s; });
@@ -327,6 +330,7 @@ function useClubInvite(clubId: number, members: ClubMember[], onInvited: () => P
       results,
       searching,
       invitingIds,
+      invitedIds,
       onQueryChange,
       onClearQuery: clearQuery,
       onInvite,
@@ -378,7 +382,7 @@ function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: strin
     } catch {}
   }, [clubId]);
 
-  const invite = useClubInvite(clubId, members, fetchMembers);
+  const invite = useClubInvite(clubId, members);
 
   const fetchAll = useCallback(async () => {
     const [clubRes, membersRes, meRes] = await Promise.allSettled([

@@ -117,6 +117,32 @@ it('does not restart location work for an equivalent destination object', async 
   expect(Location.getLastKnownPositionAsync).toHaveBeenCalledTimes(1);
 });
 
+it('keeps an old completed fix hidden while reopening the same destination', async () => {
+  await act(async () => { renderer = create(<Harness online />); });
+  expect(state.status).toBe('ready');
+  await act(async () => { renderer!.update(<Harness active={false} />); });
+  const fresh = deferred<Location.LocationObject | null>();
+  jest.mocked(Location.getLastKnownPositionAsync).mockReturnValueOnce(fresh.promise);
+  await act(async () => { renderer!.update(<Harness online />); });
+  expect(state.status).toBe('locating');
+  expect(state.estimates).toBeNull();
+  expect(fetchRoute).toHaveBeenCalledTimes(1);
+  await act(async () => { fresh.resolve(fix()); });
+  expect(state.status).toBe('ready');
+  expect(fetchRoute).toHaveBeenCalledTimes(2);
+});
+
+it('does not let an old GPS result overwrite a newer destination request', async () => {
+  const oldFix = deferred<Location.LocationObject | null>();
+  jest.mocked(Location.getLastKnownPositionAsync).mockReturnValueOnce(oldFix.promise);
+  await act(async () => { renderer = create(<Harness />); });
+  await act(async () => { renderer!.update(<Harness destination={{ latitude: 43.25, longitude: 76.92 }} />); });
+  expect(state.arrived).toBe(true);
+  await act(async () => { oldFix.resolve(fix({ coords: { ...fix().coords, latitude: 45 } })); });
+  expect(state.arrived).toBe(true);
+  expect(state.status).toBe('ready');
+});
+
 it('rejects stale or inaccurate cached fixes and asks for a fresh one', async () => {
   jest.mocked(Location.getLastKnownPositionAsync).mockResolvedValueOnce(fix({ timestamp: Date.now() - 600_000 }));
   await act(async () => { renderer = create(<Harness />); });

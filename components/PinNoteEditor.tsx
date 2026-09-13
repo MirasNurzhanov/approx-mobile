@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -41,6 +41,7 @@ import { MAX_NOTE_LENGTH } from '@/services/pinnedPlaces';
  */
 interface Props {
   visible: boolean;
+  placeId: string;
   /** What the note is about, shown so the field is never ambiguous when two
    *  pins sit at the same spot. */
   placeTitle: string;
@@ -51,18 +52,19 @@ interface Props {
   onSave: (note: string) => void;
 }
 
-export function PinNoteEditor({ visible, placeTitle, note, onClose, onSave }: Props) {
+export function PinNoteEditor({ visible, placeId, ...props }: Props) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={props.onClose}>
+      <PinNoteForm key={JSON.stringify([placeId, visible, props.note ?? ''])} {...props} />
+    </Modal>
+  );
+}
+
+function PinNoteForm({ placeTitle, note, onClose, onSave }: Omit<Props, 'visible' | 'placeId'>) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
   const [draft, setDraft] = useState(note ?? '');
-
-  // Re-armed on every open rather than only on mount: this modal stays mounted
-  // behind its card, so without this the second pin you open would inherit the
-  // first one's draft — including one that was abandoned rather than saved.
-  useEffect(() => {
-    if (visible) setDraft(note ?? '');
-  }, [visible, note]);
 
   const trimmed = draft.trim();
   const hasNote = !!note && note.trim().length > 0;
@@ -79,7 +81,6 @@ export function PinNoteEditor({ visible, placeTitle, note, onClose, onSave }: Pr
   }
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -154,7 +155,6 @@ export function PinNoteEditor({ visible, placeTitle, note, onClose, onSave }: Pr
           </View>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
   );
 }
 

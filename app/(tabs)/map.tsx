@@ -1818,6 +1818,7 @@ function PinnedSheet({ place, sheetY, onDismiss, onUnpin }: {
       />
 
       <PinNoteEditor
+        placeId={place.id}
         visible={noteOpen}
         placeTitle={place.title}
         note={place.note}

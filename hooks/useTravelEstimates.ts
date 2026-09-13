@@ -59,15 +59,34 @@ function bounded<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     promise.then((value) => finish(() => resolve(value)), (error) => finish(() => reject(error)));
   });
 }
-type Origin = { key: string; status: OriginStatus; permission: PermissionState | null; point: GeoPoint | null; accuracy: number };
-type Routes = { key: string; legs: Partial<Record<TravelMode, RoutedLeg>>; refining: boolean };
+type OriginResult = { status: 'ready' | 'denied' | 'unavailable'; permission: PermissionState | null; point: GeoPoint | null; accuracy: number };
+type Origin = OriginResult & { key: string; signal: AbortSignal };
+type Routes = { key: string; signal: AbortSignal; legs: Partial<Record<TravelMode, RoutedLeg>>; refining: boolean };
+
+async function locateOrigin(signal: AbortSignal): Promise<OriginResult> {
+  let permission: PermissionState | null = null;
+  try {
+    permission = (await bounded(check('location'), signal)).state;
+    if (signal.aborted) throw new Error('Location cancelled');
+    if (permission !== 'granted') {
+      return { status: 'denied', permission, point: null, accuracy: 0 };
+    }
+    let fix = await bounded(Location.getLastKnownPositionAsync({ maxAge: MAX_FIX_AGE_MS, requiredAccuracy: MAX_FIX_ACCURACY_M }), signal).catch(() => null);
+    if (signal.aborted) throw new Error('Location cancelled');
+    if (!validFix(fix)) fix = await bounded(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }), signal);
+    if (!validFix(fix)) throw new Error('No usable location');
+    return { status: 'ready', permission, point: { latitude: fix.coords.latitude, longitude: fix.coords.longitude }, accuracy: fix.coords.accuracy! };
+  } catch {
+    return { status: 'unavailable', permission, point: null, accuracy: 0 };
+  }
+}
 
 /** Offline estimates are automatic. Precise endpoints are sent only after per-sheet online consent. */
 export function useTravelEstimates(destination: GeoPoint | null, active: boolean, online = false): TravelEstimates {
   const [attempt, setAttempt] = useState(0);
   const [foreground, setForeground] = useState(AppState.currentState !== 'background' && AppState.currentState !== 'inactive');
-  const [location, setLocation] = useState<Origin>({ key: '', status: 'idle', permission: null, point: null, accuracy: 0 });
-  const [routes, setRoutes] = useState<Routes>({ key: '', legs: {}, refining: false });
+  const [location, setLocation] = useState<Origin | null>(null);
+  const [routes, setRoutes] = useState<Routes | null>(null);
   const [, setCalibrationRevision] = useState(0);
   const lat = destination?.latitude;
   const lng = destination?.longitude;
@@ -76,7 +95,9 @@ export function useTravelEstimates(destination: GeoPoint | null, active: boolean
   // Consent can arrive minutes after opening the sheet. Recheck permission and
   // location before disclosing endpoints, and gate the previous fix immediately.
   const key = lat + ':' + lng + ':' + attempt + ':' + online;
-  const current = enabled && location.key === key;
+  // Store only completed async results. Their request signal invalidates them
+  // on cleanup, including closing and reopening the same destination.
+  const current = enabled && location !== null && location.key === key && !location.signal.aborted;
   const status: OriginStatus = !active || !foreground ? 'idle' : !valid ? 'unavailable' : current ? location.status : 'locating';
   const origin = current && status === 'ready' ? location.point : null;
 
@@ -94,32 +115,13 @@ export function useTravelEstimates(destination: GeoPoint | null, active: boolean
   }, [enabled, key]);
 
   useEffect(() => {
-    if (!enabled) {
-      setLocation({ key: '', status: 'idle', permission: null, point: null, accuracy: 0 });
-      return;
-    }
+    if (!enabled) return;
     const controller = new AbortController();
-    const signal = controller.signal;
-    setLocation({ key, status: 'locating', permission: null, point: null, accuracy: 0 });
-    void (async () => {
-      let permission: PermissionState | null = null;
-      try {
-        permission = (await bounded(check('location'), signal)).state;
-        if (signal.aborted) return;
-        if (permission !== 'granted') {
-          setLocation({ key, status: 'denied', permission, point: null, accuracy: 0 });
-          return;
-        }
-        let fix = await bounded(Location.getLastKnownPositionAsync({ maxAge: MAX_FIX_AGE_MS, requiredAccuracy: MAX_FIX_ACCURACY_M }), signal).catch(() => null);
-        if (signal.aborted) return;
-        if (!validFix(fix)) fix = await bounded(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }), signal);
-        if (signal.aborted) return;
-        if (!validFix(fix)) throw new Error('No usable location');
-        setLocation({ key, status: 'ready', permission, point: { latitude: fix.coords.latitude, longitude: fix.coords.longitude }, accuracy: fix.coords.accuracy! });
-      } catch {
-        if (!signal.aborted) setLocation({ key, status: 'unavailable', permission, point: null, accuracy: 0 });
+    void locateOrigin(controller.signal).then((result) => {
+      if (!controller.signal.aborted) {
+        setLocation({ ...result, key, signal: controller.signal });
       }
-    })();
+    });
     return () => controller.abort();
   }, [enabled, key]);
 
@@ -127,41 +129,44 @@ export function useTravelEstimates(destination: GeoPoint | null, active: boolean
   const routeKey = key + ':' + origin?.latitude + ':' + origin?.longitude;
   const canRoute = enabled && online && origin !== null && directMeters !== null && directMeters >= ARRIVED_METERS;
   useEffect(() => {
-    if (!canRoute || !origin || lat === undefined || lng === undefined || directMeters === null) {
-      setRoutes({ key: '', legs: {}, refining: false });
-      return;
-    }
+    if (!canRoute || !origin || lat === undefined || lng === undefined || directMeters === null) return;
     const modes = TRAVEL_MODES.filter((mode) => routingAvailable(mode));
     if (modes.length === 0) return;
     const controller = new AbortController();
     const signal = controller.signal;
     const to = { latitude: lat, longitude: lng };
-    setRoutes({ key: routeKey, legs: {}, refining: true });
-    void (async () => {
-      try {
-        await Promise.all(modes.map(async (mode) => {
-          if (signal.aborted) return;
-          const leg = await fetchRoute(origin, to, mode, signal).catch(() => null);
-          if (signal.aborted) return;
-          if (leg && leg.mode === mode) {
-            setRoutes((previous) => ({ key: routeKey, legs: { ...(previous.key === routeKey ? previous.legs : {}), [mode]: leg }, refining: true }));
-            void recordRoutedLeg(directMeters, leg, { origin, destination: to, signal }).catch(() => {});
-          }
+    const requests = modes.map((mode) => fetchRoute(origin, to, mode, signal)
+      .catch(() => null)
+      .then((leg) => {
+        if (controller.signal.aborted || !leg || leg.mode !== mode) return;
+        setRoutes((previous) => ({
+          key: routeKey, signal,
+          legs: { ...(previous?.signal === signal ? previous.legs : {}), [mode]: leg },
+          refining: true,
         }));
-      } finally {
-        if (!signal.aborted) setRoutes((previous) => ({ ...previous, refining: false }));
+        void recordRoutedLeg(directMeters, leg, { origin, destination: to, signal }).catch(() => {});
+      }));
+    void Promise.all(requests).finally(() => {
+      if (!controller.signal.aborted) {
+        setRoutes((previous) => ({
+          key: routeKey, signal,
+          legs: previous?.signal === signal ? previous.legs : {},
+          refining: false,
+        }));
       }
-    })();
+    });
     return () => controller.abort();
   }, [canRoute, origin, lat, lng, directMeters, routeKey]);
+
+  const currentRoutes = canRoute && routes?.key === routeKey && !routes.signal.aborted ? routes : null;
 
   const refresh = useCallback(() => setAttempt((value) => value + 1), []);
   const estimates = directMeters !== null && origin ? TRAVEL_MODES.map((mode) => {
     const base = estimateTravel(directMeters, mode, calibrationFor(mode, { origin, directMeters }));
-    const leg = canRoute && routes.key === routeKey ? routes.legs[mode] : null;
+    const leg = currentRoutes?.legs[mode];
     return leg ? withRoutedLeg(base, leg) : base;
   }) : null;
   return { status, permission: current ? location.permission : null, directMeters, estimates,
-    arrived: directMeters !== null && directMeters + location.accuracy < ARRIVED_METERS,
-    refresh, refining: canRoute && routes.key === routeKey && routes.refining };
+    arrived: directMeters !== null && directMeters + (location?.accuracy ?? 0) < ARRIVED_METERS,
+    refresh, refining: canRoute && TRAVEL_MODES.some((mode) => routingAvailable(mode)) && (currentRoutes?.refining ?? true) };
 }

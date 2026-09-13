@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,6 +24,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { useChatSocket } from '@/hooks/useChatSocket';
+import { CHAT_SOCKET_LABEL, type ChatSocketStatus } from '@/services/chatSocket';
+import { catchUpHistory, mergeMessages } from '@/services/chatHistory';
 import { runBusy } from '@/services/busy';
 import { clubsApi } from '@/services/clubs';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
@@ -39,7 +41,6 @@ import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
-const WS_BASE = 'wss://project-x-production-3261.up.railway.app';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ProposalStatus = 'pending' | 'approved' | 'rejected';
@@ -532,11 +533,11 @@ const makeCardStyles = (colors: ColorPalette) => StyleSheet.create({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 // ─── Chat pieces ──────────────────────────────────────────────────────────────
 
-function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
+function ClubChatHeader({ name, emblem, memberCount, socketStatus, top, onBack }: {
   name?: string;
   emblem?: string;
   memberCount?: string;
-  wsReady: boolean;
+  socketStatus: ChatSocketStatus;
   top: number;
   onBack: () => void;
 }) {
@@ -558,7 +559,7 @@ function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
         <Text style={styles.headerName} numberOfLines={1}>{name ?? 'Club Chat'}</Text>
         <Text style={styles.headerSub}>
           {memberCount ? `${memberCount} members` : 'Group chat'}
-          {!wsReady ? '  ·  Reconnecting…' : ''}
+          {socketStatus !== 'connected' ? `  ·  ${CHAT_SOCKET_LABEL[socketStatus]}` : ''}
         </Text>
       </View>
     </Pressable>
@@ -898,20 +899,22 @@ function useClubChat(
   const [messages, setMessages] = useState<ClubMessage[]>([]);
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
-  const [wsReady, setWsReady] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
   const currentUserIdRef = useRef<number | null>(null);
   const senderCache = useRef<Map<number, { username: string; avatar?: string }>>(new Map());
-  const ws = useRef<WebSocket | null>(null);
+  const lifecycle = useRef(0);
+  const latestSnapshot = useRef(0);
+  const syncing = useRef(false);
+  const syncAgain = useRef(false);
   const flatListRef = useRef<FlatList>(null);
 
-  function cacheSender(msg: ClubMessage) {
+  const cacheSender = useCallback((msg: ClubMessage) => {
     if (msg.sender_id > 0 && msg.sender_username) {
       senderCache.current.set(msg.sender_id, { username: msg.sender_username, avatar: msg.sender_avatar });
     }
-  }
+  }, []);
 
   function hydrate(msg: ClubMessage): ClubMessage {
     if (msg.sender_username) return msg;
@@ -927,19 +930,47 @@ function useClubChat(
       .catch(() => {});
   }, []);
 
-  // ── History ───────────────────────────────────────────────────────────────
+  // Rebuild any gap, including one longer than the server's 50-message page.
+  const refreshHistory = useCallback(async () => {
+    if (syncing.current) { syncAgain.current = true; return; }
+    syncing.current = true;
+    const epoch = lifecycle.current;
+    try {
+      do {
+        syncAgain.current = false;
+        const result = await catchUpHistory<RawMsg>(async before => {
+          const response = await api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/`, {
+            params: before ? { before } : {},
+          });
+          const results = pageOf(response.data);
+          const hasMore = results.length === 50;
+          return { results, has_more: hasMore,
+            next_before: hasMore ? Math.min(...results.map(row => Number(row.id))) : null };
+        }, latestSnapshot.current, () => epoch === lifecycle.current);
+        if (!result || epoch !== lifecycle.current) return;
+        const incoming = result.rows.map(row => normalise(row));
+        incoming.forEach(cacheSender);
+        setMessages(previous => mergeMessages(previous, incoming));
+        if (!latestSnapshot.current) setHasMore(result.firstPage.has_more);
+        latestSnapshot.current = Math.max(latestSnapshot.current, ...incoming.map(row => Number(row.id)), 0);
+      } while (syncAgain.current && epoch === lifecycle.current);
+    } catch {
+      if (epoch === lifecycle.current) Alert.alert('Messages not refreshed', 'Reconnect or reopen the chat to try again.');
+    } finally {
+      if (epoch === lifecycle.current) { syncing.current = false; setLoading(false); }
+    }
+  }, [clubId, cacheSender]);
+
   useEffect(() => {
-    api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/`)
-      .then((r) => {
-        const raw = pageOf(r.data);
-        const msgs = raw.map((m) => normalise(m));
-        msgs.forEach(cacheSender);
-        setMessages(msgs);
-        if (raw.length === 0) setHasMore(false);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [clubId]);
+    lifecycle.current += 1;
+    latestSnapshot.current = 0;
+    syncing.current = false;
+    setMessages([]);
+    setLoading(true);
+    setHasMore(true);
+    void refreshHistory();
+    return () => { lifecycle.current += 1; };
+  }, [clubId, refreshHistory]);
 
   // ── Infinite scroll up ────────────────────────────────────────────────────
   const loadOlderMessages = useCallback(async () => {
@@ -968,24 +999,11 @@ function useClubChat(
     if (e.nativeEvent.contentOffset.y < 60 && hasMore && !loadingMore) loadOlderMessages();
   }
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    let active = true;
-
-    async function connect() {
-      const token = await AsyncStorage.getItem('access_token');
-      if (!token || !active) return;
-      const socket = new WebSocket(`${WS_BASE}/ws/clubs/${clubId}/?token=${token}`);
-
-      socket.onopen = () => {
-        if (!active) { socket.close(); return; }
-        ws.current = socket;
-        setWsReady(true);
-      };
-
-      socket.onmessage = (event) => {
+  const { status: socketStatus, send: sendSocket } = useChatSocket(`/ws/clubs/${clubId}/`, {
+    onOpen: () => { void refreshHistory(); },
+    onMessage: data => {
         try {
-          const raw: RawMsg = JSON.parse(event.data);
+          const raw: RawMsg = JSON.parse(data);
 
           // A refusal from the content filter (see clubs/consumers.py). Drop
           // the optimistic bubble and say why — otherwise it hangs "pending"
@@ -1016,32 +1034,15 @@ function useClubChat(
             return [...prev, incoming];
           });
         } catch {}
-      };
-
-      socket.onclose = (event) => {
-        if (!active) return;
-        setWsReady(false);
-        if (event.code === 4003) {
-          Alert.alert('Removed from club', 'You are no longer a member of this club.', [
-            { text: 'OK', onPress: () => router.replace('/(tabs)/chat' as any) },
-          ]);
-        } else if (event.code === 4001) {
-          router.back();
-        }
-      };
-
-      socket.onerror = () => { if (active) setWsReady(false); };
-    }
-
-    connect();
-    return () => {
-      active = false;
-      ws.current?.close();
-      ws.current = null;
-    };
-    // expo-router's `router` is a module singleton, so it never changes and
-    // listing it cannot reconnect the socket.
-  }, [clubId, router]);
+    },
+    onClose: code => {
+      if (code === 4003) {
+        Alert.alert('Removed from club', 'You are no longer a member of this club.', [
+          { text: 'OK', onPress: () => router.replace('/(tabs)/chat' as any) },
+        ]);
+      } else if (code === 4001) router.back();
+    },
+  });
 
   // ── Scroll to bottom ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -1064,9 +1065,7 @@ function useClubChat(
       sender_id: currentUserIdRef.current ?? -1,
       created_at: new Date().toISOString(), pending: true,
     }]);
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ content: trimmed }));
-    } else {
+    if (!sendSocket(JSON.stringify({ content: trimmed }))) {
       api.post<RawMsg>(`/api/clubs/${clubId}/messages/`, { content: trimmed })
         .then((r) => {
           const confirmed = normalise(r.data);
@@ -1119,7 +1118,7 @@ function useClubChat(
   }
 
   return {
-    messages, setMessages, text, setText, loading, wsReady, loadingMore,
+    messages, setMessages, text, setText, loading, socketStatus, loadingMore,
     flatListRef, currentUserIdRef, hydrate, onScroll, sendText, handleAttach, handleCamera,
   };
 }
@@ -1282,7 +1281,7 @@ export default function ClubChatScreen() {
   const proposal = useMeetupProposal(clubId, ensurePermission);
   const chat = useClubChat(clubId, router, ensurePermission);
   const {
-    messages, setMessages, text, setText, loading, wsReady, loadingMore,
+    messages, setMessages, text, setText, loading, socketStatus, loadingMore,
     flatListRef, currentUserIdRef, hydrate, onScroll, sendText, handleAttach, handleCamera,
   } = chat;
 
@@ -1355,7 +1354,7 @@ export default function ClubChatScreen() {
         name={name}
         emblem={emblem}
         memberCount={memberCount}
-        wsReady={wsReady}
+        socketStatus={socketStatus}
         top={top}
         onBack={() => router.back()}
       />

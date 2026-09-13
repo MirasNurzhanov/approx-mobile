@@ -26,6 +26,8 @@
 export type SwiftSource = 'camera' | 'library';
 
 export interface SwiftDraft {
+  /** Assigned once when a take is captured/imported; retained through retries. */
+  idempotencyKey: string | null;
   /** Local file:// (camera) or content:// (library) URI of the recording. */
   uri: string | null;
   source: SwiftSource | null;
@@ -57,6 +59,7 @@ export interface SwiftDraft {
 }
 
 export const EMPTY_DRAFT: SwiftDraft = {
+  idempotencyKey: null,
   uri: null,
   source: null,
   durationMs: 0,
@@ -82,6 +85,14 @@ export const EMPTY_DRAFT: SwiftDraft = {
   longitude: null,
   placeName: '',
 };
+
+/** An opaque take label, following the device-id convention; never a credential. */
+export function createTakeKey(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+    const value = Math.floor(Math.random() * 16);
+    return (character === 'x' ? value : (value & 3) | 8).toString(16);
+  });
+}
 
 // ── Limits, mirrored from swifts/media.py ────────────────────────────────────
 // The server enforces these too. These exist so the creator finds out before

@@ -14,6 +14,7 @@ import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import {
   EMPTY_DRAFT,
+  createTakeKey,
   MAX_SWIFT_MS,
   validateDraft,
   type SwiftDraft,
@@ -109,7 +110,7 @@ export default function SwiftComposerScreen() {
   }
 
   function goBack() {
-    if (progress && progress.stage !== 'error') return; // mid-upload; use Cancel
+    if (abortRef.current || (progress && progress.stage !== 'error')) return;
     const index = ORDER.indexOf(step);
     if (index <= 0) {
       confirmExit();
@@ -156,6 +157,7 @@ export default function SwiftComposerScreen() {
 
     setDraft({
       ...EMPTY_DRAFT,
+      idempotencyKey: createTakeKey(),
       uri: video.uri,
       source: video.source,
       durationMs: video.durationMs,
@@ -175,6 +177,8 @@ export default function SwiftComposerScreen() {
 
   // ── Publishing ─────────────────────────────────────────────────────────────
   async function handlePublish() {
+    // A ref closes the same-render double-tap window before React renders progress.
+    if (abortRef.current) return;
     const problems = validateDraft(draft);
     if (problems.length > 0) {
       setError(problems[0].message);
@@ -185,6 +189,7 @@ export default function SwiftComposerScreen() {
     setError(null);
     const controller = new AbortController();
     abortRef.current = controller;
+    setProgress({ stage: 'uploading', ratio: 0, attempt: 1 });
 
     try {
       const published = await publishSwift(draft, {
@@ -202,6 +207,7 @@ export default function SwiftComposerScreen() {
       // landing there right after publishing would show everything *except*
       // what was just posted. The permalink is the one place that can.
       router.replace({ pathname: '/swifts/[id]', params: { id: published.id } });
+      return; // Keep the submission locked until navigation unmounts this screen.
     } catch (e: any) {
       if (e instanceof UploadCancelled) {
         setProgress(null);
@@ -221,7 +227,6 @@ export default function SwiftComposerScreen() {
 
   function cancelUpload() {
     abortRef.current?.abort();
-    setProgress(null);
   }
 
   // ── Chrome ─────────────────────────────────────────────────────────────────
@@ -314,11 +319,7 @@ export default function SwiftComposerScreen() {
           error={error}
           onPublish={handlePublish}
           onCancelUpload={cancelUpload}
-          onRetry={() => {
-            setError(null);
-            setProgress(null);
-            handlePublish();
-          }}
+          onRetry={handlePublish}
         />
       )}
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -91,42 +91,30 @@ function defaultMode(estimates: TravelEstimate[] | null): TravelMode {
 }
 
 export function DirectionsSheet({ visible, target, onClose }: Props) {
+  const reduceMotion = useReduceMotion();
+  return (
+    <Modal visible={visible} animationType={reduceMotion ? 'none' : 'slide'} transparent onRequestClose={onClose}>
+      <DirectionsContent key={`${visible}:${target.latitude}:${target.longitude}`}
+        visible={visible} target={target} onClose={onClose} />
+    </Modal>
+  );
+}
+
+function DirectionsContent({ visible, target, onClose }: Props) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
-  const reduceMotion = useReduceMotion();
-  const targetKey = `${target.latitude}:${target.longitude}`;
-  const [onlineTarget, setOnlineTarget] = useState<string | null>(null);
-  const online = visible && onlineTarget === targetKey;
+  const [online, setOnline] = useState(false);
   const providers = routingProviders();
   const providerNames = [...new Set(providers.map(provider => provider.hostname))].join(', ');
 
   const { status, permission, directMeters, estimates, arrived, refresh, refining } =
     useTravelEstimates(target, visible, online);
 
-  const [mode, setMode] = useState<TravelMode>('drive');
-  /** Whether the selection above is the user's or ours. Once theirs, the
-   *  distance-based default stops overriding it — a person who picked transit
-   *  for a place they are still walking toward should not have it swapped back
-   *  under them when a better fix arrives. */
-  const [chosen, setChosen] = useState(false);
-
-  // Re-armed on open, not on mount: these sheets stay mounted behind their
-  // card, so without this the second place you open inherits the first one's
-  // mode — including one picked for a trip of a completely different length.
-  useEffect(() => {
-    setOnlineTarget(null);
-    if (visible) {
-      setChosen(false);
-      setMode('drive');
-    }
-  }, [visible, targetKey]);
-
-  // The distance-based default, applied once the estimates exist and only
-  // while the user has not overridden it.
-  useEffect(() => {
-    if (!chosen && estimates) setMode(defaultMode(estimates));
-  }, [chosen, estimates]);
+  // An explicit choice belongs to this open destination. Until then, derive
+  // the default from the latest estimates without a second render.
+  const [chosenMode, setChosenMode] = useState<TravelMode | null>(null);
+  const mode = chosenMode ?? defaultMode(estimates);
 
   const selected = estimates?.find((e) => e.mode === mode) ?? null;
   const subtitle = target.placeName && target.placeName !== target.title
@@ -134,8 +122,7 @@ export function DirectionsSheet({ visible, target, onClose }: Props) {
     : target.title;
 
   function pick(next: TravelMode) {
-    setChosen(true);
-    setMode(next);
+    setChosenMode(next);
   }
 
   function open(app: 'google' | 'apple') {
@@ -158,7 +145,6 @@ export function DirectionsSheet({ visible, target, onClose }: Props) {
   }
 
   return (
-    <Modal visible={visible} animationType={reduceMotion ? 'none' : 'slide'} transparent onRequestClose={onClose}>
       <View style={styles.root}>
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
 
@@ -222,7 +208,7 @@ export function DirectionsSheet({ visible, target, onClose }: Props) {
                 {' '}Available for {providers.map(provider => TRAVEL_MODE_LABEL[provider.mode]).join(', ')}.
               </Text>
               {!online && <Button label="Check road routes" variant="secondary" size="md" fullWidth
-                accessibilityLabel="Check road routes" onPress={() => setOnlineTarget(targetKey)} />}
+                accessibilityLabel="Check road routes" onPress={() => setOnline(true)} />}
             </> : null}
             {estimates ? (
               <Text style={styles.footnote}>
@@ -279,7 +265,6 @@ export function DirectionsSheet({ visible, target, onClose }: Props) {
           </ScrollView>
         </View>
       </View>
-    </Modal>
   );
 }
 

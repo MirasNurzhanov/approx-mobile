@@ -4,7 +4,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -19,6 +18,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { useDirectMessages } from '@/hooks/useDirectMessages';
+import { CHAT_SOCKET_LABEL, type ChatSocketStatus } from '@/services/chatSocket';
+import type { DirectMessage as Message } from '@/services/directMessages';
 import { decodeStoryReply } from '@/services/storyReply';
 import { announce } from '@/hooks/useReduceMotion';
 import { useContentActions } from '@/components/ContentActions';
@@ -35,33 +37,6 @@ import type { Presence } from '@/services/presence';
 /** Slow on purpose: one request, on one focused screen. */
 const PRESENCE_POLL_MS = 30_000;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface Message {
-  id: string;
-  text?: string;
-  image?: string;
-  sender_id: number;
-  created_at: string;
-  pending?: boolean;
-}
-
-interface RawMessage {
-  id?: string | number;
-  message?: string;
-  text?: string;
-  content?: string;
-  body?: string;
-  msg?: string;
-  image?: string;
-  sender_id?: number;
-  sender?: number | { id: number; username?: string };
-  timestamp?: string;
-  created_at?: string;
-  [key: string]: unknown;
-}
-
-const WS_BASE = 'wss://project-x-production-3261.up.railway.app';
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmtTime(iso: string) {
   try {
@@ -69,14 +44,6 @@ function fmtTime(iso: string) {
   } catch {
     return '';
   }
-}
-
-/** Nothing to show: no words and no picture.
- *
- *  At module scope because the call site is inside a `try`, where a `&&` chain
- *  is a "value block" React Compiler cannot lower. */
-function isBlank(m: Message): boolean {
-  return !m.text && !m.image;
 }
 
 /** What a screen reader says when a message arrives. A message only changes the
@@ -89,46 +56,15 @@ function arrivalNotice(m: Message, username?: string): string {
   return `${username ?? 'Someone'} sent a photo`;
 }
 
-/** The reason the socket gave for refusing a message, or a plain fallback.
- *  At module scope because the call site is inside a `try`, and a `??` there is
- *  a "value block" React Compiler cannot lower. */
-function detailOf(raw: unknown): string {
-  return (raw as { detail?: string }).detail ?? 'That message could not be sent.';
-}
-
-function extractSenderId(raw: RawMessage): number {
-  if (raw.sender_id != null) return Number(raw.sender_id);
-  if (typeof raw.sender === 'number') return raw.sender;
-  if (typeof raw.sender === 'string') return Number(raw.sender);
-  if (raw.sender && typeof raw.sender === 'object') return Number(raw.sender.id);
-  return -1;
-}
-
-function extractText(raw: RawMessage): string | undefined {
-  const value = raw.content ?? raw.message ?? raw.text ?? raw.body ?? raw.msg;
-  if (value != null) return String(value);
-  return undefined;
-}
-
-function normalise(raw: RawMessage, fallbackId?: string): Message {
-  return {
-    id:         String(raw.id ?? fallbackId ?? Date.now()),
-    text:       extractText(raw),
-    image:      raw.image,
-    sender_id:  extractSenderId(raw),
-    created_at: raw.timestamp ?? raw.created_at ?? new Date().toISOString(),
-  };
-}
-
 // ─── Chat pieces ──────────────────────────────────────────────────────────────
 
 function MessagesHeader({
-  username, otherUserPicture, presence, wsReady, top, onBack, onOpenProfile, onMenu,
+  username, otherUserPicture, presence, socketStatus, top, onBack, onOpenProfile, onMenu,
 }: {
   username?: string;
   otherUserPicture?: string | null;
   presence?: Presence | null;
-  wsReady: boolean;
+  socketStatus: ChatSocketStatus;
   top: number;
   onBack: () => void;
   onOpenProfile: () => void;
@@ -167,8 +103,8 @@ function MessagesHeader({
           {presence ? (
             <PresenceDot presence={presence} size={7} withText />
           ) : null}
-          {!wsReady && (
-            <Text style={styles.statusText}>Reconnecting…</Text>
+          {socketStatus !== 'connected' && (
+            <Text style={styles.statusText}>{CHAT_SOCKET_LABEL[socketStatus]}</Text>
           )}
         </View>
       </Pressable>
@@ -191,7 +127,7 @@ function MessagesHeader({
 }
 
 /** One bubble: a story reply, a photo, or plain text. */
-function MessageBubble({ item, isMine }: { item: Message; isMine: boolean }) {
+function MessageBubble({ item, isMine, onRetry }: { item: Message; isMine: boolean; onRetry: () => void }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const storyReply = decodeStoryReply(item.text);
@@ -238,8 +174,13 @@ function MessageBubble({ item, isMine }: { item: Message; isMine: boolean }) {
           </Text>
         )}
         <Text style={[styles.bubbleTime, isMine ? styles.bubbleTimeMine : styles.bubbleTimeTheirs]}>
-          {fmtTime(item.created_at)}{item.pending ? ' ·' : ''}
+          {fmtTime(item.created_at)}{item.pending ? ' · Sending…' : ''}
         </Text>
+        {item.failed && (
+          <Pressable onPress={onRetry} accessibilityRole="button" accessibilityLabel="Retry message">
+            <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs}>{item.failure ?? 'Not confirmed'} · Tap to retry</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -323,24 +264,24 @@ export default function MessagesScreen() {
   const { id, username } = useLocalSearchParams<{ id: string; username: string }>();
   const { top, bottom } = useSafeAreaInsets();
 
-  const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [wsReady, setWsReady] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [otherUserPicture, setOtherUserPicture] = useState<string | null>(null);
   const [presence, setPresence] = useState<Presence | undefined>(undefined);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
   const { present, sheets } = useContentActions();
 
   const currentUserIdRef = useRef<number | null>(null);
-  const ws = useRef<WebSocket | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const { messages, setMessages, loading, loadingOlder, nextBefore, historyError,
+    refresh, loadOlder, status: socketStatus, sendText: submitText, retry, onViewableItemsChanged,
+  } = useDirectMessages(id, currentUserId, message => announce(arrivalNotice(message, username)));
 
 
 
   useEffect(() => {
     api.get<{ id: number | string }>('/api/users/profile/')
-      .then((r) => { currentUserIdRef.current = Number(r.data.id); })
+      .then((r) => { currentUserIdRef.current = Number(r.data.id); setCurrentUserId(Number(r.data.id)); })
       .catch(() => {});
 
     // Presence rides the profile fetch this screen already makes. Refreshed on
@@ -363,124 +304,22 @@ export default function MessagesScreen() {
     return () => clearInterval(timer);
   }, [id]);
 
-  // Opening the thread is what marks it read: MessagesView.get() flips
-  // is_read on its way out (friends/views.py). There is no mark-as-read
-  // endpoint to call — a POST to one used to sit here and 404'd on every
-  // open, silently, because the failure was swallowed.
   useEffect(() => {
     AsyncStorage.setItem('chat_last_seen', new Date().toISOString());
   }, [id]);
 
+  const lastMessageId = messages[messages.length - 1]?.id;
   useEffect(() => {
-    api.get<RawMessage[]>(`/api/friends/messages/${id}/`)
-      .then((r) => {
-        const raw = Array.isArray(r.data) ? r.data : [];
-        setMessages(raw.map((m) => normalise(m)));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [id]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function connect() {
-      const token = await AsyncStorage.getItem('access_token');
-      if (!token || !active) return;
-
-      const socket = new WebSocket(`${WS_BASE}/ws/chat/${id}/?token=${token}`);
-
-      socket.onopen = () => {
-        if (!active) { socket.close(); return; }
-        ws.current = socket;
-        setWsReady(true);
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const raw: RawMessage = JSON.parse(event.data);
-
-          // The server refuses a message that breaks the Community Guidelines
-          // (see friends/consumers.py). Without this branch the optimistic
-          // bubble sat "pending" forever and the sender was never told why —
-          // which reads as the app being broken rather than the message being
-          // refused.
-          if ((raw as { type?: string }).type === 'error') {
-            const detail = detailOf(raw);
-            setMessages((prev) => prev.filter((m) => !m.pending));
-            Alert.alert('Message not sent', detail);
-            return;
-          }
-
-          const incoming = normalise(raw);
-          if (isBlank(incoming)) return;
-
-          // A message arriving only changes the list — there is no focus
-          // change, so a screen reader says nothing unless we announce it.
-          if (incoming.sender_id !== currentUserIdRef.current) {
-            announce(arrivalNotice(incoming, username));
-          }
-
-          setMessages((prev) => {
-            if (incoming.id && prev.some((m) => m.id === incoming.id && !m.pending)) return prev;
-            const isFromMe = incoming.sender_id === currentUserIdRef.current;
-            if (isFromMe) {
-              for (let i = prev.length - 1; i >= 0; i--) {
-                if (prev[i].pending && prev[i].text === incoming.text) {
-                  const updated = [...prev];
-                  updated[i] = incoming;
-                  return updated;
-                }
-              }
-            }
-            return [...prev, incoming];
-          });
-        } catch {}
-      };
-
-      socket.onclose = () => { if (active) setWsReady(false); };
-      socket.onerror = () => { if (active) setWsReady(false); };
-    }
-
-    connect();
-    return () => {
-      active = false;
-      ws.current?.close();
-      ws.current = null;
-    };
-    // `username` is a route param, so it is fixed for the life of this screen —
-    // listing it never reconnects the socket in practice.
-  }, [id, username]);
-
-  useEffect(() => {
-    if (messages.length > 0) {
+    if (lastMessageId) {
       // Cleared on re-run and on unmount: messages can land faster than the
       // 50ms delay, and every superseded timer would otherwise still fire.
       const t = setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
       return () => clearTimeout(t);
     }
-  }, [messages.length]);
+  }, [lastMessageId]);
 
   function sendText() {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setText('');
-
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ content: trimmed }));
-    } else {
-      api.post<RawMessage>(`/api/friends/messages/${id}/`, { content: trimmed })
-        .then((r) => setMessages((prev) => [...prev, normalise(r.data)]))
-        .catch((e: any) => {
-          // Same reasoning as the socket branch above: a refusal has to be
-          // visible, and the optimistic bubble has to go.
-          setMessages((prev) => prev.filter((m) => !m.pending));
-          Alert.alert(
-            'Message not sent',
-            e?.response?.data?.detail ?? 'Please try again.',
-          );
-        });
-    }
+    if (submitText(text)) setText('');
   }
 
   function sendImage(asset: ImagePicker.ImagePickerAsset) {
@@ -529,7 +368,7 @@ export default function MessagesScreen() {
     sendImage(result.assets[0]);
   }
 
-  const canSend = text.trim().length > 0;
+  const canSend = text.trim().length > 0 && currentUserId !== null;
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -541,7 +380,7 @@ export default function MessagesScreen() {
         username={username}
         otherUserPicture={otherUserPicture}
         presence={presence}
-        wsReady={wsReady}
+        socketStatus={socketStatus}
         top={top}
         onBack={() => router.back()}
         onOpenProfile={() => router.push({ pathname: '/profile/[id]', params: { id, username: username ?? '' } })}
@@ -556,6 +395,11 @@ export default function MessagesScreen() {
         })}
       />
 
+      {historyError && (
+        <Pressable onPress={() => { void refresh(); }} accessibilityRole="button">
+          <Text style={styles.statusText}>{historyError}</Text>
+        </Pressable>
+      )}
       {/* Messages */}
       {loading ? (
         <View style={styles.loadingWrap}>
@@ -566,6 +410,14 @@ export default function MessagesScreen() {
           ref={flatListRef}
           data={messages}
           keyExtractor={(item) => item.id}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          ListHeaderComponent={nextBefore !== null ? (
+            <Pressable disabled={loadingOlder} onPress={() => { void loadOlder(); }} accessibilityRole="button">
+              <Text style={styles.statusText}>{loadingOlder ? 'Loading…' : 'Load older messages'}</Text>
+            </Pressable>
+          ) : null}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
@@ -577,7 +429,7 @@ export default function MessagesScreen() {
             </View>
           }
           renderItem={({ item }) => (
-            <MessageBubble item={item} isMine={item.sender_id === currentUserIdRef.current} />
+            <MessageBubble item={item} isMine={item.sender_id === currentUserIdRef.current} onRetry={() => { void retry(item); }} />
           )}
         />
       )}

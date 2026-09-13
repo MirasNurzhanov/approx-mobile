@@ -8,6 +8,7 @@ export function useCreatorSwifts(creatorId: number, enabled: boolean, limit: num
   const [items, setItems] = useState<Swift[]>([]);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(enabled);
+  const [settled, setSettled] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -48,6 +49,7 @@ export function useCreatorSwifts(creatorId: number, enabled: boolean, limit: num
       if (current !== generation.current) return;
       busy.current = false;
       setLoading(false);
+      setSettled(true);
     });
   }, [creatorId, enabled, limit]);
 
@@ -63,6 +65,7 @@ export function useCreatorSwifts(creatorId: number, enabled: boolean, limit: num
       setLoadingMore(false);
       setItems([]);
       setCount(0);
+      setSettled(false);
     };
   }, [refresh, refreshKey]));
 
@@ -101,5 +104,5 @@ export function useCreatorSwifts(creatorId: number, enabled: boolean, limit: num
     });
   }, [creatorId, enabled, limit, count, unavailable]);
 
-  return { items, count, loading, loadingMore, error, unavailable, refresh, loadMore };
+  return { items, count, loading: loading || (enabled && !settled), loadingMore, error, unavailable, refresh, loadMore };
 }

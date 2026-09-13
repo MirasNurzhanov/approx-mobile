@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Mock factories load dependencies after Jest hoists them. */
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { Text, View } from 'react-native';
 import CreatorSwiftsScreen from '../../../app/swifts/user/[id]';
 import { api } from '../../../services/api';
-import { SwiftProfileSection, SwiftProfileTile } from '../SwiftProfileSection';
+import { SwiftProfileSection, SwiftProfileSectionView, SwiftProfileTile } from '../SwiftProfileSection';
 import { useCreatorSwifts } from '../useCreatorSwifts';
 import { hiddenProfileMessage, profileDetailsHidden } from '../profilePrivacy';
 import { creatorSwiftLabel, fetchCreatorSwifts } from '../../../services/swiftCreator';
@@ -42,6 +43,14 @@ let gallery: ReturnType<typeof useCreatorSwifts>;
 function Harness({ enabled = true, creatorId = 22, refreshKey = 0 }: { enabled?: boolean; creatorId?: number; refreshKey?: number }) {
   gallery = useCreatorSwifts(creatorId, enabled, 2, refreshKey);
   return null;
+}
+
+function OwnerProfileHarness({ enabled = true }: { enabled?: boolean }) {
+  const mine = useCreatorSwifts(22, enabled, 6);
+  return <View>
+    <Text testID="owner-swift-count">{mine.count}</Text>
+    {enabled && <SwiftProfileSectionView creatorId={22} canView isOwner mine={mine} />}
+  </View>;
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -93,6 +102,19 @@ it('renders the owner empty state and upload entry', async () => {
   expect(JSON.stringify(renderer!.toJSON())).toContain('Your first Swift starts here');
   act(() => renderer!.root.findByProps({ accessibilityLabel: 'Upload a Swift' }).props.onPress());
   expect(mockPush).toHaveBeenCalledWith('/swifts/compose');
+});
+
+it('shares one request between the owner count and the gallery after profile verification', async () => {
+  const page = deferred<SwiftPage>();
+  fetchMock.mockReturnValueOnce(page.promise);
+  await act(async () => { renderer = create(<OwnerProfileHarness enabled={false} />); });
+  expect(fetchMock).not.toHaveBeenCalled();
+  await act(async () => { renderer!.update(<OwnerProfileHarness />); });
+  expect(JSON.stringify(renderer!.toJSON())).not.toContain('Your first Swift starts here');
+  await act(async () => { page.resolve({ count: 7, results: [video()] }); });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(renderer!.root.findByProps({ testID: 'owner-swift-count' }).props.children).toBe(7);
+  expect(renderer!.root.findByProps({ testID: 'creator-swift-1' })).toBeDefined();
 });
 
 it('distinguishes failed uploads and suppresses owner-only status labels for other viewers', () => {

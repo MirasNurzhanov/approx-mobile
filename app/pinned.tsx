@@ -183,6 +183,7 @@ function PinnedRow({ place, colors, styles }: {
       />
 
       <PinNoteEditor
+        placeId={place.id}
         visible={noteOpen}
         placeTitle={place.title}
         note={place.note}

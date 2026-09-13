@@ -416,7 +416,7 @@ describe('the Swift type carries no location fields', () => {
     // interface and vanishes at runtime, so this pins the *fixture* — which is
     // built to mirror the server's serializer field list — against the same
     // list `swifts/testing.py::FORBIDDEN_LOCATION_KEYS` uses.
-    const swift = makeSwift(1) as Record<string, unknown>;
+    const swift = makeSwift(1);
     for (const banned of [
       'latitude', 'longitude', 'lat', 'lng', 'lon',
       'place_name', 'place', 'coordinates', 'location',

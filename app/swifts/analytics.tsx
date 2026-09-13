@@ -33,7 +33,7 @@ export default function SwiftAnalyticsScreen() {
   const [days, setDays] = useState<AnalyticsDays>(28);
   const [metric, setMetric] = useState<AnalyticsMetric>('views');
   const { data, loading, refreshing, error, refresh, retry } = useSwiftAnalytics(days, swiftId);
-  const selectedLabel = METRICS.find(item => item.key === metric)!.label;
+  const selectedLabel = METRICS.find(item => item.key === metric)?.label ?? 'Activity';
   const previous = data?.previous_period[metric] ?? 0;
   const current = data?.period[metric] ?? 0;
 

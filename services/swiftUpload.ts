@@ -139,7 +139,9 @@ export interface PublishedSwift {
  * location whatever this sends, which is the point.
  */
 export function buildForm(draft: SwiftDraft): FormData {
+  if (!draft.idempotencyKey) throw new UploadError('This take has no publish key.', false);
   const form = new FormData();
+  form.append('idempotency_key', draft.idempotencyKey);
   form.append('video', {
     uri: draft.uri as string,
     type: 'video/mp4',
@@ -320,6 +322,7 @@ export async function publishSwift(
   { onProgress, signal }: PublishOptions = {},
 ): Promise<PublishedSwift> {
   if (!draft.uri) throw new UploadError('Nothing to publish.', false);
+  if (!draft.idempotencyKey) throw new UploadError('This take has no publish key.', false);
 
   const file = inspectFile(draft.uri);
   if (file.size > 0 && file.size > MAX_UPLOAD_BYTES) {

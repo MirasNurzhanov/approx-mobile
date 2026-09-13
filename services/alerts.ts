@@ -27,16 +27,24 @@ export interface AlertUser {
  *  accept/decline hits and what the row says. */
 export interface AlertRequest {
   id: number;
-  kind: 'hi' | 'friend';
+  kind: 'hi' | 'friend' | 'club';
   user: AlertUser;
+  /** The club a `club` request invites the user to join. */
+  club?: AlertClub;
   created_at?: string;
 }
 
-/** Raw shape from either requests endpoint — the sender key has varied. */
+export interface AlertClub {
+  id: number;
+  name: string;
+}
+
+/** Raw shape from the requests endpoints — the sender key has varied. */
 interface RawRequest {
   id: number;
   sender?: AlertUser;
   from_user?: AlertUser;
+  club?: AlertClub;
   created_at?: string;
 }
 
@@ -123,11 +131,15 @@ export function isClubAlert(n: Notification): boolean {
   return t === 'club_event' || t === 'club_event_status' || t === 'club_invite';
 }
 
+const REQUEST_ENDPOINTS: Record<AlertRequest['kind'], string> = {
+  hi: '/api/friends/hi',
+  friend: '/api/friends/request',
+  club: '/api/clubs/invitations',
+};
+
 /** Endpoint paths for answering a request, by kind. */
 export function requestActionUrl(req: AlertRequest, action: 'accept' | 'decline'): string {
-  return req.kind === 'hi'
-    ? `/api/friends/hi/${req.id}/${action}/`
-    : `/api/friends/request/${req.id}/${action}/`;
+  return `${REQUEST_ENDPOINTS[req.kind]}/${req.id}/${action}/`;
 }
 
 // ─── Parsing ──────────────────────────────────────────────────────────────────
@@ -154,7 +166,7 @@ function toRequests(raw: unknown, kind: AlertRequest['kind']): AlertRequest[] {
   if (!Array.isArray(raw)) return [];
   return (raw as RawRequest[]).flatMap((r) => {
     const user = r.sender ?? r.from_user;
-    return user ? [{ id: r.id, kind, user, created_at: r.created_at }] : [];
+    return user ? [{ id: r.id, kind, user, created_at: r.created_at, ...(r.club ? { club: r.club } : {}) }] : [];
   });
 }
 
@@ -164,15 +176,17 @@ function byDateDesc(a: { created_at?: string }, b: { created_at?: string }): num
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
 export async function loadAlerts(): Promise<AlertsData> {
-  const [hiRes, friendRes, notifRes] = await Promise.allSettled([
+  const [hiRes, friendRes, clubRes, notifRes] = await Promise.allSettled([
     api.get<unknown>('/api/friends/requests/'),
     api.get<unknown>('/api/friends/requests/incoming/'),
+    api.get<unknown>('/api/clubs/invitations/'),
     api.get<unknown>('/api/notifications/'),
   ]);
 
   const requests = [
     ...(hiRes.status === 'fulfilled' ? toRequests(hiRes.value.data, 'hi') : []),
     ...(friendRes.status === 'fulfilled' ? toRequests(friendRes.value.data, 'friend') : []),
+    ...(clubRes.status === 'fulfilled' ? toRequests(clubRes.value.data, 'club') : []),
   ].sort(byDateDesc);
 
   const notifications =

@@ -186,7 +186,14 @@ export function NotifRow({ notif, onPress }: { notif: Notification; onPress?: ()
 const REQUEST_COPY: Record<AlertRequest['kind'], string> = {
   hi: 'Sent you a Hi 👋',
   friend: 'Wants to be friends',
+  club: 'Invited you to a club',
 };
+
+function requestCopy(request: AlertRequest): string {
+  return request.kind === 'club' && request.club
+    ? `Invited you to join ${request.club.name}`
+    : REQUEST_COPY[request.kind];
+}
 
 export function RequestRow({
   request,
@@ -219,7 +226,7 @@ export function RequestRow({
       <View style={styles.notifBody}>
         <Text style={styles.notifTitle}>{user.username}</Text>
         <Text style={styles.notifSubtitle}>
-          {REQUEST_COPY[request.kind]}
+          {requestCopy(request)}
           {request.created_at ? `  ·  ${fmtTime(request.created_at)}` : ''}
         </Text>
         <View style={styles.requestActions}>

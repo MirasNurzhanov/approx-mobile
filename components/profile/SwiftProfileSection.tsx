@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -83,24 +83,27 @@ function SwiftTabs({ tab, onChange, savedCount }: {
   </View>;
 }
 
-export function SwiftProfileSection({ creatorId, canView, isOwner = false, ghostMode = false, refreshKey = 0, onCountChange }: {
+interface SwiftProfileProps {
   creatorId: number; canView: boolean; isOwner?: boolean; ghostMode?: boolean; refreshKey?: number;
-  /** How many Swifts this person has, reported up as it lands.
-   *  The profile lights the ring on the avatar from it, and this section has
-   *  already paid for the number — asking again from the parent would be a
-   *  second request for a count that is sitting right here. */
-  onCountChange?: (count: number) => void;
+}
+
+/** Standalone gallery for callers that do not need its data elsewhere. */
+export function SwiftProfileSection(props: SwiftProfileProps) {
+  const mine = useCreatorSwifts(props.creatorId, props.canView, 6, props.refreshKey);
+  return <SwiftProfileSectionView {...props} mine={mine} />;
+}
+
+/** The owner profile shares one query between this gallery and its avatar ring. */
+export function SwiftProfileSectionView({ creatorId, canView, isOwner = false, ghostMode = false, refreshKey = 0, mine }: SwiftProfileProps & {
+  mine: ReturnType<typeof useCreatorSwifts>;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const router = useRouter();
   const [tab, setTab] = useState<SwiftTab>('mine');
-  const mine = useCreatorSwifts(creatorId, canView, 6, refreshKey);
   // Fetched only for the owner, and only once the Saved tab has actually been
   // opened — a shortlist nobody looks at costs no request.
   const saved = useSavedSwifts(isOwner && canView && tab === 'saved', 6, refreshKey);
-
-  useEffect(() => { onCountChange?.(mine.count); }, [mine.count, onCountChange]);
 
   const showingSaved = isOwner && tab === 'saved';
   const { items, count, loading, error, refresh } = showingSaved ? saved : mine;

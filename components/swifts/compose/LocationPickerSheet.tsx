@@ -227,7 +227,7 @@ function PickerBody({
     : false;
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} accessibilityViewIsModal>
         {primer}
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <Pressable

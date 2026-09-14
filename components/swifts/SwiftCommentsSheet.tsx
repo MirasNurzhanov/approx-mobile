@@ -219,6 +219,7 @@ function CommentsBody({
       // resizes the window itself.
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
+      accessibilityViewIsModal
     >
       {sheets}
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>

@@ -145,7 +145,7 @@ function DirectionsContent({ visible, target, onClose }: Props) {
   }
 
   return (
-      <View style={styles.root}>
+      <View style={styles.root} accessibilityViewIsModal>
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
 
         <View style={styles.sheet}>

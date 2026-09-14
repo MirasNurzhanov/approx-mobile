@@ -753,14 +753,21 @@ function MeetupProposalModal({
       onRequestClose={modalView === 'map' ? onBackToForm : onDismiss}
     >
       {modalView === 'proposal' ? (
-        <>
-          <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
+        // One container for the backdrop and the sheet, so a screen reader stays
+        // inside the proposal and can still reach the backdrop's close.
+        <View style={{ flex: 1 }} accessibilityViewIsModal>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={onDismiss}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
             <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Propose a Meetup</Text>
-                <Pressable onPress={onDismiss} hitSlop={10}>
+                <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
                   <Ionicons name="close" size={22} color={colors.t2} />
                 </Pressable>
               </View>
@@ -838,12 +845,18 @@ function MeetupProposalModal({
               </ScrollView>
             </View>
           </KeyboardAvoidingView>
-        </>
+        </View>
       ) : (
-        <View style={styles.mapPickerRoot}>
+        <View style={styles.mapPickerRoot} accessibilityViewIsModal>
           {/* Map header */}
           <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
-            <Pressable onPress={onBackToForm} hitSlop={12} style={styles.backBtn}>
+            <Pressable
+              onPress={onBackToForm}
+              hitSlop={12}
+              style={styles.backBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Back to the proposal"
+            >
               <Ionicons name="chevron-back" size={24} color={colors.t1} />
             </Pressable>
             <Text style={styles.mapPickerTitle}>Drop a pin</Text>

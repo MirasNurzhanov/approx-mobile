@@ -161,6 +161,9 @@ it('the actual hook reconnects on foreground/focus and cleans up on route change
   expect(sockets).toHaveLength(3); expect(urls[2]).toContain('/ws/clubs/3/?token=');
   act(() => sockets[2].disconnect());
   act(() => renderer!.unmount()); renderer = undefined;
+  // React's renderer schedules zero-delay work in addition to our retry timer.
+  // Drain only that work; a leaked 1s retry or 10s handshake stays observable.
+  jest.advanceTimersByTime(0);
   expect(mockListeners.size).toBe(0); expect(jest.getTimerCount()).toBe(0);
   jest.advanceTimersByTime(60000); await flush(); expect(sockets).toHaveLength(3);
 });

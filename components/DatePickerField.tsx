@@ -152,8 +152,8 @@ export default function DatePickerField({
       </Pressable>
       {error ? <Text style={dp.error}>{error}</Text> : null}
 
-      <Modal visible={open} transparent animationType="fade">
-        <View style={dp.overlay}>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <View style={dp.overlay} accessibilityViewIsModal>
           <View style={dp.sheet}>
             <Text style={dp.sheetTitle}>{label}</Text>
             <View style={dp.wheelRow}>

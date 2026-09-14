@@ -157,7 +157,7 @@ export function ReportSheet({
       transparent
       onRequestClose={handleClose}
     >
-      <View style={styles.root}>
+      <View style={styles.root} accessibilityViewIsModal>
         <Pressable
           style={styles.backdrop}
           onPress={handleClose}

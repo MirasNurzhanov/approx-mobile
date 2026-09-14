@@ -75,7 +75,12 @@ export function TermsGate({ visible, onAccepted, onSignOut }: Props) {
       // this. Passing a no-op is what keeps the modal from closing itself.
       onRequestClose={() => {}}
     >
-      <View style={[styles.root, { paddingTop: top + 24, paddingBottom: bottom + 20 }]}>
+      {/* Screen readers stay on the gate: nothing behind it is reachable while
+          it is up, and both ways forward — "I agree" and "Sign out" — are in here. */}
+      <View
+        style={[styles.root, { paddingTop: top + 24, paddingBottom: bottom + 20 }]}
+        accessibilityViewIsModal
+      >
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}

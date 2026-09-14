@@ -84,6 +84,7 @@ function PinNoteForm({ placeTitle, note, onClose, onSave }: Omit<Props, 'visible
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        accessibilityViewIsModal
       >
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
 

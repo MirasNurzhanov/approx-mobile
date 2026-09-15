@@ -81,7 +81,9 @@ export async function reportLocation(
   // club visibility turns on which district somebody is standing in and a fix
   // with a two-kilometre radius cannot answer that. It says nothing about
   // *where* they are.
-  if (accuracy != null && accuracy >= 0) body.accuracy = accuracy;
+  if (accuracy !== undefined) {
+    body.accuracy = typeof accuracy === 'number' && Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
+  }
   await api.patch('/api/proximity/location/', body);
   return true;
 }

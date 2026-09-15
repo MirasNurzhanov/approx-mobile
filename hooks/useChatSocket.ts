@@ -1,10 +1,10 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 
 import { BASE_URL } from '@/services/api';
 import { ChatSocketConnection, type ChatSocketStatus } from '@/services/chatSocket';
+import { getSocketTicket } from '@/services/socketTicket';
 
 export function useChatSocket(path: string, callbacks: {
   onMessage: (data: string) => void;
@@ -19,7 +19,7 @@ export function useChatSocket(path: string, callbacks: {
   useEffect(() => {
     const connection = new ChatSocketConnection({
       url: `${BASE_URL.replace(/^http/, 'ws')}${path}`,
-      getToken: () => AsyncStorage.getItem('access_token'),
+      getTicket: () => getSocketTicket(path),
       createSocket: url => new WebSocket(url),
       onStatus: setStatus,
       onMessage: data => callbackRef.current.onMessage(data),

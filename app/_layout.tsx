@@ -156,6 +156,7 @@ function AppShell() {
         <Stack.Screen name="zone-trim"       options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="profile/[id]"    options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="edit-profile"    options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="delete-account"  options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="search"          options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="starred-stories" options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="pinned"          options={{ headerShown: false, animation: 'slide_from_right' }} />

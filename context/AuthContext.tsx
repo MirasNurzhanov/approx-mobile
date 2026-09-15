@@ -68,6 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (token) markOnboardingSeen();
       setIsAuthenticated(!!token);
       setIsLoading(false);
+    }).catch(() => {
+      setIsAuthenticated(false);
+      setIsLoading(false);
+      Alert.alert('Secure storage unavailable', 'Unlock your device and reopen the app, or sign in again.');
     });
   }, []);
 
@@ -113,10 +117,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       // Revokes the refresh token server-side, unregisters push, stops the
-      // background location task and clears account-scoped caches. Never
-      // throws: signing out has to succeed locally even with no network.
+      // background location task and clears account-scoped caches.
       await performSignOut();
     } catch {
+      Alert.alert('Device cleanup needs attention',
+        'You are signed out. Unlock your device and restart the app to retry secure credential cleanup.');
       // Swallowed here rather than left to a `finally`, which React Compiler
       // cannot lower — it bails on any component containing one. The guarantee
       // is unchanged: a teardown that somehow threw still reaches the teardown

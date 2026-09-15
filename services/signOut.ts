@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { tokenStore } from './tokenStore';
 
 import { beginSessionEnd, BASE_URL } from './api';
 import { stopBackgroundLocationUpdates } from './backgroundLocation';
@@ -116,8 +117,8 @@ export async function performSignOut(): Promise<void> {
   clearRouteCache();
 
   const [accessToken, refresh] = await Promise.all([
-    AsyncStorage.getItem('access_token').catch(() => null),
-    AsyncStorage.getItem('refresh_token').catch(() => null),
+    tokenStore.getItem('access_token').catch(() => null),
+    tokenStore.getItem('refresh_token').catch(() => null),
   ]);
 
   // Off the map, before the credentials that could do it are thrown away.
@@ -142,7 +143,7 @@ export async function performSignOut(): Promise<void> {
     if (!revoked) {
       // Queued, not silently dropped: the token stays valid until it expires,
       // so it is worth one more attempt on the next launch.
-      await AsyncStorage.setItem(PENDING_REVOCATION, refresh).catch(() => {});
+      await tokenStore.setItem(PENDING_REVOCATION, refresh).catch(() => {});
     }
   }
 
@@ -152,6 +153,9 @@ export async function performSignOut(): Promise<void> {
   await stopBackgroundLocationUpdates().catch(() => {});
 
   await AsyncStorage.multiRemove(ACCOUNT_SCOPED_KEYS).catch(() => {});
+  let credentialError: unknown;
+  try { await tokenStore.clearSession(); }
+  catch (error) { credentialError = error; }
 
   // The Google SDK keeps its own idea of who is signed in, on the far side of
   // AsyncStorage. Left alone, the next tap on the Google button re-signs the
@@ -200,6 +204,7 @@ export async function performSignOut(): Promise<void> {
   // the next one. Leaving a `false` here would walk a new sign-in straight
   // past the gate.
   resetTerms();
+  if (credentialError) throw credentialError;
 }
 
 /**
@@ -208,7 +213,7 @@ export async function performSignOut(): Promise<void> {
  * token is revoked or simply expired past the point of mattering.
  */
 export async function flushPendingRevocations(): Promise<void> {
-  const pending = await AsyncStorage.getItem(PENDING_REVOCATION).catch(() => null);
+  const pending = await tokenStore.getItem(PENDING_REVOCATION).catch(() => null);
   if (!pending) return;
 
   // The access token that went with this session is long gone, and /logout/
@@ -233,11 +238,11 @@ export async function flushPendingRevocations(): Promise<void> {
     // 401 means it is already dead — blacklisted, or past its seven days.
     // Either way there is nothing left to revoke.
     if (e?.response?.status === 401) {
-      await AsyncStorage.removeItem(PENDING_REVOCATION).catch(() => {});
+      await tokenStore.removeItem(PENDING_REVOCATION).catch(() => {});
     }
     return;
   }
 
   const done = await revokeRefreshToken(rotated, access);
-  if (done) await AsyncStorage.removeItem(PENDING_REVOCATION).catch(() => {});
+  if (done) await tokenStore.removeItem(PENDING_REVOCATION).catch(() => {});
 }

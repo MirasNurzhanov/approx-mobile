@@ -533,7 +533,7 @@ export default function SettingsScreen() {
   const { colors, themeMode, toggleTheme } = useTheme();
   const { navStyle, setNavStyle } = useNavStyle();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { logout, confirmLogout, isSigningOut } = useAuth();
+  const { confirmLogout, isSigningOut } = useAuth();
   const { top } = useSafeAreaInsets();
   const layout = useLayoutSize();
   const scrollProps = useScrollHandler();
@@ -699,21 +699,7 @@ export default function SettingsScreen() {
   }
 
   function confirmDeleteAccount() {
-    Alert.alert(
-      'Delete Account',
-      'This cannot be undone. All your data will be permanently deleted.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try { await api.delete('/api/users/delete/'); } catch {}
-            await logout();
-          },
-        },
-      ],
-    );
+    router.push('/delete-account');
   }
 
   const version = Constants.expoConfig?.version ?? '1.0.0';

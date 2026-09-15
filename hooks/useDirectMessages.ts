@@ -11,6 +11,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
   onIncoming: (message: DirectMessage) => void) {
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [canSend, setCanSend] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
         syncAgain.current = false;
         const boundary = latest.current;
         const result = await catchUpHistory<RawDirectMessage>(
-          async before => (await api.get<HistoryPage<RawDirectMessage>>(
+          async before => (await api.get<HistoryPage<RawDirectMessage> & { can_send?: boolean }>(
             `/api/friends/messages/${otherId}/`, { params: before ? { before } : {} },
           )).data,
           boundary, () => lifecycle.current === epoch,
@@ -46,6 +47,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
         setMessages(previous => mergeMessages(previous, incoming));
         if (!boundary) setNextBefore(result.firstPage.next_before);
         setHistoryError(null);
+        setCanSend((result.firstPage as HistoryPage<RawDirectMessage> & { can_send?: boolean }).can_send !== false);
       } while (syncAgain.current && lifecycle.current === epoch);
     } catch {
       if (lifecycle.current === epoch) setHistoryError('Could not refresh messages. Tap to retry.');
@@ -65,6 +67,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
     sends.current.clear();
     setMessages([]);
     setLoading(true);
+    setCanSend(false);
     setLoadingOlder(false);
     setNextBefore(null);
     void refresh();
@@ -109,6 +112,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
   }, [nextBefore, otherId]);
 
   async function deliver(message: DirectMessage) {
+    if (!canSend) return;
     const clientId = message.client_id;
     if (!clientId || sends.current.has(clientId)) return;
     const epoch = lifecycle.current;
@@ -133,7 +137,7 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
   }
 
   function sendText(text: string): boolean {
-    if (!text.trim() || currentUserId === null) return false;
+    if (!canSend || !text.trim() || currentUserId === null) return false;
     const clientId = newMessageId();
     const message: DirectMessage = {
       id: `pending-${clientId}`, client_id: clientId, text: text.trim(),
@@ -168,6 +172,6 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
     return () => subscription.remove();
   }, [focused, acknowledgeVisible, status]);
 
-  return { messages, setMessages, loading, loadingOlder, nextBefore, historyError,
+  return { messages, setMessages, loading, loadingOlder, nextBefore, historyError, canSend,
     refresh, loadOlder, status, sendText, retry: deliver, onViewableItemsChanged };
 }

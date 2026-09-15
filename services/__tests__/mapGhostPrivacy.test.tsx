@@ -4,6 +4,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useMapData, type MapData } from '../../hooks/useMapData';
 import { useMapSheets } from '../../hooks/useMapSheets';
 import { api } from '../api';
+import { reportLocation } from '../location';
 import { fetchMapNearby } from '../discovery';
 import type { ClubMeetup, MapNearbyResponse, NearbyUser } from '../mapTypes';
 import type { Story } from '../stories';
@@ -49,6 +50,7 @@ const fetch = fetchMapNearby as jest.Mock;
 const get = api.get as jest.Mock;
 const coords = { current: { latitude: 10, longitude: 20 } };
 const speed = { current: null };
+const accuracy: { current: number | null } = { current: 12 };
 const person: NearbyUser = {
   id: 2, username: 'friend', latitude: 10.0001, longitude: 20.0001, relationship: 'friend',
 };
@@ -75,7 +77,7 @@ let latest: MapData;
 let sheets: ReturnType<typeof useMapSheets>;
 let tree: ReactTestRenderer | undefined;
 function Harness() {
-  latest = useMapData(coords, speed, false);
+  latest = useMapData(coords, speed, false, accuracy);
   sheets = useMapSheets(latest.nearby, latest.stories, []);
   return null;
 }
@@ -90,6 +92,8 @@ async function refresh() {
   await act(async () => { await mockRefresh(); });
 }
 beforeEach(() => {
+  accuracy.current = 12;
+  jest.mocked(reportLocation).mockClear();
   mockGhost = false;
   fetch.mockReset().mockResolvedValue(payload());
   get.mockReset().mockImplementation((url: string) => Promise.resolve({
@@ -97,6 +101,15 @@ beforeEach(() => {
       ? { friends: [{ id: 2 }], connections: [] }
       : { id: 1, username: 'owner' },
   }));
+});
+
+it('foreground map reports carry the latest accuracy, including explicitly unknown fixes', async () => {
+  await render();
+  await refresh();
+  expect(reportLocation).toHaveBeenLastCalledWith(coords.current, null, 12);
+  accuracy.current = null;
+  await refresh();
+  expect(reportLocation).toHaveBeenLastCalledWith(coords.current, null, null);
 });
 afterEach(() => {
   if (tree) act(() => tree!.unmount());

@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { tokenStore } from './tokenStore';
 import { File } from 'expo-file-system';
 
 import { BASE_URL } from './api';
@@ -330,7 +330,7 @@ export async function publishSwift(
     throw new UploadError(`That video is too large (limit ${limitMb}MB).`, false);
   }
 
-  const token = await AsyncStorage.getItem('access_token');
+  const token = await tokenStore.getItem('access_token');
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {

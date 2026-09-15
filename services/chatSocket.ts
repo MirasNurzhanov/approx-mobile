@@ -11,7 +11,7 @@ export function retryDelay(attempt: number, random = Math.random): number {
 
 type Options = {
   url: string;
-  getToken: () => Promise<string | null>;
+  getTicket: () => Promise<string | null>;
   createSocket: (url: string) => WebSocket;
   onStatus: (status: ChatSocketStatus) => void;
   onMessage: (data: string) => void;
@@ -19,7 +19,7 @@ type Options = {
   onClose?: (code: number) => void;
 };
 
-/** One owned socket/attempt. Closing, token loading and retry timers share a generation. */
+/** One owned socket/attempt. Closing, ticket loading and retry timers share a generation. */
 export class ChatSocketConnection {
   private socket: WebSocket | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -85,18 +85,18 @@ export class ChatSocketConnection {
     this.connecting = true;
     const generation = ++this.generation;
     this.options.onStatus(this.attempt ? 'reconnecting' : 'connecting');
-    // Covers both a stalled token lookup and a handshake that never finishes.
+    // Covers both a stalled ticket request and a handshake that never finishes.
     this.deadline = setTimeout(() => this.retry(), 10_000);
     try {
-      const token = await this.options.getToken();
+      const ticket = await this.options.getTicket();
       if (!this.running || generation !== this.generation) return;
-      if (!token) {
+      if (!ticket) {
         this.connecting = false;
         this.closeSocket();
         this.options.onStatus('unavailable');
         return;
       }
-      const socket = this.options.createSocket(`${this.options.url}?token=${encodeURIComponent(token)}`);
+      const socket = this.options.createSocket(`${this.options.url}?ticket=${encodeURIComponent(ticket)}`);
       this.socket = socket;
       const current = () => this.running && generation === this.generation && socket === this.socket;
       socket.onopen = () => {

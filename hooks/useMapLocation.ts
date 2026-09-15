@@ -101,6 +101,8 @@ export interface MapLocation {
   displayCoords: GeoPoint | null;
   /** Latest platform speed estimate, in m/s; null when it has none. */
   speedRef: React.RefObject<number | null>;
+  /** Latest accepted fix's confidence radius in metres, or null if unknown. */
+  accuracyRef: React.RefObject<number | null>;
   permState: PermissionState | null;
   setPermState: (state: PermissionState) => void;
   locationGranted: boolean;
@@ -162,6 +164,7 @@ export function useMapLocation(
   /** Latest platform speed estimate, in m/s; null when it has none. A ref, not
    * state — it changes on every fix and only the next poll reads it. */
   const speedRef = useRef<number | null>(null);
+  const accuracyRef = useRef<number | null>(null);
   const followingRef = useRef(false);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const trackingVersion = useRef(0);
@@ -237,6 +240,8 @@ export function useMapLocation(
     coordsRef.current = next;
     setCoords(next);
     const speed = fix.coords.speed;
+    const accuracy = fix.coords.accuracy;
+    accuracyRef.current = typeof accuracy === 'number' && Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
     speedRef.current = typeof speed === 'number' && Number.isFinite(speed) && speed >= 0 ? speed : null;
     recordSpeed(speedRef.current);
     return atSharingPrecision(next);
@@ -306,6 +311,7 @@ export function useMapLocation(
       coordsRef.current = null;
       fixAtRef.current = 0;
       speedRef.current = null;
+      accuracyRef.current = null;
       setCoords(null);
       setFollowRequested(false);
       resetPositionSmoothing();
@@ -557,6 +563,7 @@ export function useMapLocation(
     coordsRef,
     displayCoords,
     speedRef,
+    accuracyRef,
     permState,
     setPermState,
     locationGranted,

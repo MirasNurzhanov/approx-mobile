@@ -13,6 +13,7 @@ import type { ZoneMode } from '@/services/zoneArea';
 export type Relationship = 'stranger' | 'hi_sent' | 'connected' | 'friend';
 
 export interface NearbyUser {
+  age?: number | null;
   id: number;
   username: string;
   latitude: number;
@@ -97,4 +98,3 @@ export interface MapNearbyResponse {
   stories: Story[];
   meetups: ClubMeetup[];
 }
-

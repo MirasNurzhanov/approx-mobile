@@ -1,4 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { tokenStore } from './tokenStore';
+import { safeApiError } from './safeApiError';
 import axios from 'axios';
 import { BASE_URL, clientHeaders, resumeSession } from './api';
 
@@ -32,9 +33,8 @@ export async function loginRequest(
     // and lets it through. It is therefore load-bearing here in a way it is
     // not anywhere else.
     { headers: clientHeaders() },
-  );
-  await AsyncStorage.setItem('access_token', data.access);
-  await AsyncStorage.setItem('refresh_token', data.refresh);
+  ).catch(error => { throw safeApiError(error); });
+  await tokenStore.setSession(data.access, data.refresh);
   // The previous sign-out (or a dead refresh) latched the api client shut.
   // Tokens exist again, so let it talk — otherwise every screen after login
   // fails on a client that is still refusing to send.
@@ -43,10 +43,9 @@ export async function loginRequest(
 }
 
 export async function logoutRequest() {
-  await AsyncStorage.removeItem('access_token');
-  await AsyncStorage.removeItem('refresh_token');
+  await tokenStore.clearSession();
 }
 
 export async function getAccessToken() {
-  return AsyncStorage.getItem('access_token');
+  return tokenStore.getItem('access_token');
 }

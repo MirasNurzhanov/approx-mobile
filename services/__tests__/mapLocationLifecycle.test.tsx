@@ -122,6 +122,20 @@ it('starts one watcher without waiting for the initial read and ignores the olde
   expect(latest.coords).toBe(newest);
 });
 
+it('keeps accuracy with the accepted fix, ignores stale accuracy, and clears unknown estimates', async () => {
+  await render();
+  expect(latest.accuracyRef.current).toBe(5);
+  act(() => { watched()({ ...fix(T0 + 1000), coords: { ...fix().coords, accuracy: 23 } }); });
+  expect(latest.accuracyRef.current).toBe(23);
+  act(() => { watched()({ ...fix(T0), coords: { ...fix().coords, accuracy: 1 } }); });
+  expect(latest.accuracyRef.current).toBe(23);
+  act(() => { watched()({ ...fix(T0 + 2000), coords: { ...fix().coords, accuracy: null } }); });
+  expect(latest.accuracyRef.current).toBeNull();
+  mockPermission = 'denied';
+  await rerender();
+  expect(latest.accuracyRef.current).toBeNull();
+});
+
 it('removes a watcher whose asynchronous creation finishes after unmount', async () => {
   const creating = deferred<Location.LocationSubscription>();
   const subscription = { remove: jest.fn() };

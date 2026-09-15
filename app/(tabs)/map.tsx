@@ -2990,7 +2990,7 @@ export default function MapScreen() {
   // follows it — see hooks/useMapLocation. Called before every hook that reads
   // `coordsRef`, so its mirror effect lands first on any commit where both run.
   const {
-    mapRef, coords, coordsRef, displayCoords, speedRef,
+    mapRef, coords, coordsRef, displayCoords, speedRef, accuracyRef,
     permState, setPermState,
     locateState, handleLocatePress, stopFollowing, zoomToCluster,
     zoomDelta, mapH, onMapLayout, onRegionChangeComplete,
@@ -3001,7 +3001,7 @@ export default function MapScreen() {
   const {
     nearby, currentUserId, friendIds, connectionIds, selfProfile, selfZone,
     stories, clubMeetups, awaitingFix, fetchFriends, reactToStory, createStory,
-  } = useMapData(coordsRef, speedRef, !!coords);
+  } = useMapData(coordsRef, speedRef, !!coords, accuracyRef);
 
   // The places this viewer saved — where a Swift was made, and the meetups
   // they said they are going to. On-device and account-scoped; see

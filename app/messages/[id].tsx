@@ -273,7 +273,7 @@ export default function MessagesScreen() {
 
   const currentUserIdRef = useRef<number | null>(null);
   const flatListRef = useRef<FlatList>(null);
-  const { messages, setMessages, loading, loadingOlder, nextBefore, historyError,
+  const { messages, setMessages, loading, loadingOlder, nextBefore, historyError, canSend: connected,
     refresh, loadOlder, status: socketStatus, sendText: submitText, retry, onViewableItemsChanged,
   } = useDirectMessages(id, currentUserId, message => announce(arrivalNotice(message, username)));
 
@@ -434,7 +434,7 @@ export default function MessagesScreen() {
         />
       )}
 
-      <MessagesInput
+      {connected ? <MessagesInput
         text={text}
         canSend={canSend}
         bottom={bottom}
@@ -442,7 +442,9 @@ export default function MessagesScreen() {
         onSend={sendText}
         onCamera={handleCamera}
         onAttach={handleAttach}
-      />
+      /> : <Text style={[styles.statusText, { padding: 16, paddingBottom: bottom + 16 }]}>
+        {loading ? 'Loading conversation…' : 'Archived conversation · You can read your saved history.'}
+      </Text>}
       {primer}
       {sheets}
     </KeyboardAvoidingView>

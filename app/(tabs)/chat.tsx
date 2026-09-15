@@ -73,6 +73,7 @@ type AlertRow =
   | { kind: 'activity'; key: string; notif: Notification };
 
 interface UserSummary {
+  archived?: boolean;
   id: number;
   username: string;
   last_message?: string;
@@ -86,6 +87,7 @@ interface UserSummary {
 interface FriendList {
   connections: UserSummary[];
   friends: UserSummary[];
+  archived?: UserSummary[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -206,7 +208,7 @@ function UserCardActions({
 
   return (
     <View style={styles.cardTail}>
-      {type === 'connected' && onAddFriend && (
+      {!user.archived && type === 'connected' && onAddFriend && (
         <Pressable
           style={[styles.addFriendBtn, requestSent && styles.addFriendBtnSent]}
           onPress={() => { if (!requestSent) onAddFriend(user); }}
@@ -271,7 +273,7 @@ function UserCard({
               style={[styles.cardSub, !hasMessage && styles.cardSubEmpty]}
               numberOfLines={1}
             >
-              {hasMessage ? storyReplyPreview(user.last_message) : 'No messages yet'}
+              {user.archived ? 'Archived · ' : ''}{hasMessage ? storyReplyPreview(user.last_message) : 'No messages yet'}
             </Text>
             {unread > 0 && (
               <View style={styles.unreadBadge}>
@@ -869,6 +871,7 @@ function usePeopleActions({ setFriendList, setSentRequestIds, onBlockFailed, rou
     setFriendList((prev) => ({
       connections: prev.connections.filter((u) => u.id !== user.id),
       friends:     prev.friends.filter((u) => u.id !== user.id),
+      archived:    prev.archived?.filter((u) => u.id !== user.id),
     }));
     blockUser(user)
       .then(() => triggerNearbyRefresh())
@@ -891,6 +894,13 @@ function usePeopleActions({ setFriendList, setSentRequestIds, onBlockFailed, rou
     },
 
     onMenu(user: UserSummary, type: 'connected' | 'friend') {
+      if (user.archived) {
+        Alert.alert(user.username, 'This conversation is archived.', [
+          { text: 'Block User', style: 'destructive', onPress: () => handleBlock(user) },
+          { text: 'Cancel', style: 'cancel' },
+        ]);
+        return;
+      }
       const isFriend = type === 'friend';
       Alert.alert(user.username, undefined, [
         {
@@ -909,6 +919,7 @@ function usePeopleActions({ setFriendList, setSentRequestIds, onBlockFailed, rou
       setFriendList((prev) => ({
         connections: prev.connections.map((u) => u.id === user.id ? { ...u, unread_count: 0 } : u),
         friends:     prev.friends.map((u)     => u.id === user.id ? { ...u, unread_count: 0 } : u),
+        archived:    prev.archived?.map((u)   => u.id === user.id ? { ...u, unread_count: 0 } : u),
       }));
       router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } } as any);
     },
@@ -933,6 +944,7 @@ function useChatSearch(
   const chatUsers: ChatUser[] = [
     ...friendList.friends.map((u) => ({ ...u, chatType: 'friend' as const })),
     ...connections.map((u) => ({ ...u, chatType: 'connected' as const })),
+    ...(friendList.archived ?? []).map((u) => ({ ...u, archived: true, chatType: 'connected' as const })),
   ].sort((a, b) => {
     if (a.chatType !== b.chatType) return a.chatType === 'friend' ? -1 : 1;
     if (a.last_message_at && b.last_message_at) return b.last_message_at.localeCompare(a.last_message_at);
@@ -1008,7 +1020,7 @@ function useChatAlerts({ alerts, setAlerts, fetchAll, router }: {
       // Accepting a Hi adds a connection, so the list behind this tab is stale.
       fetchAll();
     } catch (e) {
-      console.log(`[Alerts] ${req.kind} ${action} failed`, e);
+      console.warn(`[Alerts] ${req.kind} ${action} failed`);
     }
     // Runs on both paths: the `catch` only logs, so nothing escapes it.
     setActioning((prev) => { const next = { ...prev }; delete next[key]; return next; });
@@ -1285,6 +1297,7 @@ export default function ChatScreen() {
       list = {
         connections: data.connections ?? [],
         friends:     data.friends     ?? [],
+        archived:    data.archived    ?? [],
       };
       setFriendList(list);
     }

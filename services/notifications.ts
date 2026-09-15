@@ -135,7 +135,6 @@ async function registerForPushNotificationsImpl(): Promise<string | null> {
     console.log('[Push] projectId:', Constants.expoConfig?.extra?.eas?.projectId);
     const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
-    console.log('[Push] token received:', token?.data);
 
     console.log('[Push] sending to backend...');
     try {
@@ -151,12 +150,12 @@ async function registerForPushNotificationsImpl(): Promise<string | null> {
       ]);
       console.log('[Push] token saved successfully');
     } catch (error: any) {
-      console.log('[Push] error:', error.response?.status, JSON.stringify(error.response?.data), error.message);
+      console.warn('[Push] registration failed:', error.response?.status);
     }
 
     return token.data;
-  } catch (e: any) {
-    console.log('[Push] registration crashed:', e?.message ?? e);
+  } catch {
+    console.warn('[Push] registration unavailable');
     return null;
   }
 }

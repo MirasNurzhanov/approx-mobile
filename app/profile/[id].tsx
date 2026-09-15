@@ -50,7 +50,7 @@ interface UserProfile {
   stats?: { friends: number; connections: number };
   links?: ProfileLink[];
   presence?: Presence;
-  date_of_birth?: string | null;
+  age?: number | null;
   nationality?: string | null;
   profession?: string | null;
   clubs?: { id: number; name: string; emblem?: string; role: ClubRole }[];
@@ -447,10 +447,7 @@ export default function UserProfileScreen() {
   const interests = profile.interests ?? [];
   const locked   = isLocked(profile);
 
-  const _ageRaw = profile.date_of_birth
-    ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-    : null;
-  const age      = _ageRaw !== null && !Number.isNaN(_ageRaw) ? _ageRaw : null;
+  const age = typeof profile.age === 'number' && Number.isFinite(profile.age) ? profile.age : null;
   // The lookup and the `?? null` are separate statements because a `??` inside
   // a ternary branch is a logical test block React Compiler cannot lower, and
   // it gives up on the whole screen when it meets one.

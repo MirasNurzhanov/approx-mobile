@@ -136,7 +136,7 @@ export function SwiftLocationSheet({
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <View style={styles.root} accessibilityViewIsModal>
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <Text style={styles.title} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
             Where this was made

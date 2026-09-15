@@ -193,68 +193,77 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
   const styles = makeStyles(colors);
   const [searchFocused, setSearchFocused] = useState(false);
   return (
-    <Modal visible={visible} transparent animationType="slide">
-      <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
-      <View style={styles.modalSheet}>
-        <View style={styles.modalHandle} />
-        <Text style={styles.modalTitle}>Pick an Interest</Text>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onDismiss}>
+      {/* One container for the backdrop and the sheet, so a screen reader stays
+          inside the modal and can still reach the backdrop's close. */}
+      <View style={{ flex: 1 }} accessibilityViewIsModal>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={onDismiss}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <Text style={styles.modalTitle}>Pick an Interest</Text>
 
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={18} color={colors.t3} />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={onQueryChange}
-            placeholder="Search interests…"
-            placeholderTextColor={colors.t3}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            onFocus={() => setSearchFocused(true)}
-            onBlur={() => setSearchFocused(false)}
-            accessibilityLabel="Search interests"
-          />
-          {query.length > 0 && (
-            <Pressable
-              onPress={() => onQueryChange('')}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search"
-            >
-              <Ionicons name="close" size={16} color={colors.t3} />
-            </Pressable>
-          )}
-          <KeyboardDoneButton visible={searchFocused} palette={colors} />
-        </View>
-
-        {loading ? (
-          <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
-        ) : (
-          <FlatList
-            data={interests}
-            keyExtractor={(interest) => String(interest.id)}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            renderItem={({ item: interest }) => (
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={18} color={colors.t3} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={onQueryChange}
+              placeholder="Search interests…"
+              placeholderTextColor={colors.t3}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              accessibilityLabel="Search interests"
+            />
+            {query.length > 0 && (
               <Pressable
-                style={[styles.interestRow, selectedId === interest.id && styles.interestRowActive]}
-                onPress={() => onSelect(interest)}
+                onPress={() => onQueryChange('')}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
               >
-                <Text style={styles.interestIcon}>{interest.icon}</Text>
-                <Text style={[styles.interestName, selectedId === interest.id && styles.interestNameActive]}>
-                  {interest.name}
-                </Text>
-                {selectedId === interest.id && (
-                  <Ionicons name="checkmark" size={18} color={colors.teal} />
-                )}
+                <Ionicons name="close" size={16} color={colors.t3} />
               </Pressable>
             )}
-            ListEmptyComponent={
-              <Text style={styles.interestEmpty}>Nothing matches “{query.trim()}”.</Text>
-            }
-          />
-        )}
+            <KeyboardDoneButton visible={searchFocused} palette={colors} />
+          </View>
+
+          {loading ? (
+            <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
+          ) : (
+            <FlatList
+              data={interests}
+              keyExtractor={(interest) => String(interest.id)}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              renderItem={({ item: interest }) => (
+                <Pressable
+                  style={[styles.interestRow, selectedId === interest.id && styles.interestRowActive]}
+                  onPress={() => onSelect(interest)}
+                >
+                  <Text style={styles.interestIcon}>{interest.icon}</Text>
+                  <Text style={[styles.interestName, selectedId === interest.id && styles.interestNameActive]}>
+                    {interest.name}
+                  </Text>
+                  {selectedId === interest.id && (
+                    <Ionicons name="checkmark" size={18} color={colors.teal} />
+                  )}
+                </Pressable>
+              )}
+              ListEmptyComponent={
+                <Text style={styles.interestEmpty}>Nothing matches “{query.trim()}”.</Text>
+              }
+            />
+          )}
+        </View>
       </View>
     </Modal>
   );

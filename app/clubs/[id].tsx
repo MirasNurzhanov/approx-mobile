@@ -200,65 +200,74 @@ function InviteModal({ visible, query, results, searching, invitingIds, invitedI
       animationType="slide"
       onRequestClose={onDismiss}
     >
-      <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
-      <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
-        <View style={styles.modalHandle} />
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>Invite Member</Text>
-          <Pressable onPress={onDismiss} hitSlop={10}>
-            <Ionicons name="close" size={22} color={colors.t2} />
-          </Pressable>
-        </View>
-
-        <View style={styles.searchRow}>
-          <Ionicons name="search" size={15} color={colors.t3} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by username…"
-            placeholderTextColor={colors.t3}
-            value={query}
-            onChangeText={onQueryChange}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoFocus
-          />
-          {query.length > 0 && (
-            <Pressable onPress={onClearQuery} hitSlop={8}>
-              <Ionicons name="close-circle" size={16} color={colors.t3} />
+      {/* One container for the backdrop and the sheet, so a screen reader stays
+          inside the modal and can still reach the backdrop's close. */}
+      <View style={{ flex: 1 }} accessibilityViewIsModal>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={onDismiss}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
+        <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Invite Member</Text>
+            <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+              <Ionicons name="close" size={22} color={colors.t2} />
             </Pressable>
-          )}
-        </View>
+          </View>
 
-        {searching ? (
-          <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
-        ) : results.length > 0 ? (
-          <FlatList
-            style={styles.inviteList}
-            data={results}
-            keyExtractor={(user) => String(user.id)}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item: user }) => (
-              <View style={styles.inviteRow}>
-                <Avatar uri={user.profile_picture} name={user.username} size="sm" />
-                <Text style={styles.inviteUsername} numberOfLines={1}>@{user.username}</Text>
-                <Pressable
-                  style={[styles.inviteBtn, (invitingIds.has(user.id) || invitedIds.has(user.id)) && styles.inviteBtnBusy]}
-                  onPress={() => onInvite(user)}
-                  disabled={invitingIds.has(user.id) || invitedIds.has(user.id)}
-                >
-                  {invitingIds.has(user.id) ? (
-                    <ActivityIndicator size="small" color={colors.bg} />
-                  ) : (
-                    <Text style={styles.inviteBtnText}>{invitedIds.has(user.id) ? 'Invited' : 'Invite'}</Text>
-                  )}
-                </Pressable>
-              </View>
+          <View style={styles.searchRow}>
+            <Ionicons name="search" size={15} color={colors.t3} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by username…"
+              placeholderTextColor={colors.t3}
+              value={query}
+              onChangeText={onQueryChange}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+            />
+            {query.length > 0 && (
+              <Pressable onPress={onClearQuery} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color={colors.t3} />
+              </Pressable>
             )}
-          />
-        ) : query.length > 0 ? (
-          <Text style={styles.inviteEmpty}>No users found.</Text>
-        ) : null}
+          </View>
+
+          {searching ? (
+            <ActivityIndicator color={colors.teal} style={{ marginTop: 24 }} />
+          ) : results.length > 0 ? (
+            <FlatList
+              style={styles.inviteList}
+              data={results}
+              keyExtractor={(user) => String(user.id)}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item: user }) => (
+                <View style={styles.inviteRow}>
+                  <Avatar uri={user.profile_picture} name={user.username} size="sm" />
+                  <Text style={styles.inviteUsername} numberOfLines={1}>@{user.username}</Text>
+                  <Pressable
+                    style={[styles.inviteBtn, (invitingIds.has(user.id) || invitedIds.has(user.id)) && styles.inviteBtnBusy]}
+                    onPress={() => onInvite(user)}
+                    disabled={invitingIds.has(user.id) || invitedIds.has(user.id)}
+                  >
+                    {invitingIds.has(user.id) ? (
+                      <ActivityIndicator size="small" color={colors.bg} />
+                    ) : (
+                      <Text style={styles.inviteBtnText}>{invitedIds.has(user.id) ? 'Invited' : 'Invite'}</Text>
+                    )}
+                  </Pressable>
+                </View>
+              )}
+            />
+          ) : query.length > 0 ? (
+            <Text style={styles.inviteEmpty}>No users found.</Text>
+          ) : null}
+        </View>
       </View>
     </Modal>
   );

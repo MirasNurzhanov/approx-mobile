@@ -291,7 +291,7 @@ export function StoryViewer({ stories, onClose, onReact, replyTo, currentUserId 
           sibling of this one would be presented *behind* the story viewer on
           iOS and never be seen. */}
       {sheets}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} accessibilityViewIsModal>
       <GestureDetector gesture={swipe ?? idleSwipe}>
       <View style={styles.svContainer}>
         {/* Background — photo fills the screen; a text-only story gets a soft

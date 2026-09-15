@@ -4,7 +4,10 @@ import axios, { create as createAxios } from 'axios';
 import * as Application from 'expo-application';
 import { router } from 'expo-router';
 
-export const BASE_URL = 'https://project-x-production-3261.up.railway.app';
+import { API_URL } from './apiUrl';
+
+/** The backend this build talks to. Set per build with EXPO_PUBLIC_API_URL; see services/apiUrl.ts. */
+export const BASE_URL = API_URL;
 
 /** Kept here rather than imported from ./presence: that module imports this
  * one, and the interceptor below needs the name at module scope. */

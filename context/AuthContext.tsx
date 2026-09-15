@@ -1,5 +1,7 @@
 import { router } from 'expo-router';
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode,
+} from 'react';
 import { Alert } from 'react-native';
 import { setOnAuthFailure } from '@/services/api';
 import { getAccessToken, loginRequest } from '@/services/auth';
@@ -41,65 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // same tick would both read the pre-render `false`.
   const signingOut = useRef(false);
 
-  useEffect(() => {
-    // When the api layer gives up on a session (refresh failed), it redirects
-    // to '/' — this keeps isAuthenticated in sync so index doesn't bounce the
-    // user straight back into the tabs.
-    //
-    // Routed through logout() rather than just flipping the flag: an expired
-    // session is still a session that ended, and the rest of the teardown —
-    // stopping the background location task, dropping account-scoped caches —
-    // has to happen whether the user chose it or not. The api layer has
-    // already cleared the tokens by this point, so this makes no network call.
-    setOnAuthFailure(() => { logout(); });
-
-    // A sign-out that could not reach the server left its refresh token valid.
-    // Retry it now that we may have a network again.
-    flushPendingRevocations().catch(() => {});
-
-    Promise.all([
-      getAccessToken(),
-      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
-    ]).then(([token]) => {
-      // A device with an account signed in on it has plainly been introduced
-      // to the app, whether or not anyone ever pressed through the carousel —
-      // which nothing recorded until now. Without this, every existing install
-      // would meet the intro once more the first time it signed out.
-      if (token) markOnboardingSeen();
-      setIsAuthenticated(!!token);
-      setIsLoading(false);
-    }).catch(() => {
-      setIsAuthenticated(false);
-      setIsLoading(false);
-      Alert.alert('Secure storage unavailable', 'Unlock your device and reopen the app, or sign in again.');
-    });
-  }, []);
-
-  async function login(email: string, password: string, acceptTerms = false) {
-    await loginRequest(email, password, acceptTerms);
-    markOnboardingSeen();
-    setIsAuthenticated(true);
-    router.replace('/(tabs)/map');
-  }
-
-  function completeSocialSignIn({ created, needsDateOfBirth }: SocialSignInResult) {
-    markOnboardingSeen();
-    setIsAuthenticated(true);
-    // Order matters, and it is not "new users here, old users there". A date of
-    // birth is the age gate, so it comes before anything else the app would
-    // show — including for the returning account whose first attempt was
-    // interrupted before they answered. The birthday screen sends them on to
-    // interests itself.
-    if (needsDateOfBirth) {
-      router.replace('/social-birthday');
-    } else if (created) {
-      router.replace('/interests-setup');
-    } else {
-      router.replace('/(tabs)/map');
-    }
-  }
-
-  async function logout() {
+  // The functions below touch only state setters, refs and module imports, so
+  // each keeps one identity for the life of the provider, and the context value
+  // changes only when one of the three flags does. useAuth() sits near the root,
+  // so a value rebuilt on every render re-rendered every consumer with it.
+  // React Compiler would memoise much of this on its own; it is spelled out so
+  // the guarantee survives the compiler bailing on this component.
+  const logout = useCallback(async () => {
     // Re-entrancy guard. The alert dismisses on press and the button stays
     // tappable for as long as revocation takes, so a second tap is easy — and
     // a second performSignOut() racing the first would try to revoke a refresh
@@ -152,9 +102,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // spinning Sign out.
     signingOut.current = false;
     setIsSigningOut(false);
-  }
+  }, []);
 
-  function confirmLogout() {
+  const login = useCallback(async (email: string, password: string, acceptTerms = false) => {
+    await loginRequest(email, password, acceptTerms);
+    markOnboardingSeen();
+    setIsAuthenticated(true);
+    router.replace('/(tabs)/map');
+  }, []);
+
+  const completeSocialSignIn = useCallback(({ created, needsDateOfBirth }: SocialSignInResult) => {
+    markOnboardingSeen();
+    setIsAuthenticated(true);
+    // Order matters, and it is not "new users here, old users there". A date of
+    // birth is the age gate, so it comes before anything else the app would
+    // show — including for the returning account whose first attempt was
+    // interrupted before they answered. The birthday screen sends them on to
+    // interests itself.
+    if (needsDateOfBirth) {
+      router.replace('/social-birthday');
+    } else if (created) {
+      router.replace('/interests-setup');
+    } else {
+      router.replace('/(tabs)/map');
+    }
+  }, []);
+
+  const confirmLogout = useCallback(() => {
     if (signingOut.current) return;
     Alert.alert(
       'Sign out?',
@@ -164,15 +138,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { text: 'Sign out', style: 'destructive', onPress: () => { logout(); } },
       ],
     );
-  }
+  }, [logout]);
+
+  useEffect(() => {
+    // When the api layer gives up on a session (refresh failed), it redirects
+    // to '/' — this keeps isAuthenticated in sync so index doesn't bounce the
+    // user straight back into the tabs.
+    //
+    // Routed through logout() rather than just flipping the flag: an expired
+    // session is still a session that ended, and the rest of the teardown —
+    // stopping the background location task, dropping account-scoped caches —
+    // has to happen whether the user chose it or not. The api layer has
+    // already cleared the tokens by this point, so this makes no network call.
+    setOnAuthFailure(() => { logout(); });
+
+    // A sign-out that could not reach the server left its refresh token valid.
+    // Retry it now that we may have a network again.
+    flushPendingRevocations().catch(() => {});
+
+    // Answered as soon as the token read is. This used to wait for a fixed
+    // 2.5 s as well, added alongside ApproxLoader, but the loader is a looping
+    // pulse with nothing to finish: the wait only held every cold start on the
+    // splash after the answer was already in.
+    getAccessToken().then((token) => {
+      // A device with an account signed in on it has plainly been introduced
+      // to the app, whether or not anyone ever pressed through the carousel —
+      // which nothing recorded until now. Without this, every existing install
+      // would meet the intro once more the first time it signed out.
+      if (token) markOnboardingSeen();
+      setIsAuthenticated(!!token);
+      setIsLoading(false);
+    }).catch(() => {
+      setIsAuthenticated(false);
+      setIsLoading(false);
+      Alert.alert('Secure storage unavailable', 'Unlock your device and reopen the app, or sign in again.');
+    });
+  }, [logout]);
+
+  const value = useMemo<AuthContextValue>(() => ({
+    isAuthenticated, isLoading, login, completeSocialSignIn,
+    logout, confirmLogout, isSigningOut,
+  }), [isAuthenticated, isLoading, login, completeSocialSignIn, logout, confirmLogout, isSigningOut]);
 
   return (
-    <AuthContext.Provider
-      value={{
-        isAuthenticated, isLoading, login, completeSocialSignIn,
-        logout, confirmLogout, isSigningOut,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

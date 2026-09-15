@@ -753,14 +753,21 @@ function MeetupProposalModal({
       onRequestClose={modalView === 'map' ? onBackToForm : onDismiss}
     >
       {modalView === 'proposal' ? (
-        <>
-          <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
+        // One container for the backdrop and the sheet, so a screen reader stays
+        // inside the proposal and can still reach the backdrop's close.
+        <View style={{ flex: 1 }} accessibilityViewIsModal>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={onDismiss}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
             <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Propose a Meetup</Text>
-                <Pressable onPress={onDismiss} hitSlop={10}>
+                <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
                   <Ionicons name="close" size={22} color={colors.t2} />
                 </Pressable>
               </View>
@@ -838,12 +845,18 @@ function MeetupProposalModal({
               </ScrollView>
             </View>
           </KeyboardAvoidingView>
-        </>
+        </View>
       ) : (
-        <View style={styles.mapPickerRoot}>
+        <View style={styles.mapPickerRoot} accessibilityViewIsModal>
           {/* Map header */}
           <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
-            <Pressable onPress={onBackToForm} hitSlop={12} style={styles.backBtn}>
+            <Pressable
+              onPress={onBackToForm}
+              hitSlop={12}
+              style={styles.backBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Back to the proposal"
+            >
               <Ionicons name="chevron-back" size={24} color={colors.t1} />
             </Pressable>
             <Text style={styles.mapPickerTitle}>Drop a pin</Text>
@@ -905,7 +918,7 @@ function useClubChat(
   const currentUserIdRef = useRef<number | null>(null);
   const senderCache = useRef<Map<number, { username: string; avatar?: string }>>(new Map());
   const lifecycle = useRef(0);
-  const latestSnapshot = useRef(0);
+  const latestSnapshot = useRef<number | null>(null);
   const syncing = useRef(false);
   const syncAgain = useRef(false);
   const flatListRef = useRef<FlatList>(null);
@@ -951,8 +964,8 @@ function useClubChat(
         const incoming = result.rows.map(row => normalise(row));
         incoming.forEach(cacheSender);
         setMessages(previous => mergeMessages(previous, incoming));
-        if (!latestSnapshot.current) setHasMore(result.firstPage.has_more);
-        latestSnapshot.current = Math.max(latestSnapshot.current, ...incoming.map(row => Number(row.id)), 0);
+        if (latestSnapshot.current === null) setHasMore(result.firstPage.has_more);
+        latestSnapshot.current = Math.max(latestSnapshot.current ?? 0, ...incoming.map(row => Number(row.id)), 0);
       } while (syncAgain.current && epoch === lifecycle.current);
     } catch {
       if (epoch === lifecycle.current) Alert.alert('Messages not refreshed', 'Reconnect or reopen the chat to try again.');
@@ -963,7 +976,7 @@ function useClubChat(
 
   useEffect(() => {
     lifecycle.current += 1;
-    latestSnapshot.current = 0;
+    latestSnapshot.current = null;
     syncing.current = false;
     setMessages([]);
     setLoading(true);
@@ -993,7 +1006,7 @@ function useClubChat(
     // reason: it used to return out of the `try`, which only a `finally` could
     // have caught.
     setLoadingMore(false);
-  }, [clubId, loadingMore, hasMore, messages]);
+  }, [clubId, loadingMore, hasMore, messages, cacheSender]);
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     if (e.nativeEvent.contentOffset.y < 60 && hasMore && !loadingMore) loadOlderMessages();

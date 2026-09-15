@@ -164,7 +164,7 @@ function ProfessionPickerModal({ visible, draft, onDraftChange, onCancel, onDone
       presentationStyle="pageSheet"
       onRequestClose={onCancel}
     >
-      <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
+      <View style={[styles.modalRoot, { backgroundColor: colors.bg }]} accessibilityViewIsModal>
         <View style={styles.modalHandle} />
         <View style={styles.modalHeader}>
           <Pressable
@@ -241,7 +241,7 @@ function NationalityPickerModal({ visible, draft, query, countries, onDraftChang
       presentationStyle="pageSheet"
       onRequestClose={onCancel}
     >
-      <View style={[styles.modalRoot, { backgroundColor: colors.bg }]}>
+      <View style={[styles.modalRoot, { backgroundColor: colors.bg }]} accessibilityViewIsModal>
         <View style={styles.modalHandle} />
         <View style={styles.modalHeader}>
           <Pressable

@@ -353,16 +353,14 @@ export function useMapData(
     return () => clearInterval(id);
   }, [hasCoords, appActive, tick]);
 
-  // Register tick as the global refresh so other screens can trigger it
-  useEffect(() => {
-    registerNearbyRefresh(tick);
-  }, [tick]);
+  // Register tick as the global refresh so other screens can trigger it. Each
+  // registration returns its own unregister as the cleanup, so once the map
+  // unmounts a trigger from another screen no longer polls or sets state here.
+  useEffect(() => registerNearbyRefresh(tick), [tick]);
 
-  useEffect(() => {
-    registerMeetupRemove((id) => {
-      setClubMeetups((prev) => prev.filter((m) => m.id !== id));
-    });
-  }, []);
+  useEffect(() => registerMeetupRemove((id) => {
+    setClubMeetups((prev) => prev.filter((m) => m.id !== id));
+  }), []);
 
   // Unknown privacy is also hidden. Every consumer (pins, trails, music zones
   // and sheets) receives the same gated lists rather than its own UI check.

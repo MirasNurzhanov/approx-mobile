@@ -3,7 +3,7 @@ export type HistoryPage<T> = { results: T[]; next_before: number | null; has_mor
 /** Fetch through the last known server ID, including gaps longer than one page. */
 export async function catchUpHistory<T extends { id?: string | number }>(
   fetchPage: (before?: number) => Promise<HistoryPage<T>>,
-  latestKnownId: number,
+  latestKnownId: number | null,
   active: () => boolean = () => true,
 ): Promise<{ rows: T[]; firstPage: HistoryPage<T> } | null> {
   let before: number | undefined;
@@ -14,7 +14,7 @@ export async function catchUpHistory<T extends { id?: string | number }>(
     if (!active()) return null;
     firstPage ??= page;
     rows.push(...page.results);
-    if (!latestKnownId || page.results.some(row => Number(row.id) <= latestKnownId)
+    if (latestKnownId === null || page.results.some(row => Number(row.id) <= latestKnownId)
         || !page.has_more || page.next_before === null) break;
     if (before !== undefined && page.next_before >= before) throw new Error('History cursor did not advance.');
     before = page.next_before;

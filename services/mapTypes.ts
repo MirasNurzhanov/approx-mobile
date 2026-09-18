@@ -78,6 +78,8 @@ export interface SelfZone {
 }
 
 export interface ClubMeetup {
+  venue?: number | null;
+  meeting_point?: string;
   id: number;
   club: number;
   club_name: string;

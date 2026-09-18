@@ -9,8 +9,11 @@ import { fonts } from '@/constants/theme';
 import { clubsApi, type Club } from '@/services/clubs';
 import { venueProposalRoute, type Venue } from '@/services/venues';
 import { runBusy } from '@/services/busy';
+import { venueAppearance } from '@/services/venueAppearance';
 
 export function VenueSheet({ venue, onClose }: { venue: Venue | null; onClose: () => void }) {
+  const appearance = venueAppearance(venue);
+  const actionStyle = [styles.action, { backgroundColor: appearance.color }];
   const { colors } = useTheme();
   const { bottom } = useSafeAreaInsets();
   const router = useRouter();
@@ -74,9 +77,9 @@ export function VenueSheet({ venue, onClose }: { venue: Venue | null; onClose: (
           <ScrollView keyboardShouldPersistTaps="handled">
             {!choosing && (venue?.image_url
               ? <Image source={{ uri: venue.image_url }} style={styles.hero} contentFit="cover" accessibilityLabel={venue.name} />
-              : <View style={[styles.hero, styles.illustration]}>
-                  <Ionicons name="storefront-outline" size={54} color="#FFFFFF" />
-                  <Text style={styles.heroLabel}>A place to get together</Text>
+              : <View style={[styles.hero, styles.illustration, { backgroundColor: appearance.color }]}>
+                  <Ionicons name={appearance.icon} size={54} color="#FFFFFF" />
+                  <Text style={styles.heroLabel}>{appearance.caption}</Text>
                 </View>)}
             <Text style={[styles.title, { color: colors.t1 }]}>{venue?.name}</Text>
             <Text style={[styles.meta, { color: colors.t2 }]}>{venue?.category} · {venue?.address}</Text>
@@ -84,10 +87,10 @@ export function VenueSheet({ venue, onClose }: { venue: Venue | null; onClose: (
               <Text style={[styles.copy, { color: colors.t2 }]}>Who would you like to meet here?</Text>
               {loading ? <ActivityIndicator accessibilityLabel="Loading your clubs" color={colors.purple} /> : error ? <>
                 <Text style={[styles.copy, { color: colors.t2 }]}>Could not load your clubs.</Text>
-                <Pressable onPress={chooseClub} accessibilityRole="button" style={styles.action}><Text style={styles.actionText}>Try again</Text></Pressable>
+                <Pressable onPress={chooseClub} accessibilityRole="button" style={actionStyle}><Text style={styles.actionText}>Try again</Text></Pressable>
               </> : clubs.length === 0 ? <>
                 <Text style={[styles.copy, { color: colors.t2 }]}>Join or create a club before proposing a meetup.</Text>
-                <Pressable onPress={() => navigate('/create-club')} accessibilityRole="button" style={styles.action}>
+                <Pressable onPress={() => navigate('/create-club')} accessibilityRole="button" style={actionStyle}>
                   <Text style={styles.actionText}>Create a club</Text>
                 </Pressable>
               </> : clubs.map(club => (
@@ -104,7 +107,7 @@ export function VenueSheet({ venue, onClose }: { venue: Venue | null; onClose: (
               </Pressable>
             </> : <>
               {!!venue?.description && <Text style={[styles.copy, { color: colors.t2 }]}>{venue.description}</Text>}
-              <Pressable onPress={chooseClub} accessibilityRole="button" style={styles.action}>
+              <Pressable onPress={chooseClub} accessibilityRole="button" style={actionStyle}>
                 <Ionicons name="people-outline" size={21} color="#FFFFFF" />
                 <Text style={styles.actionText}>Propose a meetup</Text>
               </Pressable>

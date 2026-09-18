@@ -4,6 +4,7 @@ import { Marker } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '@/constants/theme';
 import type { Venue } from '@/services/venues';
+import { venueAppearance } from '@/services/venueAppearance';
 import { isDrawable, type GeoPoint } from '@/services/markerLayout';
 
 /** Keep native marker slots mounted, matching the map's Fabric parking strategy. */
@@ -21,7 +22,8 @@ export function VenueLayer({ venues, parkedAt, onOpen }: {
 export function VenueMarker({ venue, parkedAt, onOpen }: {
   venue: Venue | null; parkedAt: GeoPoint; onOpen: (venue: Venue) => void;
 }) {
-  const key = venue ? `${venue.id}|${venue.name}` : 'parked';
+  const appearance = venueAppearance(venue);
+  const key = venue ? `${venue.id}|${venue.name}|${appearance.color}|${appearance.icon}` : 'parked';
   const [settledKey, setSettledKey] = useState<string | null>(null);
   useEffect(() => {
     const timer = setTimeout(() => setSettledKey(key), 800);
@@ -33,11 +35,11 @@ export function VenueMarker({ venue, parkedAt, onOpen }: {
       tracksViewChanges={settledKey !== key} onPress={() => { if (venue) onOpen(venue); }}
       accessibilityLabel={venue ? `${venue.name}, ${venue.category}. View venue` : undefined}>
       {venue ? <View collapsable={false} style={styles.wrap}>
-        <View style={styles.pin}>
-          <Ionicons name="storefront-outline" size={20} color="#FFFFFF" />
+        <View style={[styles.pin, { backgroundColor: appearance.color }]}>
+          <Ionicons name={appearance.icon} size={20} color="#FFFFFF" />
           <Text style={styles.name} numberOfLines={1}>{venue.name}</Text>
         </View>
-        <View style={styles.tip} />
+        <View style={[styles.tip, { borderTopColor: appearance.color }]} />
       </View> : <View style={{ width: 1, height: 1 }} />}
     </Marker>
   );

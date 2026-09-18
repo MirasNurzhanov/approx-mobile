@@ -762,12 +762,13 @@ function MeetupProposalModal({
         // inside the proposal and can still reach the backdrop's close.
         <View style={{ flex: 1 }} accessibilityViewIsModal>
           <Pressable
+            testID="meetup-proposal-backdrop"
             style={styles.modalBackdrop}
             onPress={onDismiss}
             accessibilityRole="button"
             accessibilityLabel="Close"
           />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
+          <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
             <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHeaderRow}>
@@ -1572,8 +1573,10 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   sendBtnActive: { backgroundColor: colors.teal, borderColor: colors.teal },
 
   // Proposal modal
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalKav: { justifyContent: 'flex-end' },
+  // Independent of sheet height and keyboard padding: no undimmed gap above
+  // the sheet, around its rounded corners, or while the keyboard animates.
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalKav: { flex: 1, justifyContent: 'flex-end' },
   modalSheet: {
     backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
     paddingHorizontal: 20, maxHeight: '92%',

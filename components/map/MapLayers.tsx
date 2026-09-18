@@ -48,10 +48,11 @@ import { SelfMarker, MusicZoneBadge, ClusterMarker, StoryMarker, MeetupMarker, P
  * event drops out of the nearby feed — which is the case this feature is for,
  * since a meetup you are travelling to is by definition not near you yet.
  */
-function PinnedLayer({ places, liveMeetupIds, parkedAt, onOpenPin }: {
+function PinnedLayer({ places, liveMeetupIds, parkedAt, colors, onOpenPin }: {
   places: PinnedPlace[];
   liveMeetupIds: Set<number>;
   parkedAt: GeoPoint;
+  colors: ColorPalette;
   onOpenPin: (place: PinnedPlace) => void;
 }) {
   const [slotCount, setSlotCount] = useState(0);
@@ -89,8 +90,8 @@ function PinnedLayer({ places, liveMeetupIds, parkedAt, onOpenPin }: {
               key={`pin-approx-${place.id}`}
               center={{ latitude: place.latitude, longitude: place.longitude }}
               radius={APPROX_RADIUS_M}
-              fillColor="rgba(31,199,182,0.10)"
-              strokeColor="rgba(31,199,182,0.45)"
+              fillColor={withAlpha(colors.teal, 0.10)}
+              strokeColor={withAlpha(colors.teal, 0.45)}
               strokeWidth={1}
             />,
           );
@@ -274,8 +275,8 @@ function PeopleLayer({
               key={`approx-${u.id}`}
               center={{ latitude: u.latitude, longitude: u.longitude }}
               radius={APPROX_RADIUS_M}
-              fillColor="rgba(244,244,246,0.06)"
-              strokeColor="rgba(244,244,246,0.18)"
+              fillColor={withAlpha(colors.t1, 0.06)}
+              strokeColor={withAlpha(colors.t1, 0.18)}
               strokeWidth={1}
             />,
           );
@@ -300,7 +301,7 @@ function PeopleLayer({
         <Polyline
           key={leaderSlotIds[i]}
           coordinates={line ?? [displayCoords, displayCoords]}
-          strokeColor={line ? 'rgba(244,244,246,0.28)' : 'transparent'}
+          strokeColor={line ? withAlpha(colors.t1, 0.28) : 'transparent'}
           strokeWidth={1}
           lineDashPattern={[3, 3]}
           zIndex={2}
@@ -376,7 +377,7 @@ function PeopleLayer({
 /** Pins for things rather than people: story bubbles, club meetups, and the
  *  places the viewer saved for themselves. */
 function PinsLayer({
-  storiesByAuthor, clubMeetups, pinnedPlaces, displayCoords,
+  storiesByAuthor, clubMeetups, pinnedPlaces, displayCoords, colors,
   onOpenStories, onOpenMeetup, onOpenPin,
 }: {
   storiesByAuthor: Map<number, Story[]>;
@@ -384,6 +385,7 @@ function PinsLayer({
   pinnedPlaces: PinnedPlace[];
   /** Where an empty pin slot parks — see `PinnedMarker`. */
   displayCoords: GeoPoint;
+  colors: ColorPalette;
   onOpenStories: (stories: Story[]) => void;
   onOpenMeetup: (meetup: ClubMeetup) => void;
   onOpenPin: (place: PinnedPlace) => void;
@@ -453,6 +455,7 @@ function PinsLayer({
         places={pinnedPlaces}
         liveMeetupIds={liveMeetupIds}
         parkedAt={displayCoords}
+        colors={colors}
         onOpenPin={onOpenPin}
       />
     </>
@@ -560,6 +563,7 @@ export function MapCanvas({
         clubMeetups={clubMeetups}
         pinnedPlaces={pinnedPlaces}
         displayCoords={displayCoords}
+        colors={colors}
         onOpenStories={onOpenStories}
         onOpenMeetup={onOpenMeetup}
         onOpenPin={onOpenPin}

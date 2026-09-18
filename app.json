@@ -124,7 +124,20 @@
       ],
       "expo-web-browser",
       "expo-asset",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "./modules/approx-app-icon/app.plugin.js",
+        {
+          "dark": {
+            "ios": "./assets/images/icon-dark.png",
+            "android": {
+              "legacy": "./assets/images/icon-android-dark.png",
+              "foreground": "./assets/images/adaptive-icon-dark.png",
+              "backgroundColor": "#0A0A0B"
+            }
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

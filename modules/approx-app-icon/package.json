@@ -1,0 +1,7 @@
+{
+  "name": "approx-app-icon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Switches the Approx home-screen icon to match the in-app theme.",
+  "main": "index.ts"
+}

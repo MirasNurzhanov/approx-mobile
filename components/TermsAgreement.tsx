@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { fonts, lightColors as L } from '@/constants/theme';
+import { fonts, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { openDocument, refreshDocuments, useTerms } from '@/services/terms';
 
 // The agreement, in front of every door into the app.
@@ -30,6 +31,8 @@ interface Props {
 
 export function TermsAgreement({ accepted, onToggle, disabled = false }: Props) {
   const { documents } = useTerms();
+  const { colors: L } = useTheme();
+  const s = useMemo(() => makeStyles(L), [L]);
 
   useEffect(() => {
     // Public endpoint, safe before sign-in. Falls back to bundled URLs when
@@ -85,7 +88,7 @@ export function TermsAgreement({ accepted, onToggle, disabled = false }: Props) 
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   wrap: { gap: 8 },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, minHeight: 44 },
   pressed: { opacity: 0.7 },
@@ -95,13 +98,13 @@ const s = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 1.5,
     borderColor: L.border,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: L.surface,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 1,
   },
   boxChecked: { backgroundColor: L.teal, borderColor: L.teal },
-  tick: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', lineHeight: 16 },
+  tick: { color: L.bg, fontSize: 14, fontWeight: '900', lineHeight: 16 },
   label: {
     flex: 1,
     fontFamily: fonts.body,

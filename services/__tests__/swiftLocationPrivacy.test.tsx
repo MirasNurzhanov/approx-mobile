@@ -79,6 +79,8 @@ jest.mock('expo-video', () => ({
 }));
 
 jest.mock('expo', () => ({
+  // ThemeContext's app-icon module asks for its native side; there is none here.
+  requireOptionalNativeModule: () => null,
   useEvent: () => ({ currentTime: 0 }),
   useEventListener: jest.fn(),
 }));

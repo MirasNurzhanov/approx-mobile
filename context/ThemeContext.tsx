@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Appearance } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 
 import { colors as darkColors, lightColors, type ColorPalette } from '@/constants/theme';
+import { setAppIcon } from '@/modules/approx-app-icon';
 
 interface ThemeContextValue {
   colors: ColorPalette;
@@ -20,7 +21,15 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((stored) => {
-        if (stored === 'light' || stored === 'dark') setThemeMode(stored);
+        const saved = stored === 'light' || stored === 'dark' ? stored : null;
+        if (saved) setThemeMode(saved);
+        // Android only: bring back in step an icon that drifted — a theme
+        // chosen on a build that could not switch icons, say. Only ever the
+        // *stored* theme, never the 'light' this state starts with, and on
+        // Android a request is just recorded: the swap happens after the user
+        // has left the app. Not on iOS, where the change is immediate and
+        // announced by a system alert nobody should meet on launch.
+        if (Platform.OS === 'android') void setAppIcon(saved ?? 'light');
       })
       .catch(() => {});
   }, []);
@@ -33,6 +42,9 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
     const next = themeMode === 'dark' ? 'light' : 'dark';
     AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
     setThemeMode(next);
+    // The home-screen icon follows the theme. Best-effort and never throws;
+    // see modules/approx-app-icon for when each platform applies it.
+    void setAppIcon(next);
   };
 
   // `Appearance.setColorScheme` is what stops the *native* chrome — keyboards,
@@ -41,15 +53,12 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   // The app's theme is its own setting and deliberately does not follow the OS,
   // so without this a light app on a dark phone gets a black keyboard.
   //
-  // The home-screen icon deliberately does *not* follow the theme any more.
-  // Swapping it on Android means enabling a different `activity-alias`, which
-  // does not restart the app but force-stops it — `moveTaskToBack(true)`, then
-  // `finishAffinity()` + `killProcess()` half a second later. There is no
-  // window in which that is not a crash from the user's point of view, and it
-  // fired on launch: this effect ran with the default 'light' before
-  // AsyncStorage had returned the real theme, and Android reports a cold start
-  // (and any permission dialog) as AppState 'background', which is what the
-  // queue flushed on. A themed icon is not worth the session.
+  // The home-screen icon is *not* driven from here. An earlier version did,
+  // through `@mozzius/expo-dynamic-app-icon`, and it crashed sessions: this
+  // effect ran with the default 'light' before AsyncStorage had answered, and
+  // that library force-stops the app to apply a change. The icon now follows
+  // only an explicit toggle and the hydrated value above, through a module
+  // that never kills the app — see modules/approx-app-icon.
   useEffect(() => {
     // Guarded: react-native-web has no such method, and this runs on the web
     // build too.

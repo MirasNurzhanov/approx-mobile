@@ -29,7 +29,7 @@ import {
 import { useScrollNav } from '@/context/ScrollNavContext';
 import { useNavBadges } from '@/hooks/useNavBadges';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
-import { MAX_SCALE_FIXED, lightColors, type as typography } from '@/constants/theme';
+import { MAX_SCALE_FIXED, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
@@ -340,7 +340,7 @@ export function Speedometer({ highlightSection, standalone, compact = false }: S
             const badge = badgeFor(i, badges.chat, badges.alerts);
             const isHighlighted = highlightSection === s.name;
             const isDimmed = !!highlightSection && !isHighlighted;
-            const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.navOnActive : colors.navInactive;
+            const wedgeColor = isHighlighted ? colors.teal : isActive ? colors.navOnActive : colors.navInactive;
             return (
               <NavTrigger
                 key={s.name}
@@ -397,7 +397,7 @@ export function Speedometer({ highlightSection, standalone, compact = false }: S
               const badge = badgeFor(i, badges.chat, badges.alerts);
               const isHighlighted = highlightSection === s.name;
               const isDimmed = !!highlightSection && !isHighlighted;
-              const wedgeColor = isHighlighted ? lightColors.coral : isActive ? colors.navActive : colors.navInactive;
+              const wedgeColor = isHighlighted ? colors.teal : isActive ? colors.navActive : colors.navInactive;
               return (
                 // The collapsed bar has no visible text at all, so without the
                 // spoken label NavTrigger attaches it is five unnamed buttons

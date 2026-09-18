@@ -11,7 +11,7 @@
  * it would make the whole gate optional for anyone who signed in with Google.
  * The way out is to sign out, which the header offers.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -30,13 +30,16 @@ import DatePickerField from '@/components/DatePickerField';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
-import { fonts, lightColors as L, radius } from '@/constants/theme';
+import { fonts, radius, withAlpha, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 const BLOB = 300;
 
 export default function SocialBirthdayScreen() {
   const { top } = useSafeAreaInsets();
   const { confirmLogout } = useAuth();
+  const { colors: L } = useTheme();
+  const s = useMemo(() => makeStyles(L), [L]);
   const [dob, setDob] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -109,7 +112,7 @@ export default function SocialBirthdayScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: L.bg },
 
   blobTL: {
@@ -119,7 +122,7 @@ const s = StyleSheet.create({
     width: BLOB,
     height: BLOB,
     borderRadius: BLOB / 2,
-    backgroundColor: L.surface2,
+    backgroundColor: L.tealTint,
   },
   blobBR: {
     position: 'absolute',
@@ -128,7 +131,7 @@ const s = StyleSheet.create({
     width: BLOB,
     height: BLOB,
     borderRadius: BLOB / 2,
-    backgroundColor: '#E8E4F5',
+    backgroundColor: withAlpha(L.purple, 0.16),
   },
 
   content: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 32, gap: 24 },

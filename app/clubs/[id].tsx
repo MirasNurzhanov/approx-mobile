@@ -3,7 +3,9 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -33,6 +35,9 @@ interface InviteUser {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+/** The server's minimum username-search length (users.views.MIN_SEARCH_LENGTH). */
+const MIN_INVITE_QUERY = 2;
+
 function roleBadge(role: ClubRole) {
   if (role === 'owner') return '👑';
   return '';
@@ -178,11 +183,12 @@ function MembersSection({ members, canManage, isCreator, currentUserId, onInvite
   );
 }
 
-function InviteModal({ visible, query, results, searching, invitingIds, invitedIds, bottom, onQueryChange, onClearQuery, onInvite, onDismiss }: {
+function InviteModal({ visible, query, results, searching, searchFailed, invitingIds, invitedIds, bottom, onQueryChange, onClearQuery, onInvite, onDismiss }: {
   visible: boolean;
   query: string;
   results: InviteUser[];
   searching: boolean;
+  searchFailed: boolean;
   invitingIds: Set<number>;
   invitedIds: Set<number>;
   bottom: number;
@@ -201,8 +207,17 @@ function InviteModal({ visible, query, results, searching, invitingIds, invitedI
       onRequestClose={onDismiss}
     >
       {/* One container for the backdrop and the sheet, so a screen reader stays
-          inside the modal and can still reach the backdrop's close. */}
-      <View style={{ flex: 1 }} accessibilityViewIsModal>
+          inside the modal and can still reach the backdrop's close.
+
+          It is also what lifts the sheet above the keyboard. The sheet sits at
+          the bottom and the search field opens focused, so without this the
+          keyboard covered the field and every result under it — typing a name
+          showed nothing, and there was no Invite button anyone could reach. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        accessibilityViewIsModal
+      >
         <Pressable
           style={styles.modalBackdrop}
           onPress={onDismiss}
@@ -264,11 +279,15 @@ function InviteModal({ visible, query, results, searching, invitingIds, invitedI
                 </View>
               )}
             />
-          ) : query.length > 0 ? (
+          ) : searchFailed ? (
+            <Text style={styles.inviteEmpty}>Couldn’t search right now. Check your connection and try again.</Text>
+          ) : query.trim().length > 0 && query.trim().length < MIN_INVITE_QUERY ? (
+            <Text style={styles.inviteEmpty}>Type at least {MIN_INVITE_QUERY} characters.</Text>
+          ) : query.trim().length > 0 ? (
             <Text style={styles.inviteEmpty}>No users found.</Text>
           ) : null}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -286,45 +305,70 @@ function useClubInvite(clubId: number, members: ClubMember[]) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<InviteUser[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
   const [invitingIds, setInvitingIds] = useState<Set<number>>(new Set());
   const [invitedIds, setInvitedIds] = useState<Set<number>>(new Set());
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The query the list should be showing. A slow response for "mi" that lands
+  // after the one for "miras" would otherwise replace the right results.
+  const latestQuery = useRef('');
+
+  useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current); }, []);
 
   async function search(q: string) {
     setSearching(true);
+    setSearchFailed(false);
     try {
       const { data } = await api.get<InviteUser[]>(`/api/users/search/?q=${encodeURIComponent(q)}`);
+      if (latestQuery.current !== q) return;
       const memberIds = new Set(members.map((m) => m.user.id));
-      setResults(data.filter((u) => !memberIds.has(u.id)));
+      setResults((Array.isArray(data) ? data : []).filter((u) => !memberIds.has(u.id)));
     } catch {
+      if (latestQuery.current !== q) return;
       setResults([]);
+      setSearchFailed(true);
     }
-    // Always reached — the `catch` just empties the list — so this clears the
-    // spinner without a `finally`, which React Compiler cannot compile.
+    // Reached unless a newer query took over, which owns the spinner now. Not a
+    // `finally`, which React Compiler cannot compile.
     setSearching(false);
   }
 
   function onQueryChange(text: string) {
     setQuery(text);
     if (debounce.current) clearTimeout(debounce.current);
-    if (!text.trim()) { setResults([]); return; }
-    debounce.current = setTimeout(() => search(text.trim()), 350);
+    const q = text.trim();
+    latestQuery.current = q;
+    setSearchFailed(false);
+    // The server answers nothing below its minimum, which used to read as
+    // "No users found" for a name that exists. The modal says what is missing
+    // instead, and no request goes out.
+    if (q.length < MIN_INVITE_QUERY) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    debounce.current = setTimeout(() => search(q), 350);
   }
 
   function clearQuery() {
+    if (debounce.current) clearTimeout(debounce.current);
+    latestQuery.current = '';
     setQuery('');
     setResults([]);
+    setSearching(false);
+    setSearchFailed(false);
   }
 
   async function onInvite(user: InviteUser) {
     setInvitingIds((prev) => new Set(prev).add(user.id));
     try {
       // An invitation waits for their answer, so the roster does not change yet.
+      // 201 is a new invitation and 200 one that was already waiting; both mean
+      // this person has been asked.
       await clubsApi.invite(clubId, user.id);
       setInvitedIds((prev) => new Set(prev).add(user.id));
     } catch (e: any) {
-      const detail = e?.response?.status === 404 ? 'This person can’t be invited.' : e?.response?.data?.detail;
-      Alert.alert('Error', detail ?? 'Could not invite user.');
+      Alert.alert('Could not invite', inviteErrorMessage(e));
     }
     // Reached on both paths: the `catch` alerts and stops there.
     setInvitingIds((prev) => { const s = new Set(prev); s.delete(user.id); return s; });
@@ -338,6 +382,7 @@ function useClubInvite(clubId: number, members: ClubMember[]) {
       query,
       results,
       searching,
+      searchFailed,
       invitingIds,
       invitedIds,
       onQueryChange,
@@ -346,6 +391,17 @@ function useClubInvite(clubId: number, members: ClubMember[]) {
       onDismiss: () => { setVisible(false); clearQuery(); },
     },
   };
+}
+
+/** What to tell an owner whose invitation did not go through. */
+function inviteErrorMessage(e: any): string {
+  const status = e?.response?.status;
+  const detail = e?.response?.data?.detail;
+  if (status === 404) return 'This person can’t be invited.';
+  if (status === 429) return 'You’ve sent a lot of invitations and requests recently. Try again later.';
+  if (typeof detail === 'string' && detail) return detail;
+  if (!e?.response) return 'Check your connection and try again.';
+  return 'Something went wrong. Try again.';
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -440,7 +496,9 @@ function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: strin
   // club.creator may come back as a bare id or a nested { id, username } object
   const creatorId = (club?.creator as any)?.id ?? club?.creator;
   const isCreator = (!!creatorId && Number(creatorId) === Number(currentUserId)) || fromCreate === '1';
-  const canManage = isCreator;
+  // Inviting is an owner's right on the server, not only the creator's, so a
+  // promoted owner gets the button too.
+  const canManage = isCreator || club?.my_role === 'owner' || memberRecord?.role === 'owner';
 
   // ── Join / Leave ──────────────────────────────────────────────────────────
   async function handleJoin() {

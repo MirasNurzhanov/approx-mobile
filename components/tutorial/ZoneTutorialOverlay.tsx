@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { useNavHeight } from '@/hooks/useNavMetrics';
+import { useTheme } from '@/context/ThemeContext';
 import { fonts, lightColors, radius } from '@/constants/theme';
 
 /**
@@ -33,6 +34,10 @@ export function ZoneTutorialOverlay({
   // a bit of extra gap, an underestimate is a panel sitting on the thing it is
   // pointing at.
   const navHeight = useNavHeight();
+  // The banner is the accent of the theme the app is in — coral in light mode,
+  // teal in dark — with the theme's background as its ink, the pairing every
+  // primary button uses.
+  const { colors } = useTheme();
 
   return (
     <Modal
@@ -44,8 +49,8 @@ export function ZoneTutorialOverlay({
       onRequestClose={onDismiss}
     >
       <View style={[StyleSheet.absoluteFill, styles.root]} accessible accessibilityViewIsModal>
-        <View style={[styles.banner, { top: top + 12 }]}>
-          <Text style={styles.bannerText}>
+        <View style={[styles.banner, { top: top + 12, backgroundColor: colors.teal }]}>
+          <Text style={[styles.bannerText, { color: colors.bg }]}>
             🎵 Manage your music zone and who can see you in Settings
           </Text>
         </View>
@@ -77,18 +82,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: radius.l,
-    backgroundColor: lightColors.coral,
   },
   bannerText: {
     fontFamily: fonts.body,
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
-    // The banner itself is coral, not the scrim — its own text needs the
-    // light palette's background colour for the same reason the panel text
-    // below needs it against the scrim: guaranteed contrast whatever theme
-    // the app is in.
-    color: lightColors.bg,
   },
   panel: {
     position: 'absolute',
@@ -103,6 +102,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 22,
     textAlign: 'center',
+    // Light ink in both themes on purpose: this sits on the black scrim, not
+    // on a themed surface.
     color: lightColors.bg,
   },
   buttonRow: {

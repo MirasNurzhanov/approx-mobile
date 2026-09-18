@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -22,19 +22,22 @@ import { loginRequest } from '@/services/auth';
 import { runBusy } from '@/services/busy';
 import { BASE_URL } from '@/services/api';
 import { ACCEPT_TERMS_PAYLOAD } from '@/services/terms';
-import { fonts, lightColors as L, radius } from '@/constants/theme';
+import { fonts, radius, withAlpha, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 const BLOB = 300;
 
 type FieldErrors = Record<string, string[]>;
 
-// ─── Shared light-themed input (always cream/white palette) ───────────────────
+// ─── Shared themed input ──────────────────────────────────────────────────────
 
 function AuthInput({ label, error, style, onFocus, onBlur, ...rest }: {
   label?: string;
   error?: string;
 } & TextInputProps) {
   const [focused, setFocused] = useState(false);
+  const { colors: L } = useTheme();
+  const ai = useMemo(() => makeInputStyles(L), [L]);
   return (
     <View style={ai.wrapper}>
       {label ? <Text style={ai.label}>{label}</Text> : null}
@@ -51,7 +54,7 @@ function AuthInput({ label, error, style, onFocus, onBlur, ...rest }: {
   );
 }
 
-const ai = StyleSheet.create({
+const makeInputStyles = (L: ColorPalette) => StyleSheet.create({
   wrapper: { gap: 4 },
   label: { fontFamily: fonts.body, fontSize: 13, fontWeight: '500', color: L.t2 },
   input: {
@@ -75,6 +78,8 @@ const ai = StyleSheet.create({
 
 export default function RegisterScreen() {
   const { top } = useSafeAreaInsets();
+  const { colors: L } = useTheme();
+  const rs = useMemo(() => makeStyles(L), [L]);
   const [username,        setUsername]        = useState('');
   const [email,           setEmail]           = useState('');
   const [dob,             setDob]             = useState('');
@@ -268,14 +273,14 @@ export default function RegisterScreen() {
   );
 }
 
-const rs = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: L.bg },
 
   terms: { marginTop: 20, marginBottom: 4 },
   termsError: {
     fontFamily: fonts.body,
     fontSize: 12,
-    color: '#C0392B',
+    color: L.red,
     marginTop: 6,
     paddingLeft: 32,
   },
@@ -287,7 +292,7 @@ const rs = StyleSheet.create({
     width: BLOB,
     height: BLOB,
     borderRadius: BLOB / 2,
-    backgroundColor: L.surface2,
+    backgroundColor: L.tealTint,
   },
   blobBR: {
     position: 'absolute',
@@ -296,7 +301,7 @@ const rs = StyleSheet.create({
     width: BLOB,
     height: BLOB,
     borderRadius: BLOB / 2,
-    backgroundColor: '#E8E4F5',
+    backgroundColor: withAlpha(L.purple, 0.16),
   },
 
   container: {

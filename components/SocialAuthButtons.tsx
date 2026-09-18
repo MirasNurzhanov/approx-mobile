@@ -35,11 +35,12 @@
  *                 localise, so nothing regresses — but the accessibility label
  *                 below is now the only wording, and it is English-only.
  *   recognition   Apple asks that a custom button still read instantly as a
- *                 Sign in with Apple button. Black circle, white mark, sat
- *                 next to Google under "or continue with" is the conventional
- *                 form of exactly that.
+ *                 Sign in with Apple button. Black circle, white mark (white
+ *                 circle, black mark in dark mode, Apple's dark-background
+ *                 style), sat next to Google under "or continue with" is the
+ *                 conventional form of exactly that.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -61,7 +62,8 @@ import {
   SocialSignInCancelled,
   SocialSignInError,
 } from '@/services/socialAuth';
-import { fonts, lightColors as L } from '@/constants/theme';
+import { fonts, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 /** Diameter. Comfortably past the 44pt minimum touch target, and large enough
  *  that a 24pt mark sits in it with room rather than filling it. */
@@ -121,6 +123,11 @@ export default function SocialAuthButtons({
   acceptedTerms?: boolean;
 }) {
   const { completeSocialSignIn } = useAuth();
+  const { colors: L, themeMode } = useTheme();
+  const dark = themeMode === 'dark';
+  const s = useMemo(() => makeStyles(L, dark), [L, dark]);
+  // Apple's dark-background style is the white button with a black mark.
+  const appleInk = dark ? '#000000' : '#FFFFFF';
   const [pending, setPending] = useState<'google' | 'apple' | null>(null);
   // Async, and iOS-only, so it starts false and the button appears once the
   // answer is in. Anything else flashes a button on Android for one frame.
@@ -216,8 +223,8 @@ export default function SocialAuthButtons({
             accessibilityState={{ disabled: busy, busy: pending === 'apple' }}
           >
             {pending === 'apple'
-              ? <ActivityIndicator size="small" color="#FFFFFF" />
-              : <Ionicons name="logo-apple" size={26} color="#FFFFFF" style={s.appleGlyph} />}
+              ? <ActivityIndicator size="small" color={appleInk} />
+              : <Ionicons name="logo-apple" size={26} color={appleInk} style={s.appleGlyph} />}
           </Pressable>
         ) : null}
       </View>
@@ -225,7 +232,7 @@ export default function SocialAuthButtons({
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette, dark: boolean) => StyleSheet.create({
   wrap: { gap: 12 },
 
   dividerRow: {
@@ -255,15 +262,15 @@ const s = StyleSheet.create({
   },
 
   googleCircle: {
-    // White, per Google's light-theme spec — the mark is only permitted on
-    // white or on Google Blue, so the cream page background is not an option
-    // and the circle has to carry its own fill.
-    backgroundColor: '#FFFFFF',
+    // Google's own button themes: white with a light stroke on light pages,
+    // #131314 with an #8E918F stroke on dark ones. The mark keeps its colours
+    // in both, so the circle carries its own fill rather than the page's.
+    backgroundColor: dark ? '#131314' : '#FFFFFF',
     borderWidth: 1,
-    borderColor: L.border,
+    borderColor: dark ? '#8E918F' : L.border,
   },
 
-  appleCircle: { backgroundColor: '#000000' },
+  appleCircle: { backgroundColor: dark ? '#FFFFFF' : '#000000' },
   /** The Apple mark's leaf puts its optical centre below its bounding-box
    *  centre, so a glyph centred by geometry reads as sitting low. */
   appleGlyph: { marginTop: -2 },

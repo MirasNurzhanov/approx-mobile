@@ -1,20 +1,14 @@
 import { router } from 'expo-router';
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApproxMark } from '@/components/ui/ApproxMark';
-import { fonts, radius } from '@/constants/theme';
+import { fonts, radius, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
-const LIGHT = {
-  bg:     '#faf9f5',
-  t1:     '#2D2A22',
-  t2:     '#6B6455',
-  teal:   '#E8714A',
-  border: '#E8E4DA',
-} as const;
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: LIGHT.bg },
+const makeStyles = (c: ColorPalette) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
   hero: {
     flex: 1,
     alignItems: 'center',
@@ -25,7 +19,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 48,
-    color: LIGHT.t1,
+    color: c.t1,
     letterSpacing: 48 * 0.34,
     paddingLeft: 48 * 0.34,
   },
@@ -35,7 +29,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   btnPrimary: {
-    backgroundColor: LIGHT.teal,
+    backgroundColor: c.teal,
     borderRadius: radius.m,
     borderWidth: 1,
     borderColor: 'transparent',
@@ -47,7 +41,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderRadius: radius.m,
     borderWidth: 1,
-    borderColor: LIGHT.border,
+    borderColor: c.border,
     paddingVertical: 17,
     alignItems: 'center',
     justifyContent: 'center',
@@ -56,23 +50,27 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontWeight: '600',
     fontSize: 17,
-    color: LIGHT.bg,
+    color: c.bg,
   },
   btnLabelGhost: {
     fontFamily: fonts.body,
     fontWeight: '600',
     fontSize: 17,
-    color: LIGHT.t1,
+    color: c.t1,
   },
   pressed: { opacity: 0.75 },
 });
 
 export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
+  // The screen a signed-out user lands on, so it has to match the theme they
+  // signed out of.
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.hero}>
-        <ApproxMark size={80} color={LIGHT.teal} />
+        <ApproxMark size={80} color={colors.teal} />
         <Text style={styles.wordmark}>APPROX</Text>
       </View>
 

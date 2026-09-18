@@ -13,6 +13,7 @@ declare module 'react-test-renderer' {
     type: unknown;
     props: Record<string, any>;
     children: (ReactTestInstance | string)[];
+    parent: ReactTestInstance | null;
     findAll(predicate: (instance: ReactTestInstance) => boolean, options?: { deep: boolean }): ReactTestInstance[];
     findAllByType(type: unknown): ReactTestInstance[];
     findByType(type: unknown): ReactTestInstance;

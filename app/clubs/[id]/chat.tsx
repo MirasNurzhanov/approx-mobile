@@ -266,10 +266,20 @@ const makeDtStyles = (colors: ColorPalette) => StyleSheet.create({
 });
 
 // ─── ProposalCard ─────────────────────────────────────────────────────────────
-const STATUS_COLORS: Record<ProposalStatus, { bg: string; text: string }> = {
-  pending:  { bg: '#FEF3C7', text: '#92400E' },
-  approved: { bg: '#D1FAE5', text: '#065F46' },
-  rejected: { bg: '#FEE2E2', text: '#991B1B' },
+// Pale chips with dark ink on the light theme; on the dark theme the same hues
+// as a faint tint with light ink, so a card on near-black does not carry three
+// glaring pastel pills.
+const STATUS_COLORS: Record<'light' | 'dark', Record<ProposalStatus, { bg: string; text: string }>> = {
+  light: {
+    pending:  { bg: '#FEF3C7', text: '#92400E' },
+    approved: { bg: '#D1FAE5', text: '#065F46' },
+    rejected: { bg: '#FEE2E2', text: '#991B1B' },
+  },
+  dark: {
+    pending:  { bg: 'rgba(245,158,11,0.16)', text: '#FCD34D' },
+    approved: { bg: 'rgba(16,185,129,0.16)', text: '#6EE7B7' },
+    rejected: { bg: 'rgba(239,68,68,0.16)',  text: '#FCA5A5' },
+  },
 };
 
 function ProposalCard({
@@ -293,9 +303,10 @@ function ProposalCard({
   onDelete: (id: number) => void;
   actioningId: number | null;
 }) {
-  const { colors } = useTheme();
+  const { colors, themeMode } = useTheme();
   const cardStyles = makeCardStyles(colors);
-  const statusColor = STATUS_COLORS[proposal.status] ?? STATUS_COLORS.pending;
+  const statusPalette = STATUS_COLORS[themeMode === 'dark' ? 'dark' : 'light'];
+  const statusColor = statusPalette[proposal.status] ?? statusPalette.pending;
   const isActioning = actioningId === proposal.id;
   const canDelete = viewerIsOwner || viewerIsProposer;
 

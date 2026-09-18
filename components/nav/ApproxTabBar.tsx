@@ -23,7 +23,7 @@ import { useScrollNav } from '@/context/ScrollNavContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useNavBadges } from '@/hooks/useNavBadges';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
-import { MAX_SCALE_FIXED, lightColors, type as typography, withAlpha } from '@/constants/theme';
+import { MAX_SCALE_FIXED, type as typography, withAlpha } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 
 const FADE = { duration: 220, easing: Easing.out(Easing.cubic) };
@@ -150,14 +150,15 @@ export function ApproxTabBar({ highlightSection, standalone }: ApproxTabBarProps
             const isHighlighted = highlightSection === s.name;
             const isDimmed = !!highlightSection && !isHighlighted;
             // The highlighted state overrides "active": a tutorial pointing
-            // at Settings still pulses coral even if Settings is the screen
-            // you are already on.
+            // at Settings still pulses in the accent even if Settings is the
+            // screen you are already on. The theme's accent — coral in light
+            // mode, teal in dark — not a fixed coral.
             const showActiveFill = isActive && !isHighlighted;
             // Icon and label now share one filled section rather than a pill
             // wrapping just the icon, so both need the fill's contrast colour
             // rather than the bar-background one the label used to sit on.
             const contentColor = isHighlighted
-              ? lightColors.coral
+              ? colors.teal
               : showActiveFill
                 ? colors.navOnActive
                 : colors.navInactive;
@@ -175,7 +176,7 @@ export function ApproxTabBar({ highlightSection, standalone }: ApproxTabBarProps
                   style={[
                     styles.sectionFill,
                     showActiveFill && { backgroundColor: colors.navActive },
-                    isHighlighted && { backgroundColor: withAlpha(lightColors.coral, 0.18) },
+                    isHighlighted && { backgroundColor: withAlpha(colors.teal, 0.18) },
                   ]}
                 >
                   <View style={styles.iconWrap}>

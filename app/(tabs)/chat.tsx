@@ -665,7 +665,7 @@ function ClubsTab({ myClubs, discoverClubs, clubPlace, loadingClubs, refreshingP
       }
     >
       <Pressable style={styles.createClubBtn} onPress={onCreateClub}>
-        <Ionicons name="add-circle-outline" size={18} color="#ffffff" />
+        <Ionicons name="add-circle-outline" size={18} color={colors.bg} />
         <Text style={styles.createClubBtnText}>Create Club</Text>
       </Pressable>
 
@@ -1019,8 +1019,25 @@ function useChatAlerts({ alerts, setAlerts, fetchAll, router }: {
       triggerNearbyRefresh();
       // Accepting a Hi adds a connection, so the list behind this tab is stale.
       fetchAll();
-    } catch (e) {
+      // Accepting a club invitation is joining the club: open it, which is
+      // where the new member wants to be and what proves the join landed.
+      if (req.kind === 'club' && action === 'accept' && req.club) {
+        router.push({ pathname: '/clubs/[id]', params: { id: req.club.id } } as any);
+      }
+    } catch (e: any) {
       console.warn(`[Alerts] ${req.kind} ${action} failed`);
+      // A silent failure reads as a button that does nothing. A 404 means the
+      // request is no longer answerable — withdrawn, the club deleted, or a
+      // block since — so it leaves the list; anything else can be retried.
+      if (e?.response?.status === 404) {
+        setAlerts((prev) => ({
+          ...prev,
+          requests: prev.requests.filter((r) => !(r.id === req.id && r.kind === req.kind)),
+        }));
+        Alert.alert('No longer available', 'This request can’t be answered any more.');
+      } else {
+        Alert.alert('Something went wrong', 'Check your connection and try again.');
+      }
     }
     // Runs on both paths: the `catch` only logs, so nothing escapes it.
     setActioning((prev) => { const next = { ...prev }; delete next[key]; return next; });
@@ -1616,7 +1633,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#E8714A',
+    // The theme's accent — coral in light mode, teal in dark — like every
+    // other primary button. A literal coral here stayed orange in dark mode.
+    backgroundColor: colors.teal,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 13,
@@ -1626,7 +1645,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 15,
     fontWeight: '600',
-    color: '#ffffff',
+    color: colors.bg,
   },
 
   clubsSectionLabel: {

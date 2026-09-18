@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
 
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import { hasSeenOnboarding } from '@/services/onboarding';
 
 // Where the app opens. Three destinations, and the distinction between the last
@@ -26,6 +27,7 @@ import { hasSeenOnboarding } from '@/services/onboarding';
 // was never visible before social sign-in existed.
 export default function Index() {
   const { isAuthenticated, isLoading } = useAuth();
+  const { colors } = useTheme();
   const decided = useRef(false);
 
   useEffect(() => {
@@ -54,5 +56,5 @@ export default function Index() {
     return () => { cancelled = true; };
   }, [isAuthenticated, isLoading]);
 
-  return <View style={{ flex: 1, backgroundColor: '#faf9f5' }} />;
+  return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 }

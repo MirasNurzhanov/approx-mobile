@@ -18,6 +18,7 @@ declare module 'react-test-renderer' {
     findAllByType(type: unknown): ReactTestInstance[];
     findByType(type: unknown): ReactTestInstance;
     findByProps(props: Record<string, unknown>): ReactTestInstance;
+    findAllByProps(props: Record<string, unknown>): ReactTestInstance[];
   }
 
   /** A rendered host element, as `toJSON` reports it. */

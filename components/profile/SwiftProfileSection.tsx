@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -9,8 +8,17 @@ import { useTheme } from '@/context/ThemeContext';
 import { creatorSwiftLabel } from '@/services/swiftCreator';
 import type { Swift } from '@/services/swifts';
 import { useCreatorSwifts } from './useCreatorSwifts';
-import { useSavedSwifts } from './useSavedSwifts';
 
+/**
+ * The owner's three doors: what their uploads did, a new one, and the private
+ * shortlist.
+ *
+ * Saved is a link rather than a tab in the gallery below, and that is the whole
+ * point of it being here. A shortlist is other people's videos; showing it
+ * inside the profile's own gallery meant that watching the feed and saving
+ * something put another creator's video on your profile page. The page is one
+ * person's uploads, so the shortlist gets its own screen.
+ */
 export function SwiftCreatorActions() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -21,6 +29,9 @@ export function SwiftCreatorActions() {
     </Pressable>
     <Pressable style={styles.action} onPress={() => router.push('/swifts/compose')} accessibilityRole="button" accessibilityLabel="Upload a Swift">
       <SwiftPlusIcon size={18} color={colors.teal} /><Text style={styles.actionText}>Upload</Text>
+    </Pressable>
+    <Pressable testID="swift-saved-link" style={styles.action} onPress={() => router.push('/swifts/saved')} accessibilityRole="button" accessibilityLabel="Saved Swifts, only you can see these">
+      <IconSwift size={18} color={colors.teal} /><Text style={styles.actionText}>Saved</Text>
     </Pressable>
   </View>;
 }
@@ -47,42 +58,6 @@ export function SwiftProfileTile({ swift }: { swift: Swift }) {
   </Pressable>;
 }
 
-/** Which list the Swifts section is showing. */
-type SwiftTab = 'mine' | 'saved';
-
-/**
- * Mine / Saved, and only on your own profile.
- *
- * A shortlist is private, so there is nothing to switch between when looking at
- * somebody else — a visitor sees the single unlabelled gallery they always saw,
- * with no hint that the other tab exists.
- */
-function SwiftTabs({ tab, onChange, savedCount }: {
-  tab: SwiftTab; onChange: (next: SwiftTab) => void; savedCount: number;
-}) {
-  const { colors } = useTheme();
-  const styles = makeStyles(colors);
-  return <View style={styles.tabs} accessibilityRole="tablist">
-    {([['mine', 'Mine'], ['saved', 'Saved']] as const).map(([key, label]) => {
-      const active = tab === key;
-      const withCount = key === 'saved' && savedCount > 0;
-      return <Pressable
-        key={key}
-        testID={`swift-tab-${key}`}
-        onPress={() => onChange(key)}
-        style={[styles.tab, active && styles.tabActive]}
-        accessibilityRole="tab"
-        accessibilityState={{ selected: active }}
-        accessibilityLabel={withCount ? `${label}, ${savedCount}` : label}
-      >
-        <Text style={[styles.tabText, active && styles.tabTextActive]}>
-          {label}{withCount ? ` (${savedCount})` : ''}
-        </Text>
-      </Pressable>;
-    })}
-  </View>;
-}
-
 interface SwiftProfileProps {
   creatorId: number; canView: boolean; isOwner?: boolean; ghostMode?: boolean; refreshKey?: number;
 }
@@ -94,19 +69,16 @@ export function SwiftProfileSection(props: SwiftProfileProps) {
 }
 
 /** The owner profile shares one query between this gallery and its avatar ring. */
-export function SwiftProfileSectionView({ creatorId, canView, isOwner = false, ghostMode = false, refreshKey = 0, mine }: SwiftProfileProps & {
+export function SwiftProfileSectionView({ creatorId, canView, isOwner = false, ghostMode = false, mine }: SwiftProfileProps & {
   mine: ReturnType<typeof useCreatorSwifts>;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const router = useRouter();
-  const [tab, setTab] = useState<SwiftTab>('mine');
-  // Fetched only for the owner, and only once the Saved tab has actually been
-  // opened — a shortlist nobody looks at costs no request.
-  const saved = useSavedSwifts(isOwner && canView && tab === 'saved', 6, refreshKey);
-
-  const showingSaved = isOwner && tab === 'saved';
-  const { items, count, loading, error, refresh } = showingSaved ? saved : mine;
+  // One list, one author: whoever's profile this is. The saved shortlist used
+  // to sit here behind a tab, which put videos this person never made on their
+  // own profile page — see `SwiftCreatorActions`, which links to it instead.
+  const { items, count, loading, error, refresh } = mine;
 
   if (!canView || (mine.unavailable && !isOwner)) return null;
   return <View style={styles.section}>
@@ -114,27 +86,20 @@ export function SwiftProfileSectionView({ creatorId, canView, isOwner = false, g
       <View style={styles.titleRow}><IconSwift size={21} color={colors.teal} /><Text style={styles.title}>{isOwner ? 'My Swifts' : 'Swifts'}</Text></View>
       <Pressable
         style={styles.seeAll}
-        onPress={() => (showingSaved
-          ? router.push('/swifts/saved')
-          : router.push({ pathname: '/swifts/user/[id]', params: { id: creatorId } }))}
+        onPress={() => router.push({ pathname: '/swifts/user/[id]', params: { id: creatorId } })}
         accessibilityRole="button"
       >
         <Text style={styles.link}>See all{count > 0 ? ' (' + count + ')' : ''}</Text><IconChevron size={14} color={colors.teal} />
       </Pressable>
     </View>
-    {isOwner && <SwiftTabs tab={tab} onChange={setTab} savedCount={saved.count} />}
-    {/* Upload and Analytics belong to your own uploads, not to a shortlist of
-        other people's videos, so they go with the Mine tab. */}
-    {isOwner && !showingSaved && <SwiftCreatorActions />}
-    {isOwner && !showingSaved && ghostMode && <Text style={styles.body}>Your Swifts are hidden from others while Ghost Mode is on.</Text>}
+    {isOwner && <SwiftCreatorActions />}
+    {isOwner && ghostMode && <Text style={styles.body}>Your Swifts are hidden from others while Ghost Mode is on.</Text>}
     {loading ? <ActivityIndicator color={colors.teal} style={styles.message} /> : error ? <View style={styles.message}>
       <Text style={styles.body}>{error}</Text><Pressable onPress={() => { void refresh(); }} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
     </View> : items.length === 0 ? <View style={styles.message}>
       <IconSwift size={30} color={colors.t3} />
-      <Text style={styles.emptyTitle}>{showingSaved ? 'Nothing saved yet' : isOwner ? 'Your first Swift starts here' : 'No Swifts yet'}</Text>
-      <Text style={styles.body}>{showingSaved
-        ? 'Save a Swift and it waits here. Only you can see this list.'
-        : isOwner ? 'Your uploads appear here, including videos still being reviewed.' : 'Shared videos will appear here.'}</Text>
+      <Text style={styles.emptyTitle}>{isOwner ? 'Your first Swift starts here' : 'No Swifts yet'}</Text>
+      <Text style={styles.body}>{isOwner ? 'Your uploads appear here, including videos still being reviewed.' : 'Shared videos will appear here.'}</Text>
     </View> : <View style={styles.grid}>{items.map((swift) => <SwiftProfileTile key={swift.id} swift={swift} />)}</View>}
   </View>;
 }
@@ -146,11 +111,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   title: { fontFamily: fonts.display, fontSize: 20, fontWeight: '600', color: colors.t1 },
   seeAll: { flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 3 },
   link: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.teal, paddingVertical: 8 },
-  tabs: { flexDirection: 'row', gap: 6, backgroundColor: colors.surface, borderRadius: 999, padding: 4, marginBottom: 14 },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 38, borderRadius: 999 },
-  tabActive: { backgroundColor: colors.tealTint },
-  tabText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.t2 },
-  tabTextActive: { color: colors.teal },
   actions: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   action: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7, minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: colors.tealLine, backgroundColor: colors.tealTint },
   actionText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.teal },

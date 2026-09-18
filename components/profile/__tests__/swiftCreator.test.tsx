@@ -104,6 +104,34 @@ it('renders the owner empty state and upload entry', async () => {
   expect(mockPush).toHaveBeenCalledWith('/swifts/compose');
 });
 
+it('shows one author on a profile and keeps the saved shortlist off it', async () => {
+  // Saving from the feed used to land other people's videos on your own
+  // profile, because the shortlist was a tab inside this gallery. It is a link
+  // to its own screen now, and the gallery is only ever the creator's uploads.
+  fetchMock.mockResolvedValue({ count: 2, results: [video(1), video(2)] });
+  await act(async () => { renderer = create(<SwiftProfileSection creatorId={22} canView isOwner />); });
+
+  const rendered = JSON.stringify(renderer!.toJSON());
+  expect(rendered).not.toContain('Nothing saved yet');
+  expect(renderer!.root.findAllByProps({ accessibilityRole: 'tab' })).toHaveLength(0);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock.mock.calls[0][0]).toBe(22);
+  // Only the creator endpoint is asked; nothing fetches a shortlist here.
+  expect(jest.mocked(api.get)).not.toHaveBeenCalledWith('/api/swifts/saved/', expect.anything());
+  expect(renderer!.root.findByProps({ testID: 'creator-swift-1' })).toBeDefined();
+  expect(renderer!.root.findByProps({ testID: 'creator-swift-2' })).toBeDefined();
+
+  act(() => renderer!.root.findByProps({ testID: 'swift-saved-link' }).props.onPress());
+  expect(mockPush).toHaveBeenCalledWith('/swifts/saved');
+});
+
+it("offers no saved shortlist on somebody else's profile", async () => {
+  fetchMock.mockResolvedValue({ count: 1, results: [video(1)] });
+  await act(async () => { renderer = create(<SwiftProfileSection creatorId={22} canView />); });
+  expect(renderer!.root.findAllByProps({ testID: 'swift-saved-link' })).toHaveLength(0);
+  expect(renderer!.root.findAllByProps({ accessibilityRole: 'tab' })).toHaveLength(0);
+});
+
 it('shares one request between the owner count and the gallery after profile verification', async () => {
   const page = deferred<SwiftPage>();
   fetchMock.mockReturnValueOnce(page.promise);

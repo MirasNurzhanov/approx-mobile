@@ -29,6 +29,7 @@ import { CHAT_SOCKET_LABEL, type ChatSocketStatus } from '@/services/chatSocket'
 import { catchUpHistory, mergeMessages } from '@/services/chatHistory';
 import { runBusy } from '@/services/busy';
 import { clubsApi } from '@/services/clubs';
+import { venuesApi } from '@/services/venues';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import {
   MAX_PINS, pinIdFor, pinMeetup, unpinPlace, useIsPinned,
@@ -46,6 +47,7 @@ import { useTheme } from '@/context/ThemeContext';
 type ProposalStatus = 'pending' | 'approved' | 'rejected';
 
 interface MeetupProposal {
+  meeting_point?: string;
   id: number;
   title: string;
   description?: string;
@@ -392,6 +394,7 @@ function ProposalCard({
           <Ionicons name="time-outline" size={13} color={colors.t3} />
           <Text style={cardStyles.metaText}>{fmtDateTime(proposal.event_datetime)}</Text>
         </View>
+        {!!proposal.meeting_point && <Text style={cardStyles.metaText}>{proposal.meeting_point}</Text>}
         {proposal.location_name ? (
           <View style={cardStyles.metaRow}>
             <Ionicons name="location-outline" size={13} color={colors.t3} />
@@ -726,7 +729,7 @@ function ClubChatInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
  *  leaves the first one's backdrop over the second. */
 function MeetupProposalModal({
   modalView, top, bottom,
-  propTitle, propDesc, propDateTime, propLocation,
+  propTitle, propDesc, propDateTime, propLocation, meetingPoint, onMeetingPointChange,
   gettingLocation, proposalSubmitting, mapRegion,
   onTitleChange, onDescChange, onDateTimeChange, onClearLocation,
   onCurrentLocation, onOpenMap, onBackToForm, onRegionChange,
@@ -736,6 +739,8 @@ function MeetupProposalModal({
   top: number;
   bottom: number;
   propTitle: string;
+  meetingPoint: string;
+  onMeetingPointChange: (value: string) => void;
   propDesc: string;
   propDateTime: Date;
   propLocation: { name: string; lat: number; lng: number } | null;
@@ -768,12 +773,13 @@ function MeetupProposalModal({
         // inside the proposal and can still reach the backdrop's close.
         <View style={{ flex: 1 }} accessibilityViewIsModal>
           <Pressable
+            testID="meetup-proposal-backdrop"
             style={styles.modalBackdrop}
             onPress={onDismiss}
             accessibilityRole="button"
             accessibilityLabel="Close"
           />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
+          <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
             <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHeaderRow}>
@@ -841,6 +847,13 @@ function MeetupProposalModal({
                     </Pressable>
                   </View>
                 )}
+
+                {!!propLocation && <>
+                  <Text style={styles.fieldLabel}>Meeting point (optional)</Text>
+                  <TextInput style={styles.fieldInput} value={meetingPoint} onChangeText={onMeetingPointChange}
+                    accessibilityLabel="Meeting point" placeholder="e.g. Main entrance, near the fountain"
+                    placeholderTextColor={colors.t3} maxLength={200} />
+                </>}
 
                 {/* Submit */}
                 <Pressable
@@ -1157,21 +1170,53 @@ function useClubChat(
  * socket like anyone else's. So it lives here rather than among the messaging
  * state it would otherwise be interleaved with.
  */
-function useMeetupProposal(
+export function useMeetupProposal(
   clubId: number,
   // Passed in rather than calling `usePermissionPrimer` again: two instances of
   // that hook in one screen means two Modals racing to present, and only one of
   // them is rendered. The screen owns the primer; this hook borrows its `ensure`.
   ensurePermission: (key: 'location') => Promise<boolean>,
+  venueId?: string,
+  venueRequest?: string,
 ) {
   const [modalView, setModalView] = useState<'proposal' | 'map' | null>(null);
   const [propTitle, setPropTitle] = useState('');
   const [propDesc, setPropDesc] = useState('');
   const [propDateTime, setPropDateTime] = useState<Date>(defaultProposalDate);
-  const [propLocation, setPropLocation] = useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [propLocation, setPropLocation] = useState<{ name: string; lat: number; lng: number; venue_id?: number } | null>(null);
+  const [meetingPoint, setMeetingPoint] = useState('');
   const [proposalSubmitting, setProposalSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const consumedVenue = useRef<string | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    if (!venueId) return;
+    const requestKey = `${clubId}|${venueId}|${venueRequest ?? ''}`;
+    if (consumedVenue.current === requestKey) return;
+    let active = true;
+    if (!/^[1-9]\d*$/.test(venueId) || !Number.isSafeInteger(Number(venueId))) {
+      consumedVenue.current = requestKey;
+      Alert.alert('Venue unavailable', 'Return to the map and choose a venue again.');
+      return;
+    }
+    venuesApi.get(Number(venueId)).then(({ data: venue }) => {
+      if (!active) return;
+      consumedVenue.current = requestKey;
+      setPropTitle(''); setPropDesc(''); setMeetingPoint('');
+      setPropDateTime(defaultProposalDate());
+      setPropLocation({ name: venue.name, lat: venue.latitude, lng: venue.longitude, venue_id: venue.id });
+      setMapRegion({ latitude: venue.latitude, longitude: venue.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+      setModalView('proposal');
+    }).catch(() => {
+      if (active) {
+        consumedVenue.current = requestKey;
+        Alert.alert('Venue unavailable', 'This place could not be loaded. Return to the map and try again.');
+      }
+    });
+    return () => { active = false; };
+  }, [clubId, venueId, venueRequest]));
 
   /** Best human-readable name for a point, falling back to the given label. */
   async function placeName(latitude: number, longitude: number, fallback: string) {
@@ -1222,13 +1267,16 @@ function useMeetupProposal(
     setPropDesc('');
     setPropDateTime(defaultProposalDate());
     setPropLocation(null);
+    setMeetingPoint('');
   }
 
   async function handleSubmit() {
+    if (submittingRef.current) return;
     if (!propTitle.trim()) {
       Alert.alert('Title required', 'Give your meetup a title.');
       return;
     }
+    submittingRef.current = true;
     setProposalSubmitting(true);
     await runBusy(async () => {
       await api.post(`/api/clubs/${clubId}/events/`, {
@@ -1238,9 +1286,11 @@ function useMeetupProposal(
         location_name: propLocation?.name,
         latitude: propLocation?.lat,
         longitude: propLocation?.lng,
+        venue_id: propLocation?.venue_id,
+        meeting_point: propLocation ? meetingPoint.trim() : '',
       });
       close();
-    }, () => setProposalSubmitting(false)).catch((e: any) =>
+    }, () => { submittingRef.current = false; setProposalSubmitting(false); }).catch((e: any) =>
       Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create proposal.'),
     );
   }
@@ -1254,20 +1304,22 @@ function useMeetupProposal(
       propDesc,
       propDateTime,
       propLocation,
+      meetingPoint,
+      onMeetingPointChange: setMeetingPoint,
       gettingLocation,
       proposalSubmitting,
       mapRegion,
       onTitleChange: setPropTitle,
       onDescChange: setPropDesc,
       onDateTimeChange: setPropDateTime,
-      onClearLocation: () => setPropLocation(null),
+      onClearLocation: () => { setPropLocation(null); setMeetingPoint(''); },
       onCurrentLocation: handleCurrentLocation,
       onOpenMap: () => setModalView('map'),
       onBackToForm: () => setModalView('proposal'),
       onRegionChange: setMapRegion,
       onConfirmMapLocation: confirmMapLocation,
       onSubmit: handleSubmit,
-      onDismiss: close,
+      onDismiss: () => { if (!submittingRef.current) close(); },
     },
   };
 }
@@ -1275,11 +1327,13 @@ function useMeetupProposal(
 export default function ClubChatScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { id, name, emblem, memberCount } = useLocalSearchParams<{
+  const { id, name, emblem, memberCount, venueId, venueRequest } = useLocalSearchParams<{
     id: string;
     name?: string;
     emblem?: string;
     memberCount?: string;
+    venueId?: string;
+    venueRequest?: string;
   }>();
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
@@ -1302,7 +1356,7 @@ export default function ClubChatScreen() {
 
   const [actioningEventId, setActioningEventId] = useState<number | null>(null);
 
-  const proposal = useMeetupProposal(clubId, ensurePermission);
+  const proposal = useMeetupProposal(clubId, ensurePermission, venueId, venueRequest);
   const chat = useClubChat(clubId, router, ensurePermission);
   const {
     messages, setMessages, text, setText, loading, socketStatus, loadingMore,
@@ -1530,8 +1584,10 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   sendBtnActive: { backgroundColor: colors.teal, borderColor: colors.teal },
 
   // Proposal modal
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalKav: { justifyContent: 'flex-end' },
+  // Independent of sheet height and keyboard padding: no undimmed gap above
+  // the sheet, around its rounded corners, or while the keyboard animates.
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalKav: { flex: 1, justifyContent: 'flex-end' },
   modalSheet: {
     backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
     paddingHorizontal: 20, maxHeight: '92%',

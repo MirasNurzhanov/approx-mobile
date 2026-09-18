@@ -32,6 +32,8 @@ interface SearchUser {
   shared_interests_count?: number;
   shared_interests?: { name: string; icon: string }[] | number;
   relationship?: Relationship;
+  /** Username search uses this field, unlike the nearby/map response. */
+  relationship_status?: 'friends' | 'pending_sent' | 'pending_received' | 'none';
   /** Absent when this viewer may not see it — render no indicator, not grey. */
   presence?: Presence;
 }
@@ -76,6 +78,8 @@ function ActionBtn({
       <Pressable
         style={({ pressed }) => [styles.actionBtn, styles.actionBtnGhost, pressed && styles.pressed]}
         onPress={onMessage}
+        accessibilityRole="button"
+        accessibilityLabel="Message"
         hitSlop={4}
       >
         <Text style={styles.actionBtnGhostText}>Message</Text>
@@ -95,6 +99,8 @@ function ActionBtn({
     <Pressable
       style={({ pressed }) => [styles.actionBtn, styles.actionBtnPrimary, pressed && styles.pressed]}
       onPress={onSendHi}
+      accessibilityRole="button"
+      accessibilityLabel="Hi"
       hitSlop={4}
     >
       <Text style={styles.actionBtnPrimaryText}>Hi</Text>
@@ -118,7 +124,7 @@ function UserCard({
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const rel = user.relationship ?? 'stranger';
+  const rel = user.relationship_status === 'friends' ? 'friend' : user.relationship ?? 'stranger';
   const count = sharedCount(user);
 
   return (

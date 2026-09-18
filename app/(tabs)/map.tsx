@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Pressable,
     Text,
     View,
 } from 'react-native';
@@ -44,6 +45,9 @@ import { MapCanvas } from '@/components/map/MapLayers';
 import { MapSheets } from '@/components/map/MapSheets';
 import { LocateButton, TopBar, MapPermissionGate, MapNotices, MapToasts } from '@/components/map/MapChrome';
 import { CreateStoryModal } from '@/components/map/CreateStoryModal';
+import { VenueSheet } from '@/components/map/VenueSheet';
+import { useMapVenues } from '@/hooks/useMapVenues';
+import type { Venue } from '@/services/venues';
 
 // ─── Where the pieces live ────────────────────────────────────────────────────
 // This file is the screen: its state, effects and the wiring between them.
@@ -75,6 +79,8 @@ import { CreateStoryModal } from '@/components/map/CreateStoryModal';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function MapScreen() {
+  const { venues, error: venueError, retry: retryVenues } = useMapVenues();
+  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
   const { colors, themeMode } = useTheme();
   // No wrapper: now that the screen's compile-blocking code has moved into
   // `useMapData`, React Compiler caches this and every `styles.*` read off it
@@ -263,7 +269,7 @@ export default function MapScreen() {
   // underneath is visible-but-dead rather than merely hidden.
   const chromeVisible =
     mapVisible && !selectedUser && !selectedMeetup && !selectedPin
-    && !storyViewer && !composerOpen;
+    && !storyViewer && !composerOpen && !selectedVenue;
 
   // The strip directly under the top bar, where the map's notices sit.
   const overlayTop = topInset + 52 + (awaitingFix ? 46 : 0);
@@ -313,6 +319,8 @@ export default function MapScreen() {
           storiesByAuthor={storiesByAuthor}
           clubMeetups={clubMeetups}
           pinnedPlaces={pinnedPlaces}
+          venues={venues}
+          onOpenVenue={setSelectedVenue}
           onMapLayout={onMapLayout}
           onRegionChangeComplete={onRegionChangeComplete}
           onPanDrag={() => stopFollowing('gesture')}
@@ -360,6 +368,16 @@ export default function MapScreen() {
         offsetNotice={!!overlays.chinaOffsetNotice && mapVisible}
         onOpenPrivacy={() => router.push('/privacy')}
       />
+
+      {venueError && chromeVisible && (
+        <Pressable onPress={retryVenues} accessibilityRole="button"
+          accessibilityLabel="Places unavailable. Retry loading venues"
+          style={{ position: 'absolute', top: overlayTop + 92, alignSelf: 'center',
+            backgroundColor: colors.bg, borderRadius: 12, padding: 10 }}>
+          <Text style={{ color: colors.t2 }}>Places unavailable · Tap to retry</Text>
+        </Pressable>
+      )}
+      <VenueSheet venue={selectedVenue} onClose={() => setSelectedVenue(null)} />
 
       <MapSheets
         sheetUser={sheetUser}

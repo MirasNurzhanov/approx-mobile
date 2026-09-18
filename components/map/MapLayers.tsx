@@ -5,6 +5,8 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import MapView, { Circle, Polygon, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { mapStyleFor } from '@/constants/mapStyle';
+import type { Venue } from '@/services/venues';
+import { VenueLayer } from './VenueMarker';
 import {
     isDrawable,
     SELF_KEY,
@@ -475,11 +477,13 @@ export function MapCanvas({
   mapRef, styles, themeMode, region, displayCoords, colors,
   overlays, slots, visibleNearby, motionTrails, reduceMotion,
   friendIds, connectionIds, selfProfile, selfZone, ghost,
-  storiesByAuthor, clubMeetups, pinnedPlaces,
+  storiesByAuthor, clubMeetups, pinnedPlaces, venues, onOpenVenue,
   onMapLayout, onRegionChangeComplete, onPanDrag, onLongPress,
   onOpenSheet, onZoomToCluster, onOpenStories, onOpenMeetup, onOpenPin,
 }: {
   mapRef: React.RefObject<MapView | null>;
+  venues: Venue[];
+  onOpenVenue: (venue: Venue) => void;
   styles: MapStyles;
   themeMode: string;
   region: Region | undefined;
@@ -528,6 +532,7 @@ export function MapCanvas({
       onRegionChangeComplete={onRegionChangeComplete}
       onLongPress={onLongPress}
     >
+      <VenueLayer venues={venues} parkedAt={displayCoords} onOpen={onOpenVenue} />
       <ZoneLayer
         musicZones={overlays.musicZones}
         musicBadges={slots.musicBadges}

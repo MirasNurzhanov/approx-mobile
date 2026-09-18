@@ -144,6 +144,7 @@ function MeetupSheet({
             <IconPeople size={14} color={colors.t3} />
             <Text style={styles.meetupDetailText}>Proposed by @{meetup.created_by.username}</Text>
           </View>
+          {!!meetup.meeting_point && <Text style={styles.meetupDescription}>Meeting point: {meetup.meeting_point}</Text>}
           {meetup.description ? (
             <Text style={styles.meetupDescription}>{meetup.description}</Text>
           ) : null}

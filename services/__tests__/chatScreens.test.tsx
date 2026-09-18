@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Jest factories run before imports. */
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { FlatList, Text } from 'react-native';
+import { FlatList, KeyboardAvoidingView, StyleSheet, Text } from 'react-native';
 import ClubChatScreen from '../../app/clubs/[id]/chat';
 import MessagesScreen from '../../app/messages/[id]';
 import type { ChatSocketStatus } from '../chatSocket';
@@ -87,4 +87,23 @@ it('DM screen exposes the exact failed bubble retry and older-page action', asyn
   const list = renderer!.root.findByType(FlatList);
   act(() => list.props.ListHeaderComponent.props.onPress()); expect(mockDM.loadOlder).toHaveBeenCalledTimes(1);
   expect(list.props.onViewableItemsChanged).toBe(mockDM.onViewableItemsChanged);
+});
+
+it('meetup proposal dims the entire modal independently of the sheet and keeps backdrop dismissal reachable', async () => {
+  mockPages.mockResolvedValue({ data: [] });
+  await act(async () => { renderer = create(<ClubChatScreen />); });
+  act(() => renderer!.root.findByProps({ accessibilityLabel: 'Propose a meetup' }).props.onPress());
+  const backdrop = renderer!.root.findByProps({ testID: 'meetup-proposal-backdrop' });
+  expect(StyleSheet.flatten(backdrop.props.style)).toEqual(expect.objectContaining({
+    position: 'absolute', top: 0, right: 0, bottom: 0, left: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  }));
+  const sheetContainer = renderer!.root.findAllByType(KeyboardAvoidingView)
+    .find(node => node.props.pointerEvents === 'box-none');
+  expect(sheetContainer).toBeDefined();
+  expect(StyleSheet.flatten(sheetContainer!.props.style)).toEqual(expect.objectContaining({
+    flex: 1, justifyContent: 'flex-end',
+  }));
+  act(() => backdrop.props.onPress());
+  expect(renderer!.root.findAll(node => node.props.testID === 'meetup-proposal-backdrop')).toHaveLength(0);
 });

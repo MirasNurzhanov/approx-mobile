@@ -69,13 +69,18 @@ export async function reportLocation(
   coords: Coordinates,
   speed?: number | null,
   accuracy?: number | null,
+  measuredAt?: number,
 ): Promise<boolean> {
   const payload = await prepareCoordinates(coords);
   if (!payload) return false;
+  // Do not turn a cached fix into a fresh server position on every map tick.
+  if (measuredAt !== undefined && (!Number.isFinite(measuredAt) ||
+    Date.now() - measuredAt > 120_000 || measuredAt > Date.now() + 5_000)) return false;
   // Absent rather than null when there is no estimate: the server treats a
   // missing speed as "no new information" and leaves the previous class alone,
   // which is the honest reading of a fix that could not measure it.
   const body: Record<string, unknown> = { ...payload };
+  if (measuredAt !== undefined) body.measured_at = new Date(measuredAt).toISOString();
   if (speed != null && speed >= 0) body.speed = speed;
   // How well the phone knows where it is. Unlike speed this is stored, because
   // club visibility turns on which district somebody is standing in and a fix

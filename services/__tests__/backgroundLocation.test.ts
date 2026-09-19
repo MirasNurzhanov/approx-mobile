@@ -42,6 +42,7 @@ function deliver(error: TaskManager.TaskManagerError | null, locations = [locati
 
 beforeEach(() => {
   jest.clearAllMocks();
+  location.timestamp = Date.now();
   Platform.OS = 'ios';
   jest.mocked(getCachedGhostMode).mockResolvedValue(false);
   jest.mocked(reportLocation).mockResolvedValue(true);
@@ -54,6 +55,28 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('background location task errors', () => {
+  it('does not infer entry from cached nearby users after an upload failure', async () => {
+    jest.mocked(reportLocation).mockRejectedValueOnce(new Error('offline'));
+    jest.mocked(api.get).mockResolvedValue({ data: [
+      { username: 'friend', distance_km: 0, music_zone_radius: 50, zone_audio_url: 'track' },
+    ] });
+    await deliver(null);
+    expect(api.get).not.toHaveBeenCalled();
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it('uses the newest measured fix even when the batch is out of order', async () => {
+    await deliver(null, [location, { ...location, timestamp: location.timestamp - 60_000 }]);
+    expect(reportLocation).toHaveBeenCalledWith(
+      { latitude: 43.25, longitude: 76.9 }, 1, 10, location.timestamp,
+    );
+  });
+
+  it('ignores batches without a valid measurement timestamp', async () => {
+    await deliver(null, [{ ...location, timestamp: NaN }]);
+    expect(reportLocation).not.toHaveBeenCalled();
+  });
+
   it.each([0, '0'])('handles iOS location-unknown code %p without a LogBox', async (code) => {
     await deliver({ code, message: 'Error Domain=kCLErrorDomain Code=0 "(null)"' });
 
@@ -73,9 +96,10 @@ describe('background location task errors', () => {
     expect(console.error).not.toHaveBeenCalled();
     expect(reportLocation).toHaveBeenCalledTimes(1);
     expect(reportLocation).toHaveBeenCalledWith(
-      { latitude: 43.25, longitude: 76.9 }, 1, 10,
+      { latitude: 43.25, longitude: 76.9 }, 1, 10, location.timestamp,
     );
-    expect(api.get).toHaveBeenCalledWith('/api/proximity/nearby/');
+    expect(api.get).not.toHaveBeenCalled();
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
   it.each([

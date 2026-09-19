@@ -140,7 +140,7 @@ async function currentCoords(): Promise<Fix | null> {
       accuracy: fix.coords.accuracy ?? null,
     };
     // Still best effort, and no longer load-bearing.
-    reportLocation(coords, null, coords.accuracy).catch(() => {});
+    reportLocation(coords, null, coords.accuracy, fix.timestamp).catch(() => {});
     return coords;
   } catch {
     return null;

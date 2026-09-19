@@ -103,6 +103,7 @@ export interface MapLocation {
   speedRef: React.RefObject<number | null>;
   /** Latest accepted fix's confidence radius in metres, or null if unknown. */
   accuracyRef: React.RefObject<number | null>;
+  fixTimestampRef: React.RefObject<number>;
   permState: PermissionState | null;
   setPermState: (state: PermissionState) => void;
   locationGranted: boolean;
@@ -564,6 +565,7 @@ export function useMapLocation(
     displayCoords,
     speedRef,
     accuracyRef,
+    fixTimestampRef: fixAtRef,
     permState,
     setPermState,
     locationGranted,

@@ -1,11 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
-import { api } from './api';
 import { reportLocation } from './location';
 import { getCachedGhostMode } from './privacy';
 
@@ -15,14 +12,6 @@ import { getCachedGhostMode } from './privacy';
 // calling it there is a native call the binary cannot actually service —
 // exactly the shape of crash that leaves no JS error to catch.
 const isExpoGo = Constants.appOwnership === 'expo';
-
-const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
-const ZONE_NOTIFICATION_COOLDOWN_MS = 30 * 60 * 1000;
-
-interface LastZoneNotified {
-  username: string;
-  timestamp: number;
-}
 
 export const BACKGROUND_LOCATION_TASK = 'aura-background-location';
 
@@ -46,7 +35,11 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
       console.error('[BG Location] task error:', error.message);
       return;
     }
-    const location = data?.locations?.at(-1);
+    const location = data?.locations?.reduce<Location.LocationObject | undefined>(
+      (latest, fix) => Number.isFinite(fix.timestamp) &&
+        (!latest || fix.timestamp > latest.timestamp) ? fix : latest,
+      undefined,
+    );
     if (!location) return;
 
     // Ghost Mode means there is nothing this task can usefully do. Checked
@@ -71,6 +64,7 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         },
         location.coords.speed,
         location.coords.accuracy,
+        location.timestamp,
       );
       if (!sent) {
         console.log('[BG Location] sharing paused, nothing sent');
@@ -80,65 +74,9 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
       console.log('[BG Location] patch failed:', e?.response?.status);
     }
 
-    try {
-      const { data: nearbyUsers } = await api.get<
-        {
-          id: number; username: string; distance_km?: number;
-          zone_audio_url?: string | null;
-          music_zone_radius?: number;
-        }[]
-      >('/api/proximity/nearby/');
+    // Entry alerts are server-only: nearby map distances may be stale or
+    // privacy-adjusted and cannot establish physical presence in a music zone.
 
-      // "You entered a zone — tap to listen", so this has to agree with what is
-      // actually audible. Two rules, both mirroring _trigger_zone_music_alerts
-      // on the server, because a push that fires on different terms to the
-      // server's own alert is two features disagreeing about one event.
-      const zoneUser = nearbyUsers.find((u) => {
-        // 1. There must be something to listen to. Not `zone_active` — that
-        //    switch removes the circle drawn around someone on the map, which
-        //    is a different question. The server only sends `zone_audio_url`
-        //    to viewers allowed to hear it, and withholds it entirely from
-        //    someone who has switched their music zone off, so its presence
-        //    already means all three of "there is music", "it is playing" and
-        //    "you may play it".
-        if (!u.zone_audio_url) return false;
-
-        // 2. The music zone, not the map zone. `music_zone_radius` is always
-        //    the music zone's own number — it never inherits `zone_radius`,
-        //    and `zone_mode` does not come into it: a music zone is a circle
-        //    even for someone whose map zone is a city border. Comparing
-        //    against `zone_radius` fired at the wrong distance in both
-        //    directions.
-        const reach = u.music_zone_radius ?? 0;
-        return (u.distance_km ?? Infinity) * 1000 < reach;
-      });
-      if (zoneUser) {
-        const stored = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
-        const lastNotified: LastZoneNotified | null = stored ? JSON.parse(stored) : null;
-        const withinCooldown =
-          lastNotified != null &&
-          lastNotified.username === zoneUser.username &&
-          Date.now() - lastNotified.timestamp < ZONE_NOTIFICATION_COOLDOWN_MS;
-
-        if (!withinCooldown) {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: '🎵 You entered a zone!',
-              body: `You are in @${zoneUser.username}'s zone - tap to listen`,
-            },
-            trigger: null,
-          });
-          await AsyncStorage.setItem(
-            LAST_ZONE_NOTIFIED_KEY,
-            JSON.stringify({ username: zoneUser.username, timestamp: Date.now() }),
-          );
-        }
-      } else {
-        await AsyncStorage.removeItem(LAST_ZONE_NOTIFIED_KEY);
-      }
-    } catch (e: any) {
-      console.log('[BG Task] nearby fetch failed:', e?.response?.status);
-    }
   },
 );
 

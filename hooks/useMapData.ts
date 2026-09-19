@@ -65,6 +65,7 @@ export function useMapData(
   hasCoords: boolean,
   /** Accuracy from the same accepted platform fix; null explicitly means unknown. */
   accuracyRef: React.RefObject<number | null>,
+  fixTimestampRef?: React.RefObject<number>,
 ): MapData {
   const ghost = useGhostMode();
   const privacyVersion = useRef(0);
@@ -319,13 +320,13 @@ export function useMapData(
       // the server would refuse it anyway. Speed rides along on the same
       // request — the server buckets it into a coarse class and never stores
       // the figure itself.
-      reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current, accuracyRef.current),
+      reportLocation({ latitude: c.latitude, longitude: c.longitude }, speedRef.current, accuracyRef.current, fixTimestampRef?.current),
       // Independent of the line above, which is the whole point: browsing does
       // not depend on publishing, and a paused user reaches the map through
       // the private query instead.
       fetchMapData(),
     ]);
-  }, [fetchMapData, loadSelf, coordsRef, speedRef, accuracyRef]);
+  }, [fetchMapData, loadSelf, coordsRef, speedRef, accuracyRef, fixTimestampRef]);
 
   // Mirrors AppState into render-visible state, so the polling effect below
   // can simply depend on it instead of an interval being started/stopped

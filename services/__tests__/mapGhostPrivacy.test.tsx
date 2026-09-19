@@ -76,8 +76,9 @@ function deferred<T>() {
 let latest: MapData;
 let sheets: ReturnType<typeof useMapSheets>;
 let tree: ReactTestRenderer | undefined;
+const fixTimestamp = { current: 123_456 };
 function Harness() {
-  latest = useMapData(coords, speed, false, accuracy);
+  latest = useMapData(coords, speed, false, accuracy, fixTimestamp);
   sheets = useMapSheets(latest.nearby, latest.stories, []);
   return null;
 }
@@ -106,10 +107,10 @@ beforeEach(() => {
 it('foreground map reports carry the latest accuracy, including explicitly unknown fixes', async () => {
   await render();
   await refresh();
-  expect(reportLocation).toHaveBeenLastCalledWith(coords.current, null, 12);
+  expect(reportLocation).toHaveBeenLastCalledWith(coords.current, null, 12, 123_456);
   accuracy.current = null;
   await refresh();
-  expect(reportLocation).toHaveBeenLastCalledWith(coords.current, null, null);
+  expect(reportLocation).toHaveBeenLastCalledWith(coords.current, null, null, 123_456);
 });
 afterEach(() => {
   if (tree) act(() => tree!.unmount());

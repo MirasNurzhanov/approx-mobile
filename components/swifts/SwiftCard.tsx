@@ -1,5 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   useAnimatedStyle,
@@ -11,6 +18,9 @@ import { useEvent, useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { SwiftActions } from '@/components/swifts/SwiftActions';
+import { SwiftCaption } from '@/components/swifts/SwiftCaption';
+import { SwiftStage } from '@/components/swifts/SwiftStage';
+import { hasEffect } from '@/constants/swiftEffects';
 import { SwiftProgress } from '@/components/swifts/SwiftProgress';
 import {
   SwiftAudioIcon,
@@ -21,8 +31,10 @@ import type { RevealState } from '@/components/swifts/SwiftLocationButton';
 import { Scrim } from '@/components/ui/Scrim';
 import { Avatar } from '@/components/ui/Avatar';
 import { useDoubleTap } from '@/hooks/useDoubleTap';
+import { useMusicBed } from '@/hooks/useMusicBed';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { fonts, type as typography } from '@/constants/theme';
+import { playedMs } from '@/services/swiftDraft';
 import type { Swift } from '@/services/swifts';
 
 /**
@@ -88,6 +100,8 @@ export interface SwiftCardProps {
   onToggleLike: (id: number, liked: boolean) => void;
   onToggleRepost: (id: number, reposted: boolean) => void;
   onToggleSave: (id: number, saved: boolean) => void;
+  /** Opens the sheet that forwards this Swift into somebody's messages. */
+  onSend: (swift: Swift) => void;
   onComment: (swift: Swift) => void;
   onMore: (swift: Swift) => void;
 }
@@ -107,10 +121,15 @@ function SwiftCardImpl({
   onToggleLike,
   onToggleRepost,
   onToggleSave,
+  onSend,
   onComment,
   onMore,
 }: SwiftCardProps) {
   const reduceMotion = useReduceMotion();
+  // The card is full-bleed (`styles.card` is `width: '100%'`), so the window's
+  // width is its width. Needed by the sticker layer, which converts fractional
+  // positions to pixels, and by the rotation transform.
+  const { width: cardWidth } = useWindowDimensions();
   const heartScale = useSharedValue(0);
   const [failed, setFailed] = useState(false);
   /** Bumped by Retry, which is what re-runs the source and clears the error. */
@@ -166,6 +185,16 @@ function SwiftCardImpl({
 
   useEffect(() => { player.muted = muted; }, [muted, player]);
 
+  // Speed, the same parameter the editor previewed. `playbackRate` is set from
+  // an effect rather than in the setup callback above because — unlike
+  // `volume` — it is safe to write repeatedly: it has no native KVO observer
+  // to race, and a Swift's rate never changes after publication anyway, so
+  // this runs once per card in practice.
+  useEffect(() => {
+    const rate = (swift.speed_percent || 100) / 100;
+    player.playbackRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
+  }, [swift.speed_percent, player]);
+
   // A source that will not load is a real state and needs a way out — a black
   // rectangle with no explanation is the worst version of this.
   //
@@ -207,6 +236,46 @@ function SwiftCardImpl({
       setTimeout(() => { loopSeeking.current = false; }, 120);
     }
   }, [currentTime, trimEndS, trimStartS, player]);
+
+  // The attached track, played alongside the video rather than mixed into it —
+  // see `hooks/useMusicBed` and `swifts/media.py`. Only for the card actually
+  // being watched: a neighbour in the preload window holding an audio player
+  // would be a second sound source, which is the single most noticeable bug a
+  // video feed can have.
+  //
+  // `swift.track.audio_url` is empty when the catalogue row is gone, and
+  // `useMusicBed` treats that as no bed — so a Swift whose track was withdrawn
+  // plays its own sound and keeps its credit, which is exactly what the
+  // server's attribution rule intends.
+  const bedTrack = swift.track?.audio_url && isActive && !pausedByUser
+    ? {
+      id: swift.track.id ?? 0,
+      title: swift.track.title,
+      artist: swift.track.artist,
+      artworkUrl: swift.track.artwork_url,
+      audioUrl: swift.track.audio_url,
+      durationMs: swift.track.duration_ms ?? 0,
+    }
+    : null;
+
+  useMusicBed({
+    track: bedTrack,
+    volume: swift.music_volume ?? 70,
+    startMs: swift.music_start_ms ?? 0,
+    // `playedMs`, not a hand-rolled multiply: the conversion runs the other
+    // way round from the one the shape of this expression suggests — at 2×,
+    // ten seconds of source is *five* seconds of listening, so the bed is
+    // five seconds in, not twenty. Sharing the composer's function is what
+    // keeps the feed's answer identical to the one the editor previewed.
+    positionMs: playedMs(
+      Math.max(0, (currentTime - trimStartS) * 1000), swift.speed_percent || 100,
+    ),
+    playing: isActive && !pausedByUser && !failed,
+    // The feed's own mute control governs the bed too. Two sound sources with
+    // one mute button that only silences half of them is worse than no mute
+    // button at all.
+    muted,
+  });
 
   // `player.duration` is the whole source; the bar tracks the kept range only.
   // Falls back to the API's duration when the player has not measured the
@@ -250,6 +319,27 @@ function SwiftCardImpl({
   // Track first, flat snapshot second. The snapshot is the attribution as it
   // stood when the Swift was published and survives a track leaving the
   // catalogue — see `SwiftSerializer.get_track` on the server.
+  // The server's sticker rows carry no id — it is a local key the composer
+  // needed for React and for the drag gesture, and storing one would be
+  // storing a value nothing reads back. The index is a stable key here because
+  // a published Swift's sticker list never changes.
+  const stickers = useMemo(
+    () => (swift.stickers ?? []).map((sticker, index) => ({
+      ...sticker,
+      id: `${swift.id}-${index}`,
+    })),
+    [swift.stickers, swift.id],
+  );
+
+  // Nothing is mounted over the video unless there is something to draw —
+  // which is what this card did before the stage existed, when the overlay
+  // text was the only layer and was rendered conditionally. Worth keeping:
+  // a view over a video surface is exactly what froze the camera preview
+  // once, and the cheapest guarantee against a repeat is not to have one.
+  const hasOverlay = hasEffect(swift.effect)
+    || stickers.length > 0
+    || swift.overlay_text.trim().length > 0;
+
   const audioCredit = swift.track
     ? [swift.track.title, swift.track.artist].filter(Boolean).join(' — ')
     : swift.audio_title || 'Original audio';
@@ -277,6 +367,7 @@ function SwiftCardImpl({
     () => onToggleSave(swift.id, !swift.viewer_saved),
     [onToggleSave, swift.id, swift.viewer_saved],
   );
+  const handleSend = useCallback(() => onSend(swift), [onSend, swift]);
   const handleComment = useCallback(() => onComment(swift), [onComment, swift]);
   const handleMore = useCallback(() => onMore(swift), [onMore, swift]);
 
@@ -297,7 +388,20 @@ function SwiftCardImpl({
         {source ? (
           <VideoView
             key={attempt}
-            style={styles.fill}
+            style={[
+              styles.fill,
+              // A quarter turn swaps the box's axes, so the view is sized to
+              // the card's other dimension and re-centred. Without that a 90°
+              // Swift renders into a portrait box and is cropped to a slot the
+              // creator never framed.
+              swift.rotation_deg ? { transform: [{ rotate: `${swift.rotation_deg}deg` }] } : null,
+              (swift.rotation_deg === 90 || swift.rotation_deg === 270) && height > 0 && {
+                width: height,
+                height: cardWidth,
+                left: (cardWidth - height) / 2,
+                top: (height - cardWidth) / 2,
+              },
+            ]}
             player={player}
             contentFit="cover"
             nativeControls={false}
@@ -309,18 +413,19 @@ function SwiftCardImpl({
       </Pressable>
 
       {/* Drawn over the video rather than baked into it — see the note at the
-          top of the file and services/swifts.ts. */}
-      {swift.overlay_text.trim().length > 0 && (
-        <View
-          style={[
-            styles.overlayWrap,
-            swift.overlay_position === 'top' && styles.overlayTop,
-            swift.overlay_position === 'bottom' && styles.overlayBottom,
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={styles.overlayText} numberOfLines={2}>{swift.overlay_text}</Text>
-        </View>
+          top of the file and services/swifts.ts. The very component the
+          composer previewed with, so what a creator framed is what is watched;
+          it is `pointerEvents="none"` throughout, which is what keeps a
+          sticker from eating the swipe to the next Swift. */}
+      {hasOverlay && (
+        <SwiftStage
+          size={{ width: cardWidth, height }}
+          effect={swift.effect ?? ''}
+          effectIntensity={swift.effect_intensity ?? 100}
+          stickers={stickers}
+          overlayText={swift.overlay_text}
+          overlayPosition={swift.overlay_position}
+        />
       )}
 
       <Scrim edge="top" height={140} opacity={0.5} />
@@ -375,8 +480,18 @@ function SwiftCardImpl({
           />
           <Text style={styles.username} numberOfLines={1}>@{swift.author.username}</Text>
         </View>
+        {/* The caption's hashtags and mentions are pressable — see
+            `SwiftCaption`. The meta block is already `pointerEvents="box-none"`
+            so the taps that are *not* on a link still fall through to the
+            card's own play/pause gesture behind it. */}
         {swift.caption ? (
-          <Text style={styles.caption} numberOfLines={3}>{swift.caption}</Text>
+          <SwiftCaption
+            caption={swift.caption}
+            mentions={swift.mentions}
+            style={styles.caption}
+            linkStyle={styles.captionLink}
+            numberOfLines={3}
+          />
         ) : null}
         <View style={styles.audioRow}>
           <SwiftAudioIcon size={13} color="#FFFFFF" />
@@ -401,6 +516,7 @@ function SwiftCardImpl({
         onComment={handleComment}
         onRepost={handleRepost}
         onSave={handleSave}
+        onSend={handleSend}
         onMore={handleMore}
         onToggleMute={onToggleMute}
         bottom={navClearance + 18}
@@ -478,6 +594,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#FFFFFF',
   },
+  // Bold rather than tinted: this sits over arbitrary video, where no colour
+  // can be relied on to hold contrast, and a link distinguishable only by hue
+  // is invisible to anyone who cannot separate the two.
+  captionLink: { fontWeight: '800' },
   caption: {
     fontFamily: fonts.body,
     fontSize: 14,

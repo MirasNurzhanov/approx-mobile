@@ -16,3 +16,40 @@ jest.mock('expo-secure-store', () => {
     deleteItemAsync: jest.fn(async key => { values.delete(key); }),
   };
 });
+
+// `expo-audio` reaches for its native module at *import* time — it subclasses
+// a native `SharedObject`, so the file cannot even be loaded without one, and
+// the failure is a bare "Cannot read properties of undefined (reading
+// 'prototype')" pointing at the import line rather than at anything a test did.
+//
+// Global rather than per-suite, unlike the `expo-video` mocks the feed tests
+// each build for themselves: those assert *on* the player (is exactly one
+// playing?), so each suite wants its own instrumented double. Nothing asserts
+// on the music bed yet, and every suite that renders a Swift card now pulls
+// `hooks/useMusicBed` in transitively — so the alternative is the same inert
+// stub copied into a dozen files.
+jest.mock('expo-audio', () => ({
+  useAudioPlayer: () => ({
+    id: 0,
+    playing: false,
+    muted: false,
+    loop: false,
+    paused: true,
+    isLoaded: true,
+    isBuffering: false,
+    currentTime: 0,
+    duration: 0,
+    volume: 1,
+    play: jest.fn(),
+    pause: jest.fn(),
+    // Resolved, not undefined: `useMusicBed` chains `.then(release, release)`
+    // off it to clear its seek guard, and a bare `jest.fn()` would throw there.
+    seekTo: jest.fn(async () => {}),
+    remove: jest.fn(),
+    replace: jest.fn(),
+  }),
+  useAudioPlayerStatus: () => ({
+    isLoaded: true, playing: false, currentTime: 0, duration: 0,
+  }),
+  setAudioModeAsync: jest.fn(async () => {}),
+}));

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, LayoutChangeEvent, Pressable, StyleSheet, Text, View,
+  ActivityIndicator, Alert, LayoutChangeEvent, Pressable, StyleSheet, Text, View,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SwiftCard } from '@/components/swifts/SwiftCard';
+import { SendToFriendsSheet } from '@/components/swifts/SendToFriendsSheet';
 import { SwiftCommentsSheet } from '@/components/swifts/SwiftCommentsSheet';
 import { SwiftReviewNotice } from '@/components/swifts/SwiftReviewNotice';
 import { SwiftLocationSheet } from '@/components/swifts/SwiftLocationSheet';
@@ -29,6 +30,7 @@ import {
 } from '@/services/swifts';
 import { useContentActions } from '@/components/ContentActions';
 import { reportSwiftSignal } from '@/services/swiftSignals';
+import { sendSwiftTo } from '@/services/swiftComposer';
 
 /**
  * One Swift, on its own — reached from `swifts/compose` on publish, and by
@@ -67,6 +69,10 @@ export default function SwiftDetailScreen() {
   const [muted, setMuted] = useState(true);
   const [commentsOpen, setCommentsOpen] = useState(false);
 
+  /** Whether the "send privately" sheet is open, and whether a send is in
+   *  flight — the sheet cannot be submitted twice. */
+  const [sending, setSending] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
   const [revealState, setRevealState] = useState<RevealState>('idle');
   const [reveal, setReveal] = useState<{
     location: SwiftLocation | null;
@@ -263,6 +269,34 @@ export default function SwiftDetailScreen() {
   // Same menu as the feed's. On a permalink there is no list to prune, so a
   // block closes the screen instead — leaving a blocked author's Swift on
   // screen would read as the block not having worked.
+  const handleSend = useCallback(() => setSending(true), []);
+
+  /**
+   * Spend the chosen recipients.
+   *
+   * A refusal per person is ordinary rather than exceptional — they may have
+   * blocked you since the sheet loaded, or may not be allowed to watch this
+   * particular Swift — so the result is read rather than thrown, and said
+   * once. See `services/swiftComposer.sendSwiftTo`.
+   */
+  const confirmSend = useCallback(async (userIds: number[]) => {
+    if (!swift) return;
+    setSendBusy(true);
+    const result = await sendSwiftTo(swift.id, userIds).catch(() => null);
+    setSendBusy(false);
+    setSending(false);
+    if (result === null) {
+      Alert.alert('Could not send', 'Try again in a moment.');
+      return;
+    }
+    if (result.refused.length > 0) {
+      Alert.alert(
+        result.sent.length > 0 ? 'Sent to some people' : 'Could not send',
+        `${result.sent.length} sent. ${result.refused.length} could not be — they may not be able to watch this Swift.`,
+      );
+    }
+  }, [swift]);
+
   const handleMore = useCallback((target: Swift) => {
     present({
       target: 'swift',
@@ -324,10 +358,23 @@ export default function SwiftDetailScreen() {
           onToggleLike={handleToggleLike}
           onToggleRepost={handleToggleRepost}
           onToggleSave={handleToggleSave}
+          onSend={handleSend}
           onComment={handleComment}
           onMore={handleMore}
         />
       )}
+
+      {/* Forwarding, from the permalink as well as from the feed. This is the
+          screen a mention notification and a shared card both land on, so it
+          is where somebody is most likely to want to pass a Swift along. */}
+      <SendToFriendsSheet
+        visible={sending}
+        selected={[]}
+        mode="send"
+        busy={sendBusy}
+        onCancel={() => setSending(false)}
+        onConfirm={confirmSend}
+      />
 
       <Pressable
         style={[styles.closeBtn, { top: insets.top + 10 }]}

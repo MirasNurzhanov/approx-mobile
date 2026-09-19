@@ -17,6 +17,21 @@ export const venuesApi = {
   get: (id: number) => api.get<Venue>(`/api/venues/${id}/`),
 };
 
+/**
+ * Making a Swift at a venue.
+ *
+ * Carries the id and nothing else, for the same reason `venueProposalRoute`
+ * does: the composer asks the server where the venue is. A coordinate that
+ * travelled through navigation state would be a coordinate anybody could edit,
+ * and it ends up attached to a published Swift.
+ */
+export function venueSwiftRoute(venueId: number) {
+  return {
+    pathname: '/swifts/compose' as const,
+    params: { venueId: String(venueId) },
+  };
+}
+
 export function venueProposalRoute(clubId: number, venueId: number, clubName?: string) {
   return {
     pathname: '/clubs/[id]/chat' as const,

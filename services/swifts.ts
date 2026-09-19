@@ -34,6 +34,39 @@ export interface SwiftTrackCredit {
   title: string;
   artist: string;
   artwork_url: string;
+  /**
+   * Where the audio is. Empty when the catalogue row is gone — a track pulled
+   * for a lapsed licence stops playing but keeps its credit, which is the
+   * whole reason the attribution is stored flat beside the relation. See
+   * `SwiftVideo.track` on the backend.
+   *
+   * Optional for the same reason the capture fields below are: a server older
+   * than this build sends a credit without it, and the right outcome there is
+   * a Swift that plays its own sound rather than one that crashes the card.
+   */
+  audio_url?: string;
+  duration_ms?: number;
+}
+
+/** One emoji placed over the video, positioned in fractions of the frame. */
+export interface SwiftStickerPlacement {
+  emoji: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+}
+
+/** A tag on a Swift. `display` is for showing, `name` for matching. */
+export interface SwiftHashtag {
+  name: string;
+  display: string;
+}
+
+/** Somebody named in a Swift. `username` is what the caption says. */
+export interface SwiftMention {
+  user_id: number;
+  username: string;
 }
 
 /**
@@ -99,11 +132,34 @@ export interface Swift {
   original_volume: number;
   overlay_text: string;
   overlay_position: 'top' | 'middle' | 'bottom';
+  // ── Optional, and deliberately so ────────────────────────────────────────
+  // Every field below was added after the first Swifts shipped, and a phone
+  // can be running a build newer than the API it is pointed at — an app-store
+  // update racing a deploy is the ordinary case, not an edge one. Marking them
+  // optional is what makes that a Swift which plays unfiltered rather than a
+  // crash on `.map` of undefined, and every read of them in this app is
+  // defaulted accordingly.
+  stickers?: SwiftStickerPlacement[];
+
+  /** Playback speed as a percentage: 50 is half, 200 is double. */
+  speed_percent?: number;
+  /** A quarter turn clockwise, applied by the player. */
+  rotation_deg?: 0 | 90 | 180 | 270;
+  /** A key from `constants/swiftEffects`; '' is untouched. */
+  effect?: string;
+  effect_intensity?: number;
 
   track: SwiftTrackCredit | null;
   audio_title: string;
   audio_artist: string;
   uses_original_audio: boolean;
+  /** 0–100, for the bed against the recording's own sound. */
+  music_volume?: number;
+  /** Where in the track the bed starts. */
+  music_start_ms?: number;
+
+  hashtags?: SwiftHashtag[];
+  mentions?: SwiftMention[];
 
   visibility: 'public' | 'friends' | 'private';
   allow_comments: boolean;

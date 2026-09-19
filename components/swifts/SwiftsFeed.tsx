@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   FlatList,
   LayoutChangeEvent,
@@ -36,6 +37,8 @@ import {
   type SwiftLocation,
 } from '@/services/swifts';
 import { useContentActions } from '@/components/ContentActions';
+import { SendToFriendsSheet } from '@/components/swifts/SendToFriendsSheet';
+import { sendSwiftTo } from '@/services/swiftComposer';
 import { flushSwiftSignals, reportSwiftSignal } from '@/services/swiftSignals';
 
 /**
@@ -99,6 +102,9 @@ export function SwiftsFeed() {
   const [muted, setMuted] = useState(true);
   const [height, setHeight] = useState(0);
   const [paging, setPaging] = useState(false);
+  /** The Swift whose "send to" sheet is open, if any. */
+  const [sendingFor, setSendingFor] = useState<Swift | null>(null);
+  const [sendBusy, setSendBusy] = useState(false);
   const [exhausted, setExhausted] = useState(false);
   /** The server's ranking session. Held in a ref rather than state because
    *  nothing renders from it and changing it must not re-render the list. */
@@ -423,6 +429,41 @@ export function SwiftsFeed() {
     return revealedIds.has(swift.id) ? 'revealed' : 'idle';
   }
 
+  /**
+   * Forwarding a Swift into somebody's messages.
+   *
+   * The same sheet the composer uses, in `send` mode — see
+   * `SendToFriendsSheet`. What differs is only that there is already a Swift,
+   * so the ids are spent immediately rather than held on a draft.
+   *
+   * A refusal per person is ordinary and is reported rather than thrown: the
+   * recipient may have blocked this viewer since the list loaded, or may not
+   * be allowed to watch this particular Swift. See
+   * `services/swiftComposer.sendSwiftTo`.
+   */
+  const handleSend = useCallback((swift: Swift) => {
+    setSendingFor(swift);
+  }, []);
+
+  const confirmSend = useCallback(async (userIds: number[]) => {
+    const swift = sendingFor;
+    if (!swift) return;
+    setSendBusy(true);
+    const result = await sendSwiftTo(swift.id, userIds).catch(() => null);
+    setSendBusy(false);
+    setSendingFor(null);
+    if (result === null) {
+      Alert.alert('Could not send', 'Try again in a moment.');
+      return;
+    }
+    if (result.refused.length > 0) {
+      Alert.alert(
+        result.sent.length > 0 ? 'Sent to some people' : 'Could not send',
+        `${result.sent.length} sent. ${result.refused.length} could not be — they may not be able to watch this Swift.`,
+      );
+    }
+  }, [sendingFor]);
+
   const handleComment = useCallback((swift: Swift) => {
     reportSwiftSignal({
       kind: 'comment', swift_id: swift.id, served_by: servedBy.current[swift.id],
@@ -515,6 +556,14 @@ export function SwiftsFeed() {
   return (
     <View style={styles.root} onLayout={handleLayout}>
       {sheets}
+      <SendToFriendsSheet
+        visible={sendingFor !== null}
+        selected={[]}
+        mode="send"
+        busy={sendBusy}
+        onCancel={() => setSendingFor(null)}
+        onConfirm={confirmSend}
+      />
       {height > 0 && (
         <FlatList
           data={swifts}
@@ -535,6 +584,7 @@ export function SwiftsFeed() {
               onToggleLike={handleToggleLike}
               onToggleRepost={handleToggleRepost}
               onToggleSave={handleToggleSave}
+              onSend={handleSend}
               onComment={handleComment}
               onMore={handleMore}
             />

@@ -7,7 +7,7 @@ import { useRouter, type Href } from 'expo-router';
 import { useTheme } from '@/context/ThemeContext';
 import { fonts } from '@/constants/theme';
 import { clubsApi, type Club } from '@/services/clubs';
-import { venueProposalRoute, type Venue } from '@/services/venues';
+import { venueProposalRoute, venueSwiftRoute, type Venue } from '@/services/venues';
 import { runBusy } from '@/services/busy';
 import { venueAppearance } from '@/services/venueAppearance';
 
@@ -111,11 +111,13 @@ export function VenueSheet({ venue, onClose }: { venue: Venue | null; onClose: (
                 <Ionicons name="people-outline" size={21} color="#FFFFFF" />
                 <Text style={styles.actionText}>Propose a meetup</Text>
               </Pressable>
-              <Pressable disabled accessibilityRole="button" accessibilityLabel="Make a swift, coming soon"
-                accessibilityState={{ disabled: true }} style={[styles.action, styles.disabled]}>
-                <Ionicons name="videocam-outline" size={21} color={colors.t3} />
-                <Text style={[styles.actionText, { color: colors.t3 }]}>Make a swift</Text>
-                <Text style={{ color: colors.t3, fontSize: 11 }}>Coming soon</Text>
+              {/* Opens the composer with this venue already attached as the
+                  Swift's place, and pins it to the map once it publishes. */}
+              <Pressable onPress={() => { if (venue) navigate(venueSwiftRoute(venue.id)); }}
+                accessibilityRole="button" accessibilityLabel={`Make a swift at ${venue?.name ?? 'this place'}`}
+                style={actionStyle}>
+                <Ionicons name="videocam-outline" size={21} color="#FFFFFF" />
+                <Text style={styles.actionText}>Make a swift</Text>
               </Pressable>
               <Text style={[styles.note, { color: colors.t3 }]}>A meetup proposal is not a reservation.</Text>
             </>}
@@ -140,7 +142,6 @@ const styles = StyleSheet.create({
   action: { backgroundColor: '#6044B5', borderRadius: 16, padding: 17, flexDirection: 'row',
     alignItems: 'center', justifyContent: 'center', gap: 9, marginTop: 12 },
   actionText: { fontFamily: fonts.display, color: '#FFFFFF', fontSize: 15 },
-  disabled: { backgroundColor: 'rgba(128,128,128,0.10)' },
   note: { fontFamily: fonts.body, fontSize: 11, textAlign: 'center', marginTop: 16 },
   club: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 18 },
   clubName: { flex: 1, fontFamily: fonts.display, fontSize: 16 },

@@ -13,6 +13,7 @@ import {
   LocationPickerSheet,
   type PickedLocation,
 } from '@/components/swifts/compose/LocationPickerSheet';
+import { TagField } from '@/components/swifts/compose/TagField';
 import { IconGlobe, IconLock, IconPeople, IconPin } from '@/components/ui/icons';
 import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
@@ -21,7 +22,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { MAX_CAPTION, type SwiftDraft } from '@/services/swiftDraft';
 
 /**
- * Caption, audience, and the location decision.
+ * Caption, tags, audience, and the location decision.
  *
  * ## Location is optional, and the UI has to make that obvious
  *
@@ -106,6 +107,20 @@ export function DetailsStep({ draft, onChange }: Props) {
           {draft.caption.length}/{MAX_CAPTION}
         </Text>
       </View>
+
+      {/* Hashtags and mentions.
+          Directly under the caption on purpose: both are partly *derived* from
+          it — a `#tag` typed into the caption is a tag on the Swift, and the
+          chip row says so — and a creator has to be able to see both at once
+          for that to read as one thought rather than two contradictory ones.
+          See `TagField`. */}
+      <TagField
+        caption={draft.caption}
+        hashtags={draft.hashtags}
+        mentions={draft.mentions}
+        onChangeHashtags={(hashtags) => onChange({ hashtags })}
+        onChangeMentions={(mentions) => onChange({ mentions })}
+      />
 
       {/* Audience */}
       <View style={styles.block}>

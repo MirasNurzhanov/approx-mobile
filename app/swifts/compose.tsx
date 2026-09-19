@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CaptureStep } from '@/components/swifts/compose/CaptureStep';
 import { DetailsStep } from '@/components/swifts/compose/DetailsStep';
 import { EditStep } from '@/components/swifts/compose/EditStep';
+import { MusicPickerSheet } from '@/components/swifts/compose/MusicPickerSheet';
 import { PreviewStep } from '@/components/swifts/compose/PreviewStep';
+import { SendToFriendsSheet } from '@/components/swifts/SendToFriendsSheet';
 import type { CapturedVideo } from '@/components/swifts/compose/CaptureStep';
 import { IconBack, IconClose } from '@/components/ui/icons';
 import { fonts, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
@@ -15,16 +17,22 @@ import { useTheme } from '@/context/ThemeContext';
 import {
   EMPTY_DRAFT,
   createTakeKey,
+  keptDurationMs,
   MAX_SWIFT_MS,
+  recordedMs,
   validateDraft,
   type SwiftDraft,
+  type SwiftTrackChoice,
 } from '@/services/swiftDraft';
+import { sendSwiftTo } from '@/services/swiftComposer';
 import {
   UploadCancelled,
   discardTempFile,
   publishSwift,
   type UploadProgress,
 } from '@/services/swiftUpload';
+import { MAX_PINS, pinSwiftLocation } from '@/services/pinnedPlaces';
+import { venuesApi } from '@/services/venues';
 
 /**
  * Making a Swift, start to finish.
@@ -55,6 +63,25 @@ const TITLES: Record<Step, string> = {
   preview: 'Preview',
 };
 
+/** The venue a composer was opened from, as the draft and the pin need it. */
+interface VenuePlace {
+  id: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** The draft fields that attach a venue as the Swift's place. */
+function venueLocation(venue: VenuePlace | null): Partial<SwiftDraft> {
+  if (!venue) return {};
+  return {
+    shareLocation: true,
+    latitude: venue.latitude,
+    longitude: venue.longitude,
+    placeName: venue.name,
+  };
+}
+
 export default function SwiftComposerScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -65,6 +92,22 @@ export default function SwiftComposerScreen() {
   const [draft, setDraft] = useState<SwiftDraft>(EMPTY_DRAFT);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Both sheets are owned here rather than by the step that opens them: the
+  // music picker is reachable from capture *and* from the editor, and hoisting
+  // it means one instance and one piece of state rather than two that can
+  // disagree about what is attached.
+  const [pickingMusic, setPickingMusic] = useState(false);
+  const [pickingRecipients, setPickingRecipients] = useState(false);
+
+  // Started from a venue's card on the map (`venueSwiftRoute`). The id is all
+  // the route carries; where that venue *is* comes from the server below, so a
+  // coordinate cannot be edited into a published Swift through navigation
+  // state.
+  const { venueId: venueParam } = useLocalSearchParams<{ venueId?: string }>();
+  const venueId = Number(venueParam);
+  /** The venue this composer was opened from, once the server has placed it. */
+  const venueRef = useRef<VenuePlace | null>(null);
+  const venueAsked = useRef(false);
 
   const abortRef = useRef<AbortController | null>(null);
   // The recording currently on disk. Deleted once it has been published or
@@ -84,6 +127,27 @@ export default function SwiftComposerScreen() {
 
   const patch = (next: Partial<SwiftDraft>) =>
     setDraft((prev) => ({ ...prev, ...next }));
+
+  // A Swift made at a venue arrives with that venue as its place, so the
+  // creator does not have to find on a map the café they are standing in. It
+  // is still only a default: Details can change or remove it like any other
+  // location, and nothing is pinned unless it survives to publication.
+  useEffect(() => {
+    if (!Number.isInteger(venueId) || venueId < 1 || venueAsked.current) return;
+    venueAsked.current = true;
+    let alive = true;
+    venuesApi.get(venueId).then(({ data }) => {
+      if (!alive || !Number.isFinite(data?.latitude) || !Number.isFinite(data?.longitude)) return;
+      venueRef.current = {
+        id: data.id, name: data.name, latitude: data.latitude, longitude: data.longitude,
+      };
+      patch(venueLocation(venueRef.current));
+    }).catch(() => {
+      // The composer works without it; the creator can still add a location.
+    });
+    return () => { alive = false; };
+    // Once per venue id: `venueAsked` makes a re-run a no-op anyway.
+  }, [venueId]);
 
   // ── Navigation between steps ───────────────────────────────────────────────
 
@@ -155,8 +219,31 @@ export default function SwiftComposerScreen() {
     }
     tempUriRef.current = video.source === 'camera' ? video.uri : null;
 
-    setDraft({
+    // The limit in *source* milliseconds: at 2× the ceiling is two minutes of
+    // video, because two minutes is what becomes sixty seconds. A creator's
+    // own "stop after" choice does not apply to an import — they are choosing
+    // which part of an existing video to keep, and the trim handles are that
+    // choice.
+    const sourceCeiling = recordedMs(MAX_SWIFT_MS, draft.speedPercent);
+
+    setDraft((prev) => ({
       ...EMPTY_DRAFT,
+      // A new take is a new draft, but it is still the Swift this venue's card
+      // opened the composer for.
+      ...venueLocation(venueRef.current),
+      // …and it was filmed under these, so they survive. Retaking a shot and
+      // finding the speed, effect and track you chose have been reset is the
+      // kind of thing that makes somebody stop retaking shots.
+      speedPercent: prev.speedPercent,
+      rotationDeg: prev.rotationDeg,
+      effect: prev.effect,
+      effectIntensity: prev.effectIntensity,
+      micEnabled: prev.micEnabled,
+      countdownS: prev.countdownS,
+      limitMs: prev.limitMs,
+      track: prev.track,
+      musicVolume: prev.musicVolume,
+      musicStartMs: prev.musicStartMs,
       idempotencyKey: createTakeKey(),
       uri: video.uri,
       source: video.source,
@@ -165,8 +252,8 @@ export default function SwiftComposerScreen() {
       height: video.height,
       // An import longer than the ceiling opens pre-trimmed to the limit
       // rather than being refused — the creator chooses which 60 seconds.
-      trimEndMs: video.durationMs > MAX_SWIFT_MS ? MAX_SWIFT_MS : null,
-    });
+      trimEndMs: video.durationMs > sourceCeiling ? sourceCeiling : null,
+    }));
     setStep('edit');
   }
 
@@ -176,6 +263,69 @@ export default function SwiftComposerScreen() {
   }
 
   // ── Publishing ─────────────────────────────────────────────────────────────
+  /**
+   * Put the venue on the creator's own map, now that a Swift exists there.
+   *
+   * Only if the place that published is still the venue's: somebody who
+   * changed or removed the location in Details gets no pin, because a pin
+   * would then name a place the Swift was not made at. Failures are swallowed
+   * deliberately — the Swift is already published, and a pin that did not save
+   * is not a reason to show a publishing error — except a full map, which is a
+   * decision only the creator can make.
+   */
+  async function pinVenue(swiftId: number) {
+    const venue = venueRef.current;
+    if (!venue) return;
+    if (!draft.shareLocation) return;
+    if (draft.latitude !== venue.latitude || draft.longitude !== venue.longitude) return;
+
+    const result = await pinSwiftLocation({
+      swiftId,
+      latitude: venue.latitude,
+      longitude: venue.longitude,
+      placeName: venue.name,
+      precision: 'exact',
+    }).catch(() => null);
+
+    if (result && !result.ok && result.reason === 'limit') {
+      Alert.alert(
+        'Your map is full',
+        `You can keep ${MAX_PINS} pinned places. Remove one to pin ${venue.name}.`,
+      );
+    }
+  }
+
+  /**
+   * Deliver the Swift to the people chosen in the editor.
+   *
+   * After publishing, because a send needs a Swift that exists — there is no
+   * id to forward until the 201 comes back.
+   *
+   * Failures are reported but never turned into a publishing error, for the
+   * same reason `pinVenue` swallows its own: the Swift is up, and telling
+   * somebody their post failed because a message did not go is both false and
+   * the wrong thing to act on. A refusal per person is the ordinary case
+   * — somebody may have blocked them since the sheet loaded, or may not be
+   * allowed to watch this particular Swift — so it is said plainly and once.
+   */
+  async function sendQueued(swiftId: number) {
+    if (draft.sendTo.length === 0) return;
+    const result = await sendSwiftTo(swiftId, draft.sendTo).catch(() => null);
+    if (result === null) {
+      Alert.alert(
+        'Swift published',
+        'It is up, but we could not send it to anyone just now. You can share it from the Swift itself.',
+      );
+      return;
+    }
+    if (result.refused.length > 0) {
+      Alert.alert(
+        'Sent to some people',
+        `${result.sent.length} sent. ${result.refused.length} could not be — they may not be able to watch this Swift.`,
+      );
+    }
+  }
+
   async function handlePublish() {
     // A ref closes the same-render double-tap window before React renders progress.
     if (abortRef.current) return;
@@ -201,6 +351,9 @@ export default function SwiftComposerScreen() {
       // The recording has served its purpose; R2 has the copy that matters.
       discardTempFile(tempUriRef.current);
       tempUriRef.current = null;
+
+      await pinVenue(published.id);
+      await sendQueued(published.id);
 
       // Not the main feed: the ranked feed excludes the viewer's own Swifts
       // (recs/candidates.py — same rule every For You feed follows), so
@@ -230,11 +383,57 @@ export default function SwiftComposerScreen() {
   }
 
   // ── Chrome ─────────────────────────────────────────────────────────────────
+  // Both sheets, rendered by whichever step is on screen. One definition
+  // rather than two copies: `Modal` draws over everything regardless of where
+  // it sits in the tree, so the only thing that would differ between copies is
+  // which one somebody forgot to update.
+  const sheets = (
+    <>
+      <MusicPickerSheet
+        visible={pickingMusic}
+        selected={draft.track}
+        startMs={draft.musicStartMs}
+        // Zero before a take exists — the picker then offers the whole track
+        // and the offset is bounded again once there is a Swift to bound it.
+        swiftDurationMs={draft.uri ? keptDurationMs(draft) : 0}
+        onCancel={() => setPickingMusic(false)}
+        onConfirm={(track: SwiftTrackChoice, startMs: number) => {
+          patch({ track, musicStartMs: startMs });
+          setPickingMusic(false);
+        }}
+        onRemove={() => {
+          patch({ track: null, musicStartMs: 0 });
+          setPickingMusic(false);
+        }}
+      />
+      <SendToFriendsSheet
+        visible={pickingRecipients}
+        selected={draft.sendTo}
+        // `queue` rather than `send`: there is no Swift to send yet. The ids
+        // are held on the draft and spent once publishing returns an id — see
+        // `handlePublish`.
+        mode="queue"
+        onCancel={() => setPickingRecipients(false)}
+        onConfirm={(sendTo) => {
+          patch({ sendTo });
+          setPickingRecipients(false);
+        }}
+      />
+    </>
+  );
+
   // The capture step draws its own full-bleed chrome over the camera.
   if (step === 'capture') {
     return (
       <View style={styles.root}>
-        <CaptureStep onCaptured={handleCaptured} onCancel={confirmExit} />
+        <CaptureStep
+          draft={draft}
+          onChange={patch}
+          onCaptured={handleCaptured}
+          onCancel={confirmExit}
+          onPickMusic={() => setPickingMusic(true)}
+        />
+        {sheets}
       </View>
     );
   }
@@ -300,6 +499,8 @@ export default function SwiftComposerScreen() {
         <EditStep
           draft={draft}
           onChange={patch}
+          onPickMusic={() => setPickingMusic(true)}
+          onPickRecipients={() => setPickingRecipients(true)}
           onMeasured={({ durationMs }) =>
             setDraft((prev) => ({
               ...prev,
@@ -328,6 +529,8 @@ export default function SwiftComposerScreen() {
           <Text style={styles.blockerText}>{blockingProblem.message}</Text>
         </View>
       )}
+
+      {sheets}
     </View>
   );
 }

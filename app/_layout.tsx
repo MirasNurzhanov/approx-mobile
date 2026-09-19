@@ -148,6 +148,8 @@ function AppShell() {
         <Stack.Screen name="swifts/[id]"     options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="swifts/analytics" options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="swifts/user/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="swifts/tag/[name]" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="swifts/saved"    options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="zone"            options={{ headerShown: false, animation: 'slide_from_right' }} />
         {/* Both draw their own header; without an entry here the navigator adds
             a second, native one above it. */}

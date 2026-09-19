@@ -5,7 +5,7 @@ import { VenueSheet } from '../../components/map/VenueSheet';
 import { VenueLayer } from '../../components/map/VenueMarker';
 import { useMapVenues } from '../../hooks/useMapVenues';
 import { useMeetupProposal } from '../../app/clubs/[id]/chat';
-import { venueProposalRoute, type Venue } from '../venues';
+import { venueProposalRoute, venueSwiftRoute, type Venue } from '../venues';
 
 const mockGet = jest.fn();
 const mockPost = jest.fn();
@@ -54,11 +54,9 @@ beforeEach(() => {
 });
 afterEach(() => { if (tree) act(() => tree.unmount()); jest.restoreAllMocks(); jest.useRealTimers(); });
 
-it('shows the venue and both actions, with Swift explicitly disabled', async () => {
+it('shows the venue and both actions, and opens the composer for this venue', async () => {
   await act(async () => { tree = create(<VenueSheet venue={venue} onClose={mockClose} />); });
   expect(text()).toContain('Dostyk Plaza'); expect(text()).toContain('Samal-2');
-  const swift = tree.root.findByProps({ accessibilityLabel: 'Make a swift, coming soon' });
-  expect(swift.props.disabled).toBe(true); expect(swift.props.accessibilityState).toEqual({ disabled: true });
   expect(mockMyClubs).not.toHaveBeenCalled();
   await press('Propose a meetup');
   expect(mockMyClubs).toHaveBeenCalledTimes(1);
@@ -72,6 +70,23 @@ it('shows the venue and both actions, with Swift explicitly disabled', async () 
   expect(mockPush).toHaveBeenCalledWith({ pathname: '/clubs/[id]/chat', params: {
     id: '2', venueId: '7', venueRequest: expect.any(String), name: 'Book club',
   } });
+});
+
+it('sends the composer this venue by id, and never its coordinates', async () => {
+  // Same rule as the meetup proposal: the composer asks the server where the
+  // venue is. A coordinate carried in navigation state is one anybody can
+  // edit, and it would end up attached to a published Swift.
+  await act(async () => { tree = create(<VenueSheet venue={venue} onClose={mockClose} />); });
+  await press('Make a swift at Dostyk Plaza');
+  expect(mockClose).toHaveBeenCalled();
+  const route = venueSwiftRoute(venue.id);
+  expect(route).toEqual({ pathname: '/swifts/compose', params: { venueId: '7' } });
+  expect(JSON.stringify(route)).not.toContain(String(venue.latitude));
+  // iOS routes after the sheet finishes dismissing; both platforms end up here.
+  if (mockPush.mock.calls.length === 0) {
+    act(() => { tree.root.findByType(Modal).props.onDismiss(); });
+  }
+  expect(mockPush).toHaveBeenCalledWith(route);
 });
 
 it('keeps the club choice explicit even with one club', async () => {
@@ -196,6 +211,38 @@ it('draws the venue at its actual coordinates and parks removed native pins', as
   expect(marker().props.tracksViewChanges).toBe(true);
   act(() => { marker().props.onPress(); });
   expect(onOpen).toHaveBeenCalledTimes(1);
+});
+
+it('draws a venue as a small disc with its name in the shared caption plate', async () => {
+  // It was a filled, name-inside pill about 200pt wide, which made a few
+  // venues the loudest thing on the map. The colour is a dot the size of a
+  // person's now, and the name sits in the same plate every marker uses.
+  const { StyleSheet } = require('react-native');
+  const { venueAppearance } = require('../venueAppearance');
+  const appearance = venueAppearance(venue);
+
+  await act(async () => { tree = create(<VenueLayer venues={[venue]} parkedAt={{ latitude: 43, longitude: 76 }} onOpen={jest.fn()} />); });
+
+  const styles = tree.root.findAll(node => typeof node.type === 'string')
+    .map(node => StyleSheet.flatten(node.props.style) ?? {});
+  const disc = styles.find(style => style.backgroundColor === appearance.color);
+  expect(disc).toBeDefined();
+  expect(disc.width).toBeLessThanOrEqual(32);
+  expect(disc.height).toBeLessThanOrEqual(32);
+  // Nothing else on the marker is painted in the venue's colour: no pill.
+  expect(styles.filter(style => style.backgroundColor === appearance.color)).toHaveLength(1);
+
+  // The name is still there, one line, in the caption plate's width budget.
+  expect(text()).toContain('Dostyk Plaza');
+  const caption = tree.root.findAllByType(Text).find(node => node.props.children === 'Dostyk Plaza');
+  expect(caption!.props.numberOfLines).toBe(1);
+  const plate = StyleSheet.flatten(caption!.parent!.props.style) ?? {};
+  expect(plate.maxWidth).toBeLessThanOrEqual(108);
+
+  // The tail still points at the venue rather than the middle of the box.
+  const marker = tree.root.findAll(node => node.type === 'MockMarker')[0];
+  expect(marker.props.anchor.y).toBeGreaterThan(0.5);
+  expect(marker.props.anchor.y).toBeLessThan(0.75);
 });
 
 it('does not draw non-finite venue coordinates', async () => {

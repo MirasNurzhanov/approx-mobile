@@ -8,6 +8,7 @@ import {
   SwiftMuteIcon,
   SwiftRepostIcon,
   SwiftSaveIcon,
+  SwiftSendIcon,
   SwiftSoundIcon,
   type SwiftIconComponent,
 } from '@/components/swifts/icons';
@@ -64,6 +65,8 @@ export interface SwiftActionsProps {
   onComment: () => void;
   onRepost: () => void;
   onSave: () => void;
+  /** Forward this Swift to people privately. */
+  onSend: () => void;
   onMore: () => void;
   onToggleMute: () => void;
   /** Distance from the bottom, worked out by the caller from the nav arc. */
@@ -119,7 +122,7 @@ function SwiftActionsImpl({
   locationAvailable, revealState, onRevealLocation,
   isLiked, likeCount, commentCount, isReposted, repostCount, isSaved,
   allowReposts, allowComments,
-  muted, onLike, onComment, onRepost, onSave, onMore, onToggleMute, bottom,
+  muted, onLike, onComment, onRepost, onSave, onSend, onMore, onToggleMute, bottom,
 }: SwiftActionsProps) {
   const { colors } = useTheme();
 
@@ -180,6 +183,17 @@ function SwiftActionsImpl({
           ? 'Takes this Swift off your saved list'
           : 'Keeps this Swift on your profile, visible only to you'}
         onPress={onSave}
+      />
+
+      {/* No count here either, and for a stronger reason than saving's: a
+          "sent 14 times" number would tell the author how far their Swift had
+          travelled through other people's private messages, which is a fact
+          about those conversations rather than about the Swift. */}
+      <ActionButton
+        Glyph={SwiftSendIcon}
+        accessibilityLabel="Send to a friend"
+        accessibilityHint="Sends this Swift as a private message"
+        onPress={onSend}
       />
 
       {/* Only when this viewer could actually reveal it. A Swift whose

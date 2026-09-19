@@ -286,3 +286,23 @@ export function SwiftEmptyIcon({ size = 32, color = '#FFFFFF' }: SwiftIconProps)
     </Svg>
   )
 }
+
+/** A paper plane: send this Swift to somebody privately.
+ *
+ *  Its own glyph rather than `IconSend` from the design library, for the
+ *  reason stated at the top of `SwiftActions`: the rail sits over arbitrary
+ *  user video and needs a heavier stroke than a 1.5px UI icon to stay legible
+ *  against a bright frame. */
+export function SwiftSendIcon({ size = 28, color = '#FFFFFF' }: SwiftIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21 3.5L10.5 14M21 3.5l-6.7 17.4-3.8-7.3-7.3-3.8L21 3.5z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </Svg>
+  )
+}

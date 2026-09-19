@@ -127,13 +127,16 @@ export async function performSignOut(): Promise<void> {
   //
   // Sign-out used to pause the account, because visibility had no expiry and
   // somebody who signed out would otherwise stay pinned to wherever they last
-  // were forever. Two things changed. A position now expires on its own — the
-  // row falls off every map about fifteen minutes after the last report, and
-  // this device stops reporting a few lines below — so the stale pin problem
-  // solves itself. And Ghost Mode is a *setting* rather than a session state:
+  // were forever. Ghost Mode is a *setting* rather than a session state, so
   // writing it here would hand the account a choice it never made and greet it
-  // ghosted at next sign-in, which is the empty-map complaint this whole change
-  // set out to fix.
+  // ghosted at next sign-in — which is the empty-map complaint this whole
+  // change set out to fix.
+  //
+  // The stale pin is retired by the logout endpoint instead, which clears the
+  // stored coordinate outright. It used to be left to the fifteen-minute
+  // cutoff, but a friend's position is measured against a day now, and leaving
+  // somebody who has explicitly signed out on their friends' maps until
+  // tomorrow is not what signing out means.
 
   // Server-side revocation, plus push-token unregistration, which the logout
   // endpoint does unconditionally so a signed-out device stops being

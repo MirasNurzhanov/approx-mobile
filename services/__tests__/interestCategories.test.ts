@@ -184,7 +184,7 @@ describe('inferCategory', () => {
 // The whole catalogue must resolve exactly, not by keyword luck.
 //
 // This is what makes the "More" bucket unnecessary rather than merely hidden:
-// every one of the 681 seeded interests lands in the category the seed file
+// every seeded interest lands in the category the seed file
 // puts it in, whether or not the backend has run its categorising migration.
 // Adding an interest to the seed without regenerating `interestCatalogue.ts`
 // fails here and names it.
@@ -208,7 +208,7 @@ describe('the curated catalogue', () => {
   );
 
   it('covers the whole seed file', () => {
-    expect(entries).toHaveLength(681);
+    expect(entries).toHaveLength(771);
     expect(Object.keys(seed)).toHaveLength(9);
   });
 
@@ -232,7 +232,7 @@ describe('the curated catalogue', () => {
     const sections = sectionise(entries.map((e) => ({ name: e.name })));
     expect(sections).toHaveLength(9);
     expect(sections.some((s) => s.key === '')).toBe(false);
-    expect(sections.reduce((n, s) => n + s.items.length, 0)).toBe(681);
+    expect(sections.reduce((n, s) => n + s.items.length, 0)).toBe(entries.length);
   });
 
   it('fills all nine bubbles from the catalogue, seed counts intact', () => {

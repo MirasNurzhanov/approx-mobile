@@ -250,3 +250,15 @@ it('does not draw non-finite venue coordinates', async () => {
     parkedAt={{ latitude: 43, longitude: 76 }} onOpen={jest.fn()} />); });
   expect(tree.root.findAll(node => node.type === 'MockMarker')).toHaveLength(0);
 });
+
+it('a venue picked on the map replaces a dropped pin and posts as that venue', async () => {
+  await act(async () => { tree = create(<Proposal id={undefined} />); });
+  act(() => { proposal.open(); proposal.modalProps.onOpenMap(); });
+  expect(proposal.modalProps.modalView).toBe('map');
+  act(() => { proposal.modalProps.onConfirmVenue(venue); });
+  expect(proposal.modalProps.modalView).toBe('proposal');
+  expect(proposal.modalProps.propLocation).toEqual({ name: venue.name, lat: venue.latitude, lng: venue.longitude, venue_id: 7 });
+  act(() => { proposal.modalProps.onTitleChange('Coffee'); });
+  await act(async () => { await proposal.modalProps.onSubmit(); });
+  expect(mockPost).toHaveBeenCalledWith('/api/clubs/2/events/', expect.objectContaining({ venue_id: 7, location_name: 'Dostyk Plaza' }));
+});

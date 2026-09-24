@@ -12,6 +12,10 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { VenueSearchList } from '@/components/map/VenueSearchList';
+import { useMapVenues } from '@/hooks/useMapVenues';
+import { requestVenueFocus } from '@/services/venueFocus';
+import type { Venue } from '@/services/venues';
 import { Avatar } from '@/components/ui/Avatar';
 import type { Presence } from '@/services/presence';
 import { Card } from '@/components/ui/Card';
@@ -158,6 +162,14 @@ function UserCard({
   );
 }
 
+// ─── Places ───────────────────────────────────────────────────────────────────
+/** Its own component so the venue list is fetched only once Places is opened,
+ *  not on every visit to what is mostly a people search. */
+function PlaceResults({ query, onSelect }: { query: string; onSelect: (venue: Venue) => void }) {
+  const { venues, error, loading, retry } = useMapVenues();
+  return <VenueSearchList venues={venues} query={query} loading={loading} error={error} onRetry={retry} onSelect={onSelect} />;
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SearchScreen() {
   const { colors } = useTheme();
@@ -171,6 +183,9 @@ export default function SearchScreen() {
   const [searched, setSearched] = useState(false);
   const [focused, setFocused] = useState(false);
   const [sentHiIds, setSentHiIds] = useState<Set<number>>(new Set());
+  // People are searched on the server; places are the map's own editorial list,
+  // filtered here as you type (see services/venueSearch).
+  const [mode, setMode] = useState<'people' | 'places'>('people');
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
@@ -195,6 +210,7 @@ export default function SearchScreen() {
   function handleChange(text: string) {
     setQuery(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (mode === 'places') return;
     const trimmed = text.trim();
     if (trimmed.length < 2) {
       setResults([]);
@@ -221,6 +237,21 @@ export default function SearchScreen() {
     }
   }
 
+  function switchMode(next: 'people' | 'places') {
+    if (next === mode) return;
+    setMode(next);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    // The same words usually mean something different in each list, but a
+    // username is worth looking up when switching back to it.
+    if (next === 'people' && query.trim().length >= 2) doSearch(query.trim());
+  }
+
+  /** Back to the map, which flies to the venue and opens its card. */
+  function goToVenue(venue: Venue) {
+    requestVenueFocus(venue);
+    router.back();
+  }
+
   function goToProfile(user: SearchUser) {
     router.push({ pathname: '/profile/[id]', params: { id: user.id, username: user.username } });
   }
@@ -231,6 +262,10 @@ export default function SearchScreen() {
 
   // ─── Body ─────────────────────────────────────────────────────────────────
   function renderBody() {
+    if (mode === 'places') {
+      return <PlaceResults query={query} onSelect={goToVenue} />;
+    }
+
     if (loading) {
       return (
         <View style={styles.center}>
@@ -291,10 +326,10 @@ export default function SearchScreen() {
       <ScreenHeader
         title="Search"
         search={{
-          placeholder: 'Search by username…',
+          placeholder: mode === 'places' ? 'Search places…' : 'Search by username…',
           autoFocus: true,
           onChangeText: handleChange,
-          onSubmit: (text) => text.trim().length >= 2 && doSearch(text.trim()),
+          onSubmit: (text) => mode === 'people' && text.trim().length >= 2 && doSearch(text.trim()),
           onCancel: clear,
         }}
       >
@@ -313,13 +348,13 @@ export default function SearchScreen() {
               onChangeText={handleChange}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              placeholder="Search by username…"
+              placeholder={mode === 'places' ? 'Search places…' : 'Search by username…'}
               placeholderTextColor={colors.t3}
               autoFocus
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
-              onSubmitEditing={() => query.trim().length >= 2 && doSearch(query.trim())}
+              onSubmitEditing={() => mode === 'people' && query.trim().length >= 2 && doSearch(query.trim())}
             />
             {query.length > 0 && (
               <Pressable onPress={clear} hitSlop={8}>
@@ -329,6 +364,24 @@ export default function SearchScreen() {
           </GlassSurface>
         </View>
       </ScreenHeader>
+
+      {/* Outside the header on purpose: on iOS 26 the header's children are not
+          drawn at all, and the switch has to be there on every system. */}
+      <View style={styles.segment} accessibilityRole="tablist">
+        {(['people', 'places'] as const).map((value) => (
+          <Pressable
+            key={value}
+            onPress={() => switchMode(value)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: mode === value }}
+            style={[styles.segmentItem, mode === value && styles.segmentItemActive]}
+          >
+            <Text style={[styles.segmentText, mode === value && styles.segmentTextActive]}>
+              {value === 'people' ? 'People' : 'Places'}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       {renderBody()}
     </View>
@@ -370,6 +423,24 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontSize: 15,
     color: colors.t1,
   },
+
+  // People / Places
+  segment: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  segmentItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  segmentItemActive: { backgroundColor: colors.teal, borderColor: colors.teal },
+  segmentText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.t2 },
+  segmentTextActive: { color: colors.bg },
 
   // Center states
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 60 },

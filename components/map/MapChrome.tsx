@@ -181,7 +181,7 @@ export function TopBar({
         style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel="Search for people"
+        accessibilityLabel="Search people and places"
       >
         <GlassBackdrop />
         <IconSearch size={20} color={colors.t2} />

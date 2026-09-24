@@ -19,7 +19,7 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import MapView, { PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import type { Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -29,7 +29,8 @@ import { CHAT_SOCKET_LABEL, type ChatSocketStatus } from '@/services/chatSocket'
 import { catchUpHistory, mergeMessages } from '@/services/chatHistory';
 import { runBusy } from '@/services/busy';
 import { clubsApi } from '@/services/clubs';
-import { venuesApi } from '@/services/venues';
+import { venuesApi, type Venue } from '@/services/venues';
+import { PlacePicker } from '@/components/map/PlacePicker';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import {
   MAX_PINS, pinIdFor, pinMeetup, unpinPlace, useIsPinned,
@@ -733,7 +734,7 @@ function MeetupProposalModal({
   gettingLocation, proposalSubmitting, mapRegion,
   onTitleChange, onDescChange, onDateTimeChange, onClearLocation,
   onCurrentLocation, onOpenMap, onBackToForm, onRegionChange,
-  onConfirmMapLocation, onSubmit, onDismiss,
+  onConfirmMapLocation, onConfirmVenue, onSubmit, onDismiss,
 }: {
   modalView: 'proposal' | 'map' | null;
   top: number;
@@ -743,7 +744,7 @@ function MeetupProposalModal({
   onMeetingPointChange: (value: string) => void;
   propDesc: string;
   propDateTime: Date;
-  propLocation: { name: string; lat: number; lng: number } | null;
+  propLocation: { name: string; lat: number; lng: number; venue_id?: number } | null;
   gettingLocation: boolean;
   proposalSubmitting: boolean;
   mapRegion: Region;
@@ -756,6 +757,7 @@ function MeetupProposalModal({
   onBackToForm: () => void;
   onRegionChange: (r: Region) => void;
   onConfirmMapLocation: () => void;
+  onConfirmVenue: (venue: Venue) => void;
   onSubmit: () => void;
   onDismiss: () => void;
 }) {
@@ -840,7 +842,7 @@ function MeetupProposalModal({
                 </View>
                 {propLocation && (
                   <View style={styles.locationPreview}>
-                    <Ionicons name="location" size={14} color={colors.teal} />
+                    <Ionicons name={propLocation.venue_id ? 'storefront' : 'location'} size={14} color={colors.teal} />
                     <Text style={styles.locationPreviewText} numberOfLines={1}>{propLocation.name}</Text>
                     <Pressable onPress={onClearLocation} hitSlop={8}>
                       <Ionicons name="close-circle" size={16} color={colors.t3} />
@@ -871,50 +873,17 @@ function MeetupProposalModal({
           </KeyboardAvoidingView>
         </View>
       ) : (
-        <View style={styles.mapPickerRoot} accessibilityViewIsModal>
-          {/* Map header */}
-          <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
-            <Pressable
-              onPress={onBackToForm}
-              hitSlop={12}
-              style={styles.backBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Back to the proposal"
-            >
-              <Ionicons name="chevron-back" size={24} color={colors.t1} />
-            </Pressable>
-            <Text style={styles.mapPickerTitle}>Drop a pin</Text>
-            <View style={{ width: 36 }} />
-          </View>
-
-          {/* Map */}
-          <View style={styles.mapWrap}>
-            <MapView
-              style={StyleSheet.absoluteFill}
-              provider={PROVIDER_GOOGLE}
-              initialRegion={mapRegion}
-              onRegionChangeComplete={onRegionChange}
-            />
-            {/* Fixed center pin */}
-            <View pointerEvents="none" style={styles.centerPin}>
-              <Ionicons name="location" size={36} color={colors.teal} />
-              <View style={styles.centerPinDot} />
-            </View>
-          </View>
-
-          {/* Confirm */}
-          <View style={[styles.mapConfirmBar, { paddingBottom: bottom + 16 }]}>
-            <Pressable
-              style={[styles.mapConfirmBtn, gettingLocation && styles.submitBtnBusy]}
-              onPress={onConfirmMapLocation}
-              disabled={gettingLocation}
-            >
-              {gettingLocation
-                ? <ActivityIndicator color={colors.bg} size="small" />
-                : <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
-              }
-            </Pressable>
-          </View>
+        <View style={{ flex: 1 }} accessibilityViewIsModal>
+          <PlacePicker
+            initialRegion={mapRegion}
+            top={top}
+            bottom={bottom}
+            busy={gettingLocation}
+            onRegionChange={onRegionChange}
+            onBack={onBackToForm}
+            onConfirmPoint={onConfirmMapLocation}
+            onConfirmVenue={onConfirmVenue}
+          />
         </View>
       )}
     </Modal>
@@ -1261,6 +1230,14 @@ export function useMeetupProposal(
     setModalView('proposal');
   }
 
+  /** A venue from the picker: its own name and pin, and the id that lets the
+   *  server treat it as the managed place rather than a free point. */
+  function confirmVenue(venue: Venue) {
+    setPropLocation({ name: venue.name, lat: venue.latitude, lng: venue.longitude, venue_id: venue.id });
+    setMapRegion(region => ({ ...region, latitude: venue.latitude, longitude: venue.longitude }));
+    setModalView('proposal');
+  }
+
   function close() {
     setModalView(null);
     setPropTitle('');
@@ -1318,6 +1295,7 @@ export function useMeetupProposal(
       onBackToForm: () => setModalView('proposal'),
       onRegionChange: setMapRegion,
       onConfirmMapLocation: confirmMapLocation,
+      onConfirmVenue: confirmVenue,
       onSubmit: handleSubmit,
       onDismiss: () => { if (!submittingRef.current) close(); },
     },
@@ -1635,31 +1613,4 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   submitBtnText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.bg },
 
   // Map picker
-  mapPickerRoot: { flex: 1, backgroundColor: colors.bg },
-  mapPickerHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
-  },
-  mapPickerTitle: { fontFamily: fonts.display, fontSize: 17, fontWeight: '600', color: colors.t1 },
-  mapWrap: { flex: 1, position: 'relative' },
-  centerPin: {
-    position: 'absolute', top: '50%', left: '50%',
-    transform: [{ translateX: -18 }, { translateY: -36 }],
-    alignItems: 'center',
-  },
-  centerPinDot: {
-    width: 6, height: 6, borderRadius: 3, backgroundColor: colors.teal,
-    marginTop: -2,
-  },
-  mapConfirmBar: {
-    paddingHorizontal: 20, paddingTop: 16,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  mapConfirmBtn: {
-    backgroundColor: colors.teal, borderRadius: radius.l,
-    paddingVertical: 14, alignItems: 'center',
-  },
-  mapConfirmBtnText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.bg },
 });

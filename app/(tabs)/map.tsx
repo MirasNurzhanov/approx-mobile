@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -48,6 +48,7 @@ import { CreateStoryModal } from '@/components/map/CreateStoryModal';
 import { VenueSheet } from '@/components/map/VenueSheet';
 import { useMapVenues } from '@/hooks/useMapVenues';
 import type { Venue } from '@/services/venues';
+import { takeVenueFocus } from '@/services/venueFocus';
 
 // ─── Where the pieces live ────────────────────────────────────────────────────
 // This file is the screen: its state, effects and the wiring between them.
@@ -137,6 +138,23 @@ export default function MapScreen() {
   useEffect(() => { currentUserIdRef.current = currentUserId; });
 
   const reduceMotion = useReduceMotion();
+
+  // A venue picked on the Places tab of search. Search leaves it behind and
+  // goes back; the map takes it here, flies to it, and opens its card. The card
+  // waits for the flight (and for the search screen to finish leaving — iOS
+  // will not present a modal mid-transition).
+  const venueFocusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useFocusEffect(useCallback(() => {
+    const venue = takeVenueFocus();
+    if (!venue) return;
+    stopFollowing('tap');
+    mapRef.current?.animateToRegion(
+      { latitude: venue.latitude, longitude: venue.longitude, latitudeDelta: 0.006, longitudeDelta: 0.006 },
+      reduceMotion ? 0 : 500,
+    );
+    venueFocusTimer.current = setTimeout(() => setSelectedVenue(venue), reduceMotion ? 350 : 550);
+    return () => { if (venueFocusTimer.current) clearTimeout(venueFocusTimer.current); };
+  }, [mapRef, reduceMotion, stopFollowing]));
 
   // Who is allowed on this map at all, and whose stories may pin to it — see
   // hooks/useVisiblePeople. Policy, not plumbing.

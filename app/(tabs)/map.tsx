@@ -46,6 +46,7 @@ import { MapSheets } from '@/components/map/MapSheets';
 import { LocateButton, TopBar, MapPermissionGate, MapNotices, MapToasts } from '@/components/map/MapChrome';
 import { CreateStoryModal } from '@/components/map/CreateStoryModal';
 import { VenueSheet } from '@/components/map/VenueSheet';
+import { CheckInControl } from '@/components/map/CheckInControl';
 import { useMapVenues } from '@/hooks/useMapVenues';
 import type { Venue } from '@/services/venues';
 import { takeVenueFocus } from '@/services/venueFocus';
@@ -297,6 +298,9 @@ export default function MapScreen() {
   // the same line and the two would otherwise land exactly on each other.
   const ghostNoticeVisible = chromeVisible && ghost === true;
   const noticeTop = overlayTop + (ghostNoticeVisible ? 56 : 0);
+  // Below whatever notices are showing: the basemap-offset notice shares
+  // `noticeTop`, so the check-in pill steps under it when it is up.
+  const checkInTop = noticeTop + (overlays.chinaOffsetNotice && mapVisible ? 56 : 0);
 
   const region: Region | undefined = displayCoords
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
@@ -387,10 +391,14 @@ export default function MapScreen() {
         onOpenPrivacy={() => router.push('/privacy')}
       />
 
+      {/* Visibility to non-friends, this session only. Draws nothing when
+          discovery is Private or Ghost Mode is on — see the component. */}
+      {chromeVisible && <CheckInControl top={checkInTop} />}
+
       {venueError && chromeVisible && (
         <Pressable onPress={retryVenues} accessibilityRole="button"
           accessibilityLabel="Places unavailable. Retry loading venues"
-          style={{ position: 'absolute', top: overlayTop + 92, alignSelf: 'center',
+          style={{ position: 'absolute', top: checkInTop + 48, alignSelf: 'center',
             backgroundColor: colors.bg, borderRadius: 12, padding: 10 }}>
           <Text style={{ color: colors.t2 }}>Places unavailable · Tap to retry</Text>
         </Pressable>

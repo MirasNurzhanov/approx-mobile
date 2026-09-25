@@ -101,6 +101,11 @@ interface ZoneState {
    *  is the only screen that can know how long the track is. */
   zone_track_start_ms?: number;
   zone_track_end_ms?: number | null;
+
+  /** Moderation of the current track. 'quarantined' is the automatic mute
+   *  after several reports, pending a moderator; nobody else can hear it until
+   *  then. A new track starts at 'ok'. */
+  zone_audio_moderation?: 'ok' | 'quarantined' | 'removed';
 }
 
 /** Decorative level meter on the upload tile. Fixed shape: it stands for
@@ -146,9 +151,11 @@ function NowPlayingSection({ zone, audioUrl, title, musicRadius, silent, trimmed
           // subtitle is the only thing that changes, because "loops for anyone
           // within 200 m" would be describing something that is not happening.
           subtitle={
-            silent
-              ? 'Your music zone is off — nobody else can hear this'
-              : `Loops for anyone within ${fmtRadius(musicRadius)}`
+            zone.zone_audio_moderation === 'quarantined'
+              ? 'Muted after reports — nobody else can hear this while it’s reviewed'
+              : silent
+                ? 'Your music zone is off — nobody else can hear this'
+                : `Loops for anyone within ${fmtRadius(musicRadius)}`
           }
           startMs={zone.zone_track_start_ms ?? 0}
           endMs={zone.zone_track_end_ms ?? null}

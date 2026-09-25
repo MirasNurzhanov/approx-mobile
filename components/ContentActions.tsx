@@ -64,6 +64,7 @@ const SURFACE_LABEL: Record<ReportTarget, string> = {
   comment: 'comment',
   message: 'direct message',
   club_message: 'club message',
+  zone_audio: 'zone music track',
 };
 
 export function useContentActions() {

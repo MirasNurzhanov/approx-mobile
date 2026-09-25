@@ -7,10 +7,11 @@
  * fix, map opened, foreground, background start, location change, zone entry,
  * device restart — was a list of events that must not check anybody in.
  *
- * That product is gone on purpose. Sharing follows the OS location permission
- * now and persists across launches, the way Find My and Snap Map do, so most
- * of those events *are* how somebody ends up on the map and asserting
- * otherwise would be asserting a bug.
+ * Since the second 5.1.2(i) rejection that list applies again — to everybody
+ * who is not a friend. Friends see you whenever Ghost Mode is off, across
+ * launches; anyone else only after a Check in tap in the current session. The
+ * second describe block below bounds the check-in callers the way the first
+ * bounds Ghost Mode writes.
  *
  * The danger reversed rather than disappeared, and the shape of the guard
  * survives it. Somebody who has turned themselves off must stay off: no
@@ -153,5 +154,51 @@ describe('ghost mode is only ever changed deliberately', () => {
     // Ahead of the send, not beside it.
     expect(source.indexOf('hasAcknowledgedLocationDisclosure'))
       .toBeLessThan(source.indexOf('api.patch'));
+  });
+});
+
+/**
+ * The check-in (App Review 5.1.2(i), second rejection): visibility to anyone
+ * who is not a friend takes a tap on the map, every session. App Review's list
+ * of things that must never check somebody in — opening the app, logging in,
+ * granting a permission, a GPS fix, foregrounding, the background task, a
+ * stored preference — is a list of callers, so this bounds the callers.
+ */
+describe('only the Check in button checks anybody in', () => {
+  const files = sourceFiles();
+  const read = (file: string) => fs.readFileSync(file, 'utf8');
+
+  it('reaches the check-in endpoint from one module only', () => {
+    const offenders = files
+      .filter((file) => read(file).includes('/api/proximity/check-in/'))
+      .map(relative)
+      .filter((file) => file !== 'services/checkIn.ts');
+    expect(offenders).toEqual([]);
+  });
+
+  it('calls checkIn() from the map control and nowhere else', () => {
+    const callers = files
+      .filter((file) => relative(file) !== 'services/checkIn.ts')
+      .filter((file) => /\bcheckIn\b/.test(read(file)) && /from '@\/services\/checkIn'/.test(read(file))
+        && /import\s*\{[^}]*\bcheckIn\b[^}]*\}\s*from '@\/services\/checkIn'/.test(read(file)))
+      .map(relative);
+    expect(callers).toEqual(['components/map/CheckInControl.tsx']);
+  });
+
+  it('never persists the session token', () => {
+    // Persisting it would rebuild the "previous preference" the per-session
+    // rule exists to prevent — see the header of services/checkIn.ts.
+    const source = read(path.join(ROOT, 'services/checkIn.ts'));
+    expect(source).not.toMatch(/from '(@react-native-async-storage[^']*|expo-secure-store|expo-file-system|react-native-mmkv)'/);
+    expect(source).not.toMatch(/\b(AsyncStorage|SecureStore)\.\w+\(/);
+  });
+
+  it('keeps the startup call to ending a check-in, never starting one', () => {
+    const layout = read(path.join(ROOT, 'app/_layout.tsx'));
+    expect(layout).toContain('endStaleCheckIn()');
+    expect(layout).not.toMatch(/\bcheckIn\(/);
+    for (const rel of ['services/backgroundLocation.ts', 'services/location.ts', 'services/permissions.ts']) {
+      expect(read(path.join(ROOT, rel))).not.toMatch(/services\/checkIn|from '\.\/checkIn'/);
+    }
   });
 });

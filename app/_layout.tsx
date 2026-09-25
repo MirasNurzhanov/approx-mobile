@@ -38,6 +38,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerForPushNotifications } from '@/services/notifications';
 import { refreshPrivacy } from '@/services/privacy';
 import { refreshAcceptance, useTerms } from '@/services/terms';
+import { endStaleCheckIn } from '@/services/checkIn';
 import { startNotificationRouting } from '@/services/notificationRouting';
 import '@/services/backgroundLocation';
 
@@ -66,16 +67,18 @@ function AppShell() {
     refreshAcceptance().catch(() => {});
   }, [isAuthenticated]);
 
-  // Pull the sharing state this account already has. Nothing is ended here any
-  // more: a previous run's visibility used to be torn down on every launch, so
-  // that being on the map was a per-launch decision. It persists now, the way
-  // Find My and Snap Map do, and Ghost Mode is the switch that ends it.
+  // Pull the privacy state this account already has, and end any check-in a
+  // previous run of the app made. Friends' visibility persists across launches
+  // (Ghost Mode is what ends it); visibility to everybody else is per session
+  // and needs a new tap each time — App Review 5.1.2(i). `endStaleCheckIn` is
+  // once per process and foreground only; see services/checkIn.ts.
   //
   // Gated on being signed in, like the push effect below: there is nobody to
   // fetch for otherwise.
   useEffect(() => {
     if (!isAuthenticated) return;
     refreshPrivacy().catch(() => {});
+    endStaleCheckIn().catch(() => {});
   }, [isAuthenticated]);
 
   useEffect(() => {

@@ -15,6 +15,7 @@ import { resetPinnedPlaces } from './pinnedPlaces';
 import { resetNotificationPrefs } from './notificationPrefs';
 import { resetLocationDisclosure } from './locationDisclosure';
 import { resetPrivacy } from './privacy';
+import { forgetCheckIn } from './checkIn';
 import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
 import { resetTerms } from './terms';
@@ -170,6 +171,10 @@ export async function performSignOut(): Promise<void> {
   // account inherits the previous user's privacy settings, block list and
   // story archive.
   await resetPrivacy().catch(() => {});
+  // The server ended the check-in with the session (users.views.LogoutView);
+  // the token and the button state go with it, so the next account does not
+  // present somebody else's session at startup.
+  forgetCheckIn();
   // Per install, not per account: the next person to sign in on this device
   // has not been told what being on the map means, and inheriting somebody
   // else's acknowledgement is the one case where they would be published

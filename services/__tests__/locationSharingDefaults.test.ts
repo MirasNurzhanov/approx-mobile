@@ -65,6 +65,7 @@ async function withUnreadableStore(body: () => Promise<void>): Promise<void> {
 function settings(overrides: Partial<PrivacySettings> = {}): PrivacySettings {
   return {
     ghost_mode: false,
+    discovery_mode: 'discoverable',
     is_private: false,
     visibility_interests: 'everyone',
     visibility_stories: 'friends',

@@ -30,16 +30,16 @@ interface Props {
 
 const POINTS: { title: string; body: string }[] = [
   {
-    title: 'People nearby can see you',
-    body: 'While Approx has your location, you appear on the map for people around you — including while the app is closed, if you allowed that.',
+    title: 'Your friends see exactly where you are',
+    body: 'Friends see your precise position on the map whenever Ghost Mode is off — including while Approx is closed, if you allowed that. There’s nothing to switch on for them.',
   },
   {
-    title: 'Friends see exactly where you are',
-    body: 'Everyone else sees a rough area of about 500m instead of a point. You do not choose this per person; it follows whether you are friends.',
+    title: 'Nobody else, unless you check in',
+    body: 'People who aren’t your friends see you only after you tap Check in on the map, and only until you close Approx — as a rough area of about 500m. Opening Approx never checks you in.',
   },
   {
-    title: 'Ghost Mode turns it off',
-    body: 'One switch in Privacy & safety. While it is on nobody can see you, you cannot see anyone either, and the rest of Approx keeps working.',
+    title: 'Ghost Mode hides you from everyone',
+    body: 'One switch in Privacy & safety. While it is on nobody can see you — friends included — you cannot see anyone either, and the rest of Approx keeps working.',
   },
 ];
 
@@ -55,7 +55,7 @@ export function LocationDisclosure({ visible, onAcknowledge }: Props) {
       <View style={styles.backdrop}>
         <View style={styles.sheet} accessibilityViewIsModal accessible={false}>
           <Text style={styles.title} accessibilityRole="header">
-            You’re on the map
+            Who sees you on the map
           </Text>
 
           {POINTS.map((point) => (

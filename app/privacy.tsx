@@ -35,6 +35,7 @@ import {
   updatePrivacy,
   usePrivacySettings,
   type Audience,
+  type DiscoveryMode,
   type PrivacySettings,
 } from '@/services/privacy';
 
@@ -42,11 +43,26 @@ import {
 // the API omits fields a viewer may not see, so these controls change what the
 // server sends, not what this app chooses to draw.
 
-// Location visibility is one card now — status, precision, and a single check
-// in / check out button — and it lives in components/LocationVisibilityCard so
-// this screen and the Settings tab cannot drift apart on the wording of
-// something this consequential. The mode list and its explainer copy moved
-// there with it.
+// Location visibility is one card — status and the Ghost Mode switch — in
+// components/LocationVisibilityCard. Discovery (Private / Discoverable) is its
+// own section below it; the check-in itself lives on the map, because it is a
+// per-session act rather than a setting (App Review 5.1.2(i)).
+
+/** Discovery, in the order and words the screen shows it. Discoverable does
+ *  not make anybody visible — it only puts the Check in button on the map, and
+ *  the copy has to say so, because that is the line App Review drew. */
+const DISCOVERY_OPTIONS: { value: DiscoveryMode; label: string; hint: string }[] = [
+  {
+    value: 'private',
+    label: 'Private',
+    hint: 'Only your friends ever see you on the map. There’s no check-in.',
+  },
+  {
+    value: 'discoverable',
+    label: 'Discoverable',
+    hint: 'Adds a Check in button to the map. People who aren’t your friends see you only after you tap it, and only until you close Approx. Choosing this doesn’t make you visible by itself.',
+  },
+];
 
 const AUDIENCE_FIELDS: {
   key: keyof PrivacySettings;
@@ -287,6 +303,42 @@ export default function PrivacyScreen() {
               and attached to the feature that needs it — see the header note in
               components/BackgroundLocationRow for why it is not on the map. */}
           <BackgroundLocationRow sharing={!settings.ghost_mode} />
+        </View>
+
+        {/* ── Discovery ── */}
+        <View style={styles.section}>
+          <SectionLabel>DISCOVERY</SectionLabel>
+          <Card style={styles.fieldsCard}>
+            <View style={styles.fieldBlock}>
+              <Text style={styles.rowLabel}>Who besides your friends can find you</Text>
+              <View style={styles.segment} accessibilityRole="radiogroup">
+                {DISCOVERY_OPTIONS.map((option) => {
+                  const selected = settings.discovery_mode === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      disabled={saving}
+                      onPress={() => { if (!selected) save({ discovery_mode: option.value }); }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, disabled: saving }}
+                      style={({ pressed }) => [
+                        styles.segmentItem,
+                        selected && styles.segmentItemSelected,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={[styles.rowHint, { marginTop: 10 }]}>
+                {DISCOVERY_OPTIONS.find((o) => o.value === settings.discovery_mode)?.hint}
+              </Text>
+            </View>
+          </Card>
         </View>
 
         {/* ── Per-field visibility ── */}

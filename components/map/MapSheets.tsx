@@ -32,6 +32,7 @@ import {
     IconPin,
 } from '@/components/ui/icons';
 import { ZonePlayer } from '@/components/ZonePlayer';
+import { useContentActions } from '@/components/ContentActions';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import { useNavContentPadding } from '@/hooks/useNavMetrics';
@@ -459,6 +460,9 @@ function UserSheetStatus({ user }: { user: NearbyUser }) {
 function UserSheetZone({ user, zoneUrl }: { user: NearbyUser; zoneUrl: string }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+  // Zone Music is audio other people hear, so it is reportable like any other
+  // user-generated content (App Review 1.2) — by the people who can hear it.
+  const { present, sheets } = useContentActions();
 
   const distanceM = user.distance ?? (user.distance_km != null ? user.distance_km * 1000 : null);
   // Their music zone, which is always a circle — never the city border their
@@ -509,7 +513,23 @@ function UserSheetZone({ user, zoneUrl }: { user: NearbyUser; zoneUrl: string })
         <Text style={styles.zoneNoteText}>
           Audible to their friends only. It stays silent until you press play.
         </Text>
+        <Pressable
+          onPress={() => present({
+            target: 'zone_audio',
+            targetId: user.id,
+            subject: `@${user.username}’s zone music`,
+            authorId: user.id,
+            authorUsername: user.username,
+            authorAvatar: user.profile_picture,
+          })}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`Report or block ${user.username}’s zone music`}
+        >
+          <Text style={styles.zoneReportText}>Report</Text>
+        </Pressable>
       </View>
+      {sheets}
     </View>
   );
 }

@@ -468,6 +468,12 @@ export const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     lineHeight: 15,
     color: colors.t3,
   },
+  zoneReportText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.t2,
+  },
 
   // ── Sheet ──
   //

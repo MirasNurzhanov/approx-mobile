@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { api } from './api';
+import { markCheckedOut } from './checkIn';
 
 // Single source of truth for privacy settings, shared by the Privacy & safety
 // screen and the Settings tab so a change on one updates the other without a
@@ -13,6 +14,11 @@ import { api } from './api';
 
 export type Audience = 'everyone' | 'friends' | 'nobody';
 
+/** Who besides friends may ever see you. `private` is friends-only, with no
+ *  check-in to make; `discoverable` puts the Check in button on the map. It
+ *  never makes anybody visible by itself — only the tap does, each session. */
+export type DiscoveryMode = 'private' | 'discoverable';
+
 export interface PrivacySettings {
   /** The one off switch for the map, and it cuts both ways: a ghost is on
    * nobody's map and has nobody on theirs. Replaced a three-way
@@ -20,6 +26,7 @@ export interface PrivacySettings {
    * see the precise point and everybody else a ~500m cell, decided per viewer
    * on the server. */
   ghost_mode: boolean;
+  discovery_mode: DiscoveryMode;
   is_private: boolean;
   visibility_interests: Audience;
   visibility_stories: Audience;
@@ -161,6 +168,9 @@ export async function updatePrivacy(patch: Partial<PrivacySettings>): Promise<vo
   try {
     const { data } = await api.patch<PrivacySettings>('/api/users/privacy/', patch);
     setState({ settings: data });
+    // The server ends a check-in on going Private or Ghost; mirror that so the
+    // map's button does not keep claiming a visibility that is gone.
+    if (data.ghost_mode || data.discovery_mode === 'private') markCheckedOut();
   } catch (e) {
     if (previous) setState({ settings: previous });
     throw e;

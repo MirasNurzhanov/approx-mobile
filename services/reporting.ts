@@ -24,7 +24,9 @@ export type ReportTarget =
   | 'story'
   | 'comment'
   | 'message'
-  | 'club_message';
+  | 'club_message'
+  /** Somebody's Zone Music; the id is the owner's user id. */
+  | 'zone_audio';
 
 /** Kept in the same order as the sheet renders them, worst-first-ish: the
  *  categories that need a human today are near the top where a distressed
@@ -48,6 +50,7 @@ const PATHS: Record<ReportTarget, (id: number | string) => string> = {
   comment:      (id) => `/api/moderation/report/comment/${id}/`,
   message:      (id) => `/api/moderation/report/message/${id}/`,
   club_message: (id) => `/api/moderation/report/club-message/${id}/`,
+  zone_audio:   (id) => `/api/moderation/report/zone-audio/${id}/`,
 };
 
 /** What a caller shows the user when the report could not be filed.

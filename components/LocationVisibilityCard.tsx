@@ -6,30 +6,23 @@ import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 import type { PrivacySettings } from '@/services/privacy';
+import { useCheckIn } from '@/services/checkIn';
 import { openAppSettings, refreshPermissions, usePermissionStore } from '@/services/permissions';
 
 // The one place the app states, in words, whether other people can see you.
 //
-// One axis now, where there were two. It used to carry a check in / check out
-// button *and* a Live / Approximate picker, because precision was a setting;
-// precision follows the relationship now — friends see the precise point,
-// everybody else a ~500m cell, decided per viewer on the server — so there is
-// nothing left to pick and the card is a single switch with a status line
-// above it.
+// Visibility follows the relationship (App Review 5.1.2(i)): friends see you
+// whenever Ghost Mode is off; everybody else only while you are checked in on
+// the map, for that session. So the status line has four answers to "who can
+// see me", and only the last has no fix inside this app:
 //
-// Being on a map is a state rather than a preference, which is why the status
-// line is the loudest thing here and the control sits under it. The three
-// states it can report are genuinely different answers to "why can nobody see
-// me", and only one of them has a fix inside this app:
-//
-//   Visible        sharing, and on the map as soon as a position lands
-//   Ghost Mode     you turned yourself off — mutual, and the switch undoes it
-//   Location off   the OS permission is denied, and Settings is the only route
+//   Visible to friends        the default — friends only
+//   Visible · checked in      this session, non-friends too
+//   Ghost Mode                nobody, mutual; the switch here undoes it
+//   Location off              the OS permission is denied; Settings is the route
 //
 // That last one takes over the card rather than sitting beside the switch. A
-// toggle that cannot work is worse than no toggle: leaving Ghost Mode cannot
-// publish a position the OS will not hand over, so the card says what is
-// actually wrong and offers the one button that helps.
+// toggle that cannot work is worse than no toggle.
 
 interface Props {
   settings: PrivacySettings;
@@ -45,6 +38,7 @@ export function LocationVisibilityCard({ settings, saving, onGhostChange }: Prop
   const styles = makeStyles(colors);
 
   const ghost = settings.ghost_mode;
+  const { checkedIn } = useCheckIn();
 
   // Read rather than ask: this card must never trigger a permission dialog by
   // rendering. `bindForegroundRefresh` keeps the store current after a trip to
@@ -115,7 +109,7 @@ export function LocationVisibilityCard({ settings, saving, onGhostChange }: Prop
             style={[styles.statusValue, { color: ghost ? colors.t1 : colors.green }]}
             accessibilityLiveRegion="polite"
           >
-            {ghost ? 'Ghost Mode' : 'Visible'}
+            {ghost ? 'Ghost Mode' : checkedIn ? 'Visible · checked in' : 'Visible to friends'}
           </Text>
         </View>
         {ghost ? (
@@ -128,7 +122,9 @@ export function LocationVisibilityCard({ settings, saving, onGhostChange }: Prop
       <Text style={styles.explainer}>
         {ghost
           ? 'Ghost Mode works both ways: nobody can see you on the map, and you cannot see other people. Your profile details and Swifts are hidden from everyone, including friends. You can still manage your uploads and analytics, use clubs and send messages.'
-          : 'People nearby can see you on the map. Friends see exactly where you are; everyone else sees a rough area of about 500m. Turn on Ghost Mode to hide your profile details and Swifts from everyone, including friends.'}
+          : checkedIn
+            ? 'Your friends see exactly where you are. You’re checked in, so people nearby who aren’t your friends see a rough area of about 500m until you check out, close Approx, or 8 hours pass. Turn on Ghost Mode to hide from everyone, including friends.'
+            : 'Your friends see exactly where you are. Nobody else can see you unless you check in on the map, which lasts for that session only. Turn on Ghost Mode to hide from everyone, including friends.'}
       </Text>
 
       {/* ── The one action ── */}
@@ -166,7 +162,7 @@ export function LocationVisibilityCard({ settings, saving, onGhostChange }: Prop
       <Text style={styles.footnote}>
         {ghost
           ? 'Nothing turns this off on its own — not opening Approx, not granting a permission.'
-          : 'This lasts until you turn on Ghost Mode. Closing Approx does not change it, and if you allowed location while closed, your place on the map stays current.'}
+          : 'Friends keep seeing you until you turn on Ghost Mode — closing Approx doesn’t change that, and if you allowed location while closed, your place on their map stays current.'}
       </Text>
     </View>
   );

@@ -5,13 +5,17 @@
 // The "when" is what broke a previous version: it asked with the default
 // 'light' before storage had answered, and the library it used force-stopped
 // the app to apply it. So the rules pinned here are that a request only ever
-// carries the stored or the toggled theme, and that iOS — where a request is
+// carries the stored or the chosen theme, and that iOS — where a request is
 // applied at once, under a system alert — is never asked on launch.
+//
+// There are two icons and more themes than that: each theme asks for the icon
+// of its light or dark side.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, Text } from 'react-native';
 import { act, create } from 'react-test-renderer';
 
+import type { ThemeId } from '../../constants/theme';
 import { AppThemeProvider, useTheme } from '../../context/ThemeContext';
 import { getAppIcon, isAppIconSwitchingAvailable, setAppIcon } from '../../modules/approx-app-icon';
 
@@ -36,10 +40,10 @@ function setPlatform(os: 'ios' | 'android') {
   Object.defineProperty(Platform, 'OS', { value: os, configurable: true });
 }
 
-let toggle: () => void = () => {};
+let choose: (id: ThemeId) => void = () => {};
 function Probe() {
-  const { themeMode, toggleTheme } = useTheme();
-  toggle = toggleTheme;
+  const { themeMode, setTheme } = useTheme();
+  choose = setTheme;
   return <Text>{themeMode}</Text>;
 }
 
@@ -101,7 +105,7 @@ describe('the native wrapper', () => {
 });
 
 describe('when ThemeContext asks for an icon', () => {
-  it('asks for the new theme on every toggle, on both platforms', async () => {
+  it('asks for the new theme on every choice, on both platforms', async () => {
     for (const os of ['ios', 'android'] as const) {
       setPlatform(os);
       mockNative.setIcon.mockClear();
@@ -109,13 +113,30 @@ describe('when ThemeContext asks for an icon', () => {
       const tree = await renderProvider();
       mockNative.setIcon.mockClear();
 
-      await act(async () => { toggle(); });
+      await act(async () => { choose('dark'); });
       expect(tree.root.findByType(Text).props.children).toBe('dark');
-      await act(async () => { toggle(); });
+      await act(async () => { choose('light'); });
 
       expect(requested()).toEqual(['dark', 'light']);
       act(() => tree.unmount());
     }
+  });
+
+  it('asks for the icon of a palette theme’s side — light, for all of them today', async () => {
+    setPlatform('ios');
+    await AsyncStorage.setItem(STORAGE_KEY, 'dark');
+    const tree = await renderProvider();
+
+    await act(async () => { choose('lagoon'); });
+    expect(tree.root.findByType(Text).props.children).toBe('light');
+    expect(requested()).toEqual(['light']);
+  });
+
+  it('on Android, brings a stored palette theme’s icon in line on launch', async () => {
+    setPlatform('android');
+    await AsyncStorage.setItem(STORAGE_KEY, 'orchid');
+    await renderProvider();
+    expect(requested()).toEqual(['light']);
   });
 
   it('on Android, brings the icon in line with the stored theme — never the default', async () => {

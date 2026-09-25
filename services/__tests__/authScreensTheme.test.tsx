@@ -17,8 +17,9 @@ jest.mock('../../context/ThemeContext', () => ({
     const theme = require('../../constants/theme');
     return {
       colors: mockMode === 'dark' ? theme.colors : theme.lightColors,
+      themeId: mockMode,
       themeMode: mockMode,
-      toggleTheme: () => {},
+      setTheme: () => {},
     };
   },
 }));

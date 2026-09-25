@@ -43,6 +43,7 @@ import { Button } from '@/components/ui/Button';
 import {
   IconBell,
   IconBlocked,
+  IconBrush,
   IconChevron,
   IconGauge,
   IconInfo,
@@ -51,7 +52,6 @@ import {
   IconLock,
   IconLogout,
   IconMail,
-  IconMoon,
   IconMusic,
   IconShield,
   IconTrash,
@@ -59,7 +59,7 @@ import {
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { useNavContentPadding } from '@/hooks/useNavMetrics';
-import { fonts } from '@/constants/theme';
+import { fonts, getTheme } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useNavStyle } from '@/context/NavStyleContext';
 import { useTheme } from '@/context/ThemeContext';
@@ -217,15 +217,13 @@ function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
 function PreferencesSection({
   notifAllowed,
   onToggleNotifications,
-  darkMode,
-  onToggleTheme,
+  themeName,
   wheelNav,
   onToggleWheelNav,
 }: {
   notifAllowed: boolean | null;
   onToggleNotifications: (v: boolean) => void;
-  darkMode: boolean;
-  onToggleTheme: () => void;
+  themeName: string;
   wheelNav: boolean;
   onToggleWheelNav: (v: boolean) => void;
 }) {
@@ -246,11 +244,6 @@ function PreferencesSection({
             )
           }
         />
-        <SettingsRow
-          icon={IconMoon}
-          label="Dark mode"
-          right={<PrefSwitch value={darkMode} onValueChange={onToggleTheme} />}
-        />
         {/* No explanatory note: the nav being switched is at the bottom of this
             very screen, so flipping this shows the answer faster than any
             wording could. */}
@@ -258,6 +251,20 @@ function PreferencesSection({
           icon={IconGauge}
           label="Wheel navigation bar"
           right={<PrefSwitch value={wheelNav} onValueChange={onToggleWheelNav} />}
+        />
+        {/* Was a "Dark mode" switch. With more than two themes it is a choice,
+            not an on/off, so it moved below the switches — see the ordering
+            rule above SettingsRow. */}
+        <SettingsRow
+          icon={IconBrush}
+          label="Theme"
+          onPress={() => router.push('/appearance')}
+          right={
+            <View style={styles.rowTrailing}>
+              <Text style={styles.rowTrailingText}>{themeName}</Text>
+              <IconChevron size={16} color={colors.t3} />
+            </View>
+          }
         />
         <SettingsRow
           icon={IconList}
@@ -530,7 +537,7 @@ function AccountActions({ isSigningOut, onSignOut, onDeleteAccount }: {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
-  const { colors, themeMode, toggleTheme } = useTheme();
+  const { colors, themeId } = useTheme();
   const { navStyle, setNavStyle } = useNavStyle();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { confirmLogout, isSigningOut } = useAuth();
@@ -736,8 +743,7 @@ export default function SettingsScreen() {
         <PreferencesSection
           notifAllowed={notifAllowed}
           onToggleNotifications={toggleNotifications}
-          darkMode={themeMode === 'dark'}
-          onToggleTheme={toggleTheme}
+          themeName={getTheme(themeId).name}
           wheelNav={navStyle === 'wheel'}
           onToggleWheelNav={(on) => setNavStyle(on ? 'wheel' : 'bar')}
         />

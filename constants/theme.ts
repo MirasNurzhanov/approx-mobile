@@ -102,6 +102,223 @@ export const lightColors: ColorPalette = {
   navWedge: '#FFFFFF',
 }
 
+// ─── Palette themes ───────────────────────────────────────────────────────────
+// Four more light themes, each built from a five-or-fewer colour palette. The
+// palette's own hexes go where they read — canvas, body text, accent, tints —
+// and the working tokens around them (secondary text, borders, the nav's
+// selected colour) are derived from the same hue until they clear the same
+// contrast the light theme is held to. services/__tests__/themes.test.ts and
+// navPalette.test.ts check every theme in THEMES, these included.
+//
+// `purple`, `blue`, `orange`, `red` and `green` keep their meanings across all
+// of them — "yours", "friend", "connected", destructive, online — so a palette
+// only moves one of those where it has a colour that says the same thing.
+
+/** Forest and sage greens, sand, a terracotta accent, on cream. */
+export const sageColors: ColorPalette = {
+  bg: '#F8F6EE',
+  surface: '#FFFFFF',
+  surface2: '#EFE9DD',
+  border: '#E4DCCD',
+  t1: '#2E3A2F',
+  t2: '#5A6453',
+  t3: '#7C8377',
+  teal: '#6B7F5B',
+  tealTint: '#E9EEE3',
+  tealLine: '#C3CDB6',
+  purple: '#8B6FD4',
+  blue: '#4D8DFF',
+  // Terracotta stands in for "connected": still an orange, and at 3.58:1 on
+  // white it reads better as text than the light theme's own #F97316 (2.80:1).
+  orange: '#C96F4F',
+  red: '#E5484D',
+  green: '#3DAE6E',
+  coral: '#6B7F5B',
+  coralSoft: '#E9EEE3',
+  violet: '#8B6FD4',
+  navBg: '#FFFFFF',
+  // Sage itself is 4.36:1 on white, just under what the 11pt tab label needs;
+  // the palette's forest green is the same hue with room to spare.
+  navActive: '#2E3A2F',
+  navOnActive: '#FFFFFF',
+  navInactive: '#6A6F65',
+  navBorder: '#E4DCCD',
+  navWedge: '#FFFFFF',
+}
+
+/** Deep navy on ice blue, with sky and aqua. */
+export const lagoonColors: ColorPalette = {
+  bg: '#E8F6FF',
+  surface: '#FFFFFF',
+  surface2: '#DCEFFD',
+  border: '#C9E2F4',
+  t1: '#0D2240',
+  t2: '#44607E',
+  t3: '#657F9A',
+  // Navy, not the sky blue: #3BA7F2 is 2.63:1 on white and would put every
+  // primary button's label below legibility. Sky and aqua carry the tints.
+  teal: '#0B3D91',
+  tealTint: '#DCEFFD',
+  tealLine: '#7FE7D6',
+  purple: '#8B6FD4',
+  blue: '#4D8DFF',
+  orange: '#F97316',
+  red: '#E5484D',
+  green: '#3DAE6E',
+  coral: '#0B3D91',
+  coralSoft: '#DCEFFD',
+  violet: '#8B6FD4',
+  navBg: '#FFFFFF',
+  navActive: '#0B3D91',
+  navOnActive: '#FFFFFF',
+  navInactive: '#5B6B7D',
+  navBorder: '#C9E2F4',
+  navWedge: '#FFFFFF',
+}
+
+/** Plum and orchid pinks on a blush ground. */
+export const orchidColors: ColorPalette = {
+  bg: '#EADADA',
+  // A touch warmer than white, so cards sit on the blush rather than punch
+  // holes in it.
+  surface: '#FFFAFA',
+  surface2: '#F4E6EA',
+  border: '#E0C9CF',
+  t1: '#4D3A4D',
+  t2: '#634F61',
+  t3: '#7E6A7B',
+  teal: '#BE5CA9',
+  tealTint: '#F7E4F2',
+  tealLine: '#D59CC5',
+  purple: '#8B6FD4',
+  blue: '#4D8DFF',
+  orange: '#F97316',
+  red: '#E5484D',
+  green: '#3DAE6E',
+  coral: '#BE5CA9',
+  coralSoft: '#F7E4F2',
+  violet: '#8B6FD4',
+  navBg: '#FFFFFF',
+  // The orchid darkened until it clears AA as text (5.21:1), the same move
+  // the light theme makes with its orange.
+  navActive: '#A8479A',
+  navOnActive: '#FFFFFF',
+  navInactive: '#76687A',
+  navBorder: '#E0C9CF',
+  navWedge: '#FFFFFF',
+}
+
+/** Porcelain white and graphite, with a bright blue accent. */
+export const porcelainColors: ColorPalette = {
+  bg: '#F5F5F7',
+  surface: '#FFFFFF',
+  surface2: '#E9E9EE',
+  border: '#DEDEE3',
+  t1: '#1D1D1F',
+  t2: '#6E6E73',
+  // The palette's silver (#AAAAAA) is 2.32:1 on white — a swatch, not a text
+  // colour. This is the same grey pulled down to where a placeholder reads.
+  t3: '#86868B',
+  teal: '#007AFF',
+  tealTint: '#E5F1FF',
+  tealLine: '#A8CFFF',
+  purple: '#8B6FD4',
+  blue: '#4D8DFF',
+  orange: '#F97316',
+  red: '#E5484D',
+  green: '#3DAE6E',
+  coral: '#007AFF',
+  coralSoft: '#E5F1FF',
+  violet: '#8B6FD4',
+  navBg: '#FFFFFF',
+  // #007AFF is 4.02:1 on white; this is the same blue at 4.70:1.
+  navActive: '#0071E3',
+  navOnActive: '#FFFFFF',
+  navInactive: '#6E6E73',
+  navBorder: '#DEDEE3',
+  navWedge: '#FFFFFF',
+}
+
+export type ThemeId = 'light' | 'dark' | 'sage' | 'lagoon' | 'orchid' | 'porcelain'
+
+export interface ThemeOption {
+  id: ThemeId
+  name: string
+  /** One line for the picker. */
+  description: string
+  /**
+   * Which way everything outside the palette goes — the status bar, the
+   * keyboard and other native chrome, blur tints, the basemap, the home-screen
+   * icon. Each of those has exactly a light and a dark version, so every theme
+   * has to say which of the two it is.
+   */
+  scheme: 'light' | 'dark'
+  colors: ColorPalette
+  /** The palette as a strip of chips, for the picker. Not read anywhere else. */
+  swatches: string[]
+}
+
+/** Every theme, in the order the picker shows them. */
+export const THEMES: readonly ThemeOption[] = [
+  {
+    id: 'light',
+    name: 'Light',
+    description: 'Warm cream with a coral accent',
+    scheme: 'light',
+    colors: lightColors,
+    swatches: ['#2D2A22', '#E8714A', '#F0C4AE', '#FAF9F5'],
+  },
+  {
+    id: 'dark',
+    name: 'Dark',
+    description: 'Near-black with a teal accent',
+    scheme: 'dark',
+    colors,
+    swatches: ['#0A0A0B', '#1C1C21', '#1FC7B6', '#F4F4F6'],
+  },
+  {
+    id: 'sage',
+    name: 'Sage',
+    description: 'Forest greens and terracotta on cream',
+    scheme: 'light',
+    colors: sageColors,
+    swatches: ['#2E3A2F', '#6B7F5B', '#D9C9B2', '#C96F4F', '#F8F6EE'],
+  },
+  {
+    id: 'lagoon',
+    name: 'Lagoon',
+    description: 'Deep navy, sky and aqua on ice blue',
+    scheme: 'light',
+    colors: lagoonColors,
+    swatches: ['#0B3D91', '#3BA7F2', '#7FE7D6', '#E8F6FF'],
+  },
+  {
+    id: 'orchid',
+    name: 'Orchid',
+    description: 'Plum and orchid pinks on blush',
+    scheme: 'light',
+    colors: orchidColors,
+    swatches: ['#4D3A4D', '#BE5CA9', '#D59CC5', '#EADADA'],
+  },
+  {
+    id: 'porcelain',
+    name: 'Porcelain',
+    description: 'Clean white and graphite with a bright blue',
+    scheme: 'light',
+    colors: porcelainColors,
+    swatches: ['#1D1D1F', '#AAAAAA', '#007AFF', '#F5F5F7'],
+  },
+]
+
+export function isThemeId(value: unknown): value is ThemeId {
+  return THEMES.some((theme) => theme.id === value)
+}
+
+/** The theme for an id. Falls back to Light, the app's default. */
+export function getTheme(id: ThemeId): ThemeOption {
+  return THEMES.find((theme) => theme.id === id) ?? THEMES[0]
+}
+
 // Legacy light/dark palette kept for the Expo template components
 // (themed-text, themed-view, collapsible) that still call useThemeColor.
 export const Colors = {

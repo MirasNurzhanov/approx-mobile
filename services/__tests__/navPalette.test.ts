@@ -1,7 +1,7 @@
 // The bottom nav's colour contract.
 //
-// The nav is five tokens that have to hold up against each other in two
-// themes, and the numbers are easy to break by eye: the light theme's selected
+// The nav is five tokens that have to hold up against each other in every
+// theme, and the numbers are easy to break by eye: the light theme's selected
 // colour is an orange, and the obvious "make it more orange" edit — the
 // palette's own `#F97316` — lands at 2.80:1 and fails even the 3:1 graphical
 // floor, never mind the 4.5:1 the 11pt tab label needs. The theme file says so
@@ -11,7 +11,7 @@
 // label and tint *on* `navBg`, and it is the pill and wedge fill *under*
 // `navOnActive` — and since contrast is symmetric, one number settles both.
 
-import { colors as darkColors, lightColors } from '../../constants/theme';
+import { lightColors, THEMES } from '../../constants/theme';
 
 /** WCAG 2.1 relative luminance, sRGB. */
 function luminance(hex: string): number {
@@ -32,12 +32,11 @@ function contrast(a: string, b: string): number {
  *  threshold, so it gets no large-text exemption. */
 const AA = 4.5;
 
-const THEMES = [
-  ['light', lightColors],
-  ['dark', darkColors],
-] as const;
+// Every theme, from the registry, so a palette added there is held to the same
+// contract without anybody having to remember this file exists.
+const PALETTES = THEMES.map((theme) => [theme.id, theme.colors] as const);
 
-describe.each(THEMES)('%s nav palette', (_name, palette) => {
+describe.each(PALETTES)('%s nav palette', (_name, palette) => {
   it('reads the selected item against the bar it sits on', () => {
     expect(contrast(palette.navActive, palette.navBg)).toBeGreaterThanOrEqual(AA);
   });

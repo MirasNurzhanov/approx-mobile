@@ -170,6 +170,7 @@ function AppShell() {
         <Stack.Screen name="connections"     options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="permissions"     options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="notification-settings" options={{ headerShown: false, animation: 'slide_from_right' }} />
+        <Stack.Screen name="appearance"      options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="nearby"          options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="edit-links"      options={{ headerShown: false, animation: 'slide_from_right' }} />
         <Stack.Screen name="onboarding"      options={{ headerShown: false }} />

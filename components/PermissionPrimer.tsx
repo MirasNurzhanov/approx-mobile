@@ -46,10 +46,15 @@ import { useTheme } from '@/context/ThemeContext';
 //
 // ─── Not to be confused with ──────────────────────────────────────────────────
 //
-// `components/TermsAgreement` and `components/LocationSharingConsent` are
-// consent screens that do *not* precede a native dialog, and both must be
-// declinable. Making those undismissible, or making this one dismissible, are
-// both rejections.
+// `components/TermsAgreement` is a consent screen that does *not* precede a
+// native dialog, and it must be declinable. Making it undismissible, or making
+// this one dismissible, are both rejections.
+//
+// `components/LocationDisclosure` is a third thing again, and the distinction
+// matters: it is not a consent gate at all. It tells somebody what being on
+// the map means and has one button, because there is nothing to decline —
+// declining is Ghost Mode, which lives in Privacy & safety. It never precedes
+// a system dialog, so it cannot defer one.
 //
 // Usage:
 //   const { ensure, primer } = usePermissionPrimer();

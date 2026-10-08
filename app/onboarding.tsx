@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { fonts, radius } from '@/constants/theme';
+import { fonts, radius, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { markOnboardingSeen } from '@/services/onboarding';
 
 const { width } = Dimensions.get('window');
@@ -40,17 +41,11 @@ const SLIDES: { id: string; icon: IoniconsName; title: string; body: string }[] 
   },
 ];
 
-const LIGHT = {
-  bg:       '#faf9f5',
-  surface2: '#FCEEE8',
-  t1:       '#2D2A22',
-  t2:       '#6B6455',
-  teal:     '#E8714A',
-  border:   '#E8E4DA',
-} as const;
-
 export default function OnboardingScreen() {
-  const styles = makeStyles(LIGHT);
+  // Follows the app theme: a device already switched to dark sees a dark
+  // introduction, not a cream one.
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { bottom } = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const flatRef = useRef<FlatList>(null);
@@ -93,7 +88,7 @@ export default function OnboardingScreen() {
         renderItem={({ item }) => (
           <View style={styles.slide}>
             <View style={styles.iconWrap}>
-              <Ionicons name={item.icon} size={80} color={LIGHT.teal} />
+              <Ionicons name={item.icon} size={80} color={colors.teal} />
             </View>
             <Text style={styles.title}>{item.title}</Text>
             <Text style={styles.body}>{item.body}</Text>
@@ -121,7 +116,7 @@ export default function OnboardingScreen() {
   );
 }
 
-const makeStyles = (c: typeof LIGHT) => StyleSheet.create({
+const makeStyles = (c: ColorPalette) => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: c.bg,
@@ -139,7 +134,7 @@ const makeStyles = (c: typeof LIGHT) => StyleSheet.create({
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: c.surface2,
+    backgroundColor: c.tealTint,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 44,

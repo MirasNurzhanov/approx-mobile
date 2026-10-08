@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { tokenStore } from './tokenStore';
 
 import { beginSessionEnd, BASE_URL } from './api';
 import { stopBackgroundLocationUpdates } from './backgroundLocation';
@@ -7,8 +8,14 @@ import { resetAlertsCount } from './alerts';
 import { resetBlocked } from './blocked';
 import { getInstallId } from './device';
 import { resetOwnMotion } from './ownMotion';
+import { resetPositionSmoothing } from './positionSmoothing';
+import { clearRouteCache } from './routing';
+import { resetTravelCalibration } from './travelCalibration';
+import { resetPinnedPlaces } from './pinnedPlaces';
 import { resetNotificationPrefs } from './notificationPrefs';
+import { resetLocationDisclosure } from './locationDisclosure';
 import { resetPrivacy } from './privacy';
+import { forgetCheckIn } from './checkIn';
 import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
 import { resetTerms } from './terms';
@@ -59,29 +66,6 @@ const ACCOUNT_SCOPED_KEYS = [
  * Sign-out must never appear to hang because the network is down. */
 const REVOKE_TIMEOUT_MS = 4000;
 
-/**
- * Take the departing account off the map. Best-effort; never throws.
- *
- * See the call site for why sign-out implies this at all. Pausing also
- * clears the stored position server-side, so this leaves nothing behind for
- * the account to be found by either.
- */
-async function pauseLocationSharing(accessToken: string | null): Promise<void> {
-  if (!accessToken) return;
-  try {
-    await axios.patch(
-      `${BASE_URL}/api/users/privacy/`,
-      { location_sharing: 'paused' },
-      {
-        timeout: REVOKE_TIMEOUT_MS,
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
-    );
-  } catch {
-    // Swallowed on purpose. See above.
-  }
-}
-
 /** True when the session is settled and nothing needs retrying later. */
 async function revokeRefreshToken(refresh: string, accessToken: string | null): Promise<boolean> {
   try {
@@ -130,26 +114,30 @@ export async function performSignOut(): Promise<void> {
   // refetch on focus; left running, every one of those calls 401s during
   // teardown and drags the api layer's forced-logout path in with it.
   beginSessionEnd();
+  // Invalidate coordinate-keyed routes immediately, before any logout awaits.
+  clearRouteCache();
 
   const [accessToken, refresh] = await Promise.all([
-    AsyncStorage.getItem('access_token').catch(() => null),
-    AsyncStorage.getItem('refresh_token').catch(() => null),
+    tokenStore.getItem('access_token').catch(() => null),
+    tokenStore.getItem('refresh_token').catch(() => null),
   ]);
 
   // Off the map, before the credentials that could do it are thrown away.
   //
-  // Signing out is not the same act as choosing Paused and normally should not
-  // imply it. It does here because sharing has no expiry: left alone, somebody
-  // who signed out would stay on other people's maps indefinitely, pinned to
-  // wherever they last were, with no app running to move them and no screen
-  // left to tell them about it.
+  // Nothing is written to the sharing setting here, and that is deliberate.
   //
-  // Bare axios with the token passed in, not the `api` instance, and for the
-  // same reason `revokeRefreshToken` below does it: `beginSessionEnd()` above
-  // has already closed that instance, so a request through it would never
-  // leave the device. Best-effort — it never throws, because sign-out has to
-  // work offline, and the setting is still there to change at next sign-in.
-  await pauseLocationSharing(accessToken);
+  // Sign-out used to pause the account, because visibility had no expiry and
+  // somebody who signed out would otherwise stay pinned to wherever they last
+  // were forever. Ghost Mode is a *setting* rather than a session state, so
+  // writing it here would hand the account a choice it never made and greet it
+  // ghosted at next sign-in — which is the empty-map complaint this whole
+  // change set out to fix.
+  //
+  // The stale pin is retired by the logout endpoint instead, which clears the
+  // stored coordinate outright. It used to be left to the fifteen-minute
+  // cutoff, but a friend's position is measured against a day now, and leaving
+  // somebody who has explicitly signed out on their friends' maps until
+  // tomorrow is not what signing out means.
 
   // Server-side revocation, plus push-token unregistration, which the logout
   // endpoint does unconditionally so a signed-out device stops being
@@ -159,7 +147,7 @@ export async function performSignOut(): Promise<void> {
     if (!revoked) {
       // Queued, not silently dropped: the token stays valid until it expires,
       // so it is worth one more attempt on the next launch.
-      await AsyncStorage.setItem(PENDING_REVOCATION, refresh).catch(() => {});
+      await tokenStore.setItem(PENDING_REVOCATION, refresh).catch(() => {});
     }
   }
 
@@ -169,6 +157,9 @@ export async function performSignOut(): Promise<void> {
   await stopBackgroundLocationUpdates().catch(() => {});
 
   await AsyncStorage.multiRemove(ACCOUNT_SCOPED_KEYS).catch(() => {});
+  let credentialError: unknown;
+  try { await tokenStore.clearSession(); }
+  catch (error) { credentialError = error; }
 
   // The Google SDK keeps its own idea of who is signed in, on the far side of
   // AsyncStorage. Left alone, the next tap on the Google button re-signs the
@@ -180,7 +171,24 @@ export async function performSignOut(): Promise<void> {
   // account inherits the previous user's privacy settings, block list and
   // story archive.
   await resetPrivacy().catch(() => {});
+  // The server ended the check-in with the session (users.views.LogoutView);
+  // the token and the button state go with it, so the next account does not
+  // present somebody else's session at startup.
+  forgetCheckIn();
+  // Per install, not per account: the next person to sign in on this device
+  // has not been told what being on the map means, and inheriting somebody
+  // else's acknowledgement is the one case where they would be published
+  // without ever having read it.
+  await resetLocationDisclosure().catch(() => {});
   await resetArchive().catch(() => {});
+  // Pinned places, in memory and on disk. A pin off a Swift is a coordinate one
+  // account was shown after asking for it — see services/pinnedPlaces — and it
+  // has no business being on the next account'''s map, or on their phone.
+  await resetPinnedPlaces().catch(() => {});
+  // How long journeys take *for this person, where they go*. Ratios rather
+  // than places, but derived from journeys they asked about — so the next
+  // account on this phone starts from the constants, not from these.
+  await resetTravelCalibration().catch(() => {});
   // City outlines are public geometry, not private data — but they are keyed
   // to the cities the previous account chose, and the next one should not
   // inherit them.
@@ -195,10 +203,16 @@ export async function performSignOut(): Promise<void> {
   // starting in "driving" — with nearby prompts quietly suppressed for someone
   // who is sitting still.
   resetOwnMotion();
+  // The last account's position, and the interval still interpolating it. The
+  // map's own unmount clears this too, but sign-out can happen from anywhere —
+  // and a module-level timer left running is the one piece of this teardown
+  // that would keep working after the screen it belongs to is gone.
+  resetPositionSmoothing();
   // Whether the *previous* account had agreed to the Terms says nothing about
   // the next one. Leaving a `false` here would walk a new sign-in straight
   // past the gate.
   resetTerms();
+  if (credentialError) throw credentialError;
 }
 
 /**
@@ -207,7 +221,7 @@ export async function performSignOut(): Promise<void> {
  * token is revoked or simply expired past the point of mattering.
  */
 export async function flushPendingRevocations(): Promise<void> {
-  const pending = await AsyncStorage.getItem(PENDING_REVOCATION).catch(() => null);
+  const pending = await tokenStore.getItem(PENDING_REVOCATION).catch(() => null);
   if (!pending) return;
 
   // The access token that went with this session is long gone, and /logout/
@@ -232,11 +246,11 @@ export async function flushPendingRevocations(): Promise<void> {
     // 401 means it is already dead — blacklisted, or past its seven days.
     // Either way there is nothing left to revoke.
     if (e?.response?.status === 401) {
-      await AsyncStorage.removeItem(PENDING_REVOCATION).catch(() => {});
+      await tokenStore.removeItem(PENDING_REVOCATION).catch(() => {});
     }
     return;
   }
 
   const done = await revokeRefreshToken(rotated, access);
-  if (done) await AsyncStorage.removeItem(PENDING_REVOCATION).catch(() => {});
+  if (done) await tokenStore.removeItem(PENDING_REVOCATION).catch(() => {});
 }

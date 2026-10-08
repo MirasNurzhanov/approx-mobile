@@ -34,6 +34,10 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }),
 }));
 jest.mock('../../components/ui/Button', () => ({ Button: () => null }));
+// The banner takes the theme accent; any palette will do for layout assertions.
+jest.mock('../../context/ThemeContext', () => ({
+  useTheme: () => ({ colors: jest.requireActual('../../constants/theme').colors }),
+}));
 
 function renderOverlay(props: Partial<React.ComponentProps<typeof ZoneTutorialOverlay>> = {}) {
   let tree!: ReturnType<typeof create>;

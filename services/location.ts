@@ -1,23 +1,29 @@
 import { api } from './api';
-import { getCachedLocationSharing, type LocationSharing } from './privacy';
+import { hasAcknowledgedLocationDisclosure } from './locationDisclosure';
+import { getCachedGhostMode } from './privacy';
 
 // The one place location leaves this device.
 //
 // Both callers (the map's tick and the background task) go through here so the
-// user's Location sharing setting cannot be honoured in one and forgotten in
-// the other.
+// two gates below cannot be honoured in one and forgotten in the other:
 //
-// Layering, deliberately:
-//   Paused       — nothing is sent at all. Not "sent and hidden".
-//   Approximate  — coordinates are coarsened here, so full precision never
-//                  leaves the phone, and the server then snaps them to its own
-//                  ~500m grid before storing. The server does not trust this.
-//   Live         — sent at the usual 6-decimal precision.
+//   Ghost Mode        nothing is sent at all. Not "sent and hidden".
+//   Not yet disclosed nothing is sent either, until the person has been shown
+//                     what being on the map means. See
+//                     services/locationDisclosure.ts — a client that has not
+//                     shown that screen reports no position, and a row with no
+//                     position is on nobody's map, which is what keeps the
+//                     migration from publishing anyone unannounced.
+//
+// What is *not* here any more is coarsening. Coordinates used to be rounded to
+// ~110m before transmission for an Approximate sharer, so full precision never
+// left the phone. Friends are entitled to the precise point now, and the phone
+// cannot know who is asking, so it sends the truth and the server decides per
+// viewer what to show — see users.visibility.coordinates_for. That is a real
+// widening of what leaves the device, and it is the price of the friends-see-
+// precisely half of the model.
 
-/** ~110m. Enough to stop the exact position ever being transmitted, while the
- * server's grid snap does the real fuzzing. */
-const APPROX_DECIMALS = 3;
-const LIVE_DECIMALS = 6;
+const COORD_DECIMALS = 6;
 
 export interface Coordinates {
   latitude: number;
@@ -29,58 +35,60 @@ function round(value: number, decimals: number): number {
 }
 
 /**
- * The coordinates at the precision `mode` is willing to transmit.
+ * Coordinates at the precision this device transmits and draws.
  *
- * `paused` has no precision of its own because it transmits nothing:
- * `prepareCoordinates` rejects it before it ever reaches here, and the owner's
- * own map — which sends nothing either — keeps full precision so they can
- * still see themselves while invisible to everyone else.
- *
- * The owner's map draws their marker through this too, so an approximate
- * sharer is never shown a precise position we would not transmit. Otherwise
- * their own screen becomes the one place the exact value is still on display.
+ * One precision for both, which is the simplification the relationship model
+ * bought: the owner's own marker and the value on the wire are the same
+ * number, so their screen cannot disagree with what the server holds.
  */
-export function atSharingPrecision(coords: Coordinates, mode: LocationSharing): Coordinates {
-  const decimals = mode === 'approximate' ? APPROX_DECIMALS : LIVE_DECIMALS;
+export function atSharingPrecision(coords: Coordinates): Coordinates {
   return {
-    latitude: round(coords.latitude, decimals),
-    longitude: round(coords.longitude, decimals),
+    latitude: round(coords.latitude, COORD_DECIMALS),
+    longitude: round(coords.longitude, COORD_DECIMALS),
   };
 }
 
-/** What we are willing to transmit, or null when sharing is paused. */
+/** What we are willing to transmit, or null when we must send nothing. */
 export async function prepareCoordinates(coords: Coordinates): Promise<Coordinates | null> {
-  const mode = await getCachedLocationSharing();
-  if (mode === 'paused') return null;
-  return atSharingPrecision(coords, mode);
+  if (await getCachedGhostMode()) return null;
+  if (!(await hasAcknowledgedLocationDisclosure())) return null;
+  return atSharingPrecision(coords);
 }
 
 /**
- * Send a position update, honouring the user's sharing mode. Resolves to false
- * when nothing was sent.
+ * Send a position update, honouring both gates above. Resolves to false when
+ * nothing was sent.
  *
  * `speed` is the platform's own estimate in m/s, passed straight through. It
  * rides this request rather than getting one of its own, and the server buckets
  * it into a coarse class and discards the figure — no numeric speed is ever
- * stored or served. Omitted entirely when paused, along with everything else.
+ * stored or served. Omitted entirely when nothing is sent, along with
+ * everything else.
  */
 export async function reportLocation(
   coords: Coordinates,
   speed?: number | null,
   accuracy?: number | null,
+  measuredAt?: number,
 ): Promise<boolean> {
   const payload = await prepareCoordinates(coords);
   if (!payload) return false;
+  // Do not turn a cached fix into a fresh server position on every map tick.
+  if (measuredAt !== undefined && (!Number.isFinite(measuredAt) ||
+    Date.now() - measuredAt > 120_000 || measuredAt > Date.now() + 5_000)) return false;
   // Absent rather than null when there is no estimate: the server treats a
   // missing speed as "no new information" and leaves the previous class alone,
   // which is the honest reading of a fix that could not measure it.
   const body: Record<string, unknown> = { ...payload };
+  if (measuredAt !== undefined) body.measured_at = new Date(measuredAt).toISOString();
   if (speed != null && speed >= 0) body.speed = speed;
   // How well the phone knows where it is. Unlike speed this is stored, because
   // club visibility turns on which district somebody is standing in and a fix
-  // with a two-kilometre radius cannot answer that. Sent at full precision
-  // even on Approximate sharing: it says nothing about *where* they are.
-  if (accuracy != null && accuracy >= 0) body.accuracy = accuracy;
+  // with a two-kilometre radius cannot answer that. It says nothing about
+  // *where* they are.
+  if (accuracy !== undefined) {
+    body.accuracy = typeof accuracy === 'number' && Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
+  }
   await api.patch('/api/proximity/location/', body);
   return true;
 }

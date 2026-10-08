@@ -1,6 +1,6 @@
 import { api } from './api';
 import type { Coordinates } from './location';
-import { getCachedLocationSharing } from './privacy';
+import { getCachedGhostMode } from './privacy';
 
 // Asking "who is near me", from whichever anchor this user has.
 //
@@ -27,23 +27,33 @@ import { getCachedLocationSharing } from './privacy';
 // that does, it is the only caller of the update endpoint, and it already
 // refuses to send anything while paused.
 
-/** Sent at full precision, and only on the paused path.
+/** Sent at full precision, and only on the private path.
  *
  * Not coarsened, because coarsening would degrade the caller's own results for
- * no privacy gain: this coordinate answers their query and is then gone. The
- * Approximate *sharing* mode fuzzes for a different reason — there the point
- * is stored and shown to other people, and that is the case worth blurring. */
+ * no privacy gain: this coordinate answers their query and is then gone.
+ * Fuzzing happens where the point is stored and shown to *other* people, which
+ * is a different case and the one worth blurring. */
 function queryBody(coords: Coordinates) {
   return { latitude: coords.latitude, longitude: coords.longitude };
 }
 
+/**
+ * Whether to ask with our own anchor instead of the stored one.
+ *
+ * A ghost has a position on file — it still answers their clubs and region —
+ * but the server will not use it to place them or to answer them, because
+ * Ghost Mode is mutual. So the private query is the path that still works, and
+ * it returns nothing, which is the correct answer rather than an error.
+ */
 async function usesPrivateQuery(): Promise<boolean> {
-  return (await getCachedLocationSharing()) === 'paused';
+  return await getCachedGhostMode();
 }
 
 /** Sharing is on, but no position has reached the server yet. */
 export const LOCATION_NOT_AVAILABLE = 'location_not_available';
-/** Sharing is off. Not a transient state and not something to wait out. */
+/** Ghost Mode is on. Not a transient state and not something to wait out. The
+ *  wire value still reads `paused`; the server kept it stable for older
+ *  clients that branch on the string. */
 export const SHARING_PAUSED = 'location_sharing_paused';
 
 /**

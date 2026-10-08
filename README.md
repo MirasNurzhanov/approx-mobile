@@ -79,6 +79,26 @@ it **fails** if any icon name doesn't exist in the installed
 that don't match the catalog are stored server-side with `needs_review=True`
 (reviewable in the Django admin).
 
+## Which backend a build talks to
+
+`EXPO_PUBLIC_API_URL` sets the API address, validated in `services/apiUrl.ts`.
+Switching backends never needs a source edit.
+
+| Build | How to point it somewhere else | If unset |
+|---|---|---|
+| Local `npx expo start` | `EXPO_PUBLIC_API_URL=http://<your-computer's-LAN-IP>:8000` in `.env.local` (gitignored). The Android emulator reaches your computer as `10.0.2.2`. | production |
+| EAS `development` / `preview` | `"env": { "EXPO_PUBLIC_API_URL": "https://<staging-host>" }` on that profile in `eas.json` | production |
+| EAS `production` | Already pinned to production in `eas.json`. | — |
+
+The value is baked into the JavaScript bundle when it is built, so restart
+Metro with `npx expo start --clear` after changing it, and an installed build
+keeps the address it was built with.
+
+A release build refuses plain `http` and local or private-network hosts at
+launch; a development build accepts them. Keep local addresses in `.env.local`,
+not `.env`: `.env` is not gitignored, and a committed file is uploaded with
+every EAS build.
+
 ## Get started
 
 1. Install dependencies

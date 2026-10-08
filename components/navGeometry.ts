@@ -21,6 +21,9 @@ export const NAV_ARC_R_OUT = W / 2 - 4;
 /** The arc's full height when expanded, matching Speedometer's own `SVG_H`. */
 export const NAV_ARC_H = NAV_ARC_R_OUT + 6;
 
+/** Height of the wheel's compact row, excluding the safe-area inset. */
+export const NAV_WHEEL_SLIM_H = 56;
+
 /**
  * How far above the safe-area inset a control of `width`, inset `fromRight`
  * points from the right edge, has to sit to clear the nav arc.

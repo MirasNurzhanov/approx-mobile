@@ -4,6 +4,8 @@ import { BAR_STYLE_IS_NATIVE } from '@/constants/platform';
 import { useNavStyle } from '@/context/NavStyleContext';
 
 interface ApproxNavProps {
+  /** Keep this screen's wheel compact, even while its tab is inactive. */
+  compact?: boolean;
   /** Name of a NAV_SECTIONS entry to spotlight for a tutorial. Both nav styles
    *  honour it, so a caller never has to know which one is on. */
   highlightSection?: string;
@@ -25,7 +27,7 @@ interface ApproxNavProps {
  * Settings hands it a `highlightSection` during the zone tutorial, and because
  * `/market` needs it from outside the tab group entirely.
  */
-export function ApproxNav({ highlightSection, standalone }: ApproxNavProps = {}) {
+export function ApproxNav({ highlightSection, standalone, compact }: ApproxNavProps = {}) {
   const { navStyle, ready } = useNavStyle();
 
   // Nothing until the stored choice is back. One frame of no nav is invisible;
@@ -33,7 +35,7 @@ export function ApproxNav({ highlightSection, standalone }: ApproxNavProps = {})
   if (!ready) return null;
 
   if (navStyle === 'wheel') {
-    return <Speedometer highlightSection={highlightSection} standalone={standalone} />;
+    return <Speedometer highlightSection={highlightSection} standalone={standalone} compact={compact} />;
   }
 
   // Bar style, where it is the real native tab bar (iOS — UITabBarController,

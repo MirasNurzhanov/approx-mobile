@@ -6,11 +6,9 @@
  * be answered there too. Two copies of a wheel picker is two places for the
  * padding maths to drift.
  *
- * Fixed to the light palette, like the auth screens it appears on — those are
- * cream in both themes, and a picker that followed the system theme would be a
- * dark sheet on a cream card.
+ * Follows the app theme, like the sign-up screens it appears on.
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -26,7 +24,8 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
-import { fonts, lightColors as L, radius } from '@/constants/theme';
+import { fonts, radius, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // Module-local: nothing outside this file reads the wheels' contents, and an
 // exported non-component would cost the file its Fast Refresh boundary.
@@ -54,10 +53,14 @@ interface WheelProps {
 function WheelRow({ index, count, text, scrollY }: {
   index: number; count: number; text: string; scrollY: SharedValue<number>;
 }) {
+  const { colors: L } = useTheme();
+  const wh = useMemo(() => makeWheelStyles(L), [L]);
+  // A plain string, so the worklet below captures a value rather than the palette object.
+  const activeColor = L.t1;
   const style = useAnimatedStyle(() => {
     const raw = Math.round(scrollY.get() / ITEM_H);
     const active = Math.max(0, Math.min(raw, count - 1));
-    return index === active ? { color: L.t1, fontWeight: '600' as const, fontSize: 16 } : {};
+    return index === active ? { color: activeColor, fontWeight: '600' as const, fontSize: 16 } : {};
   });
   return (
     <View style={wh.item}>
@@ -72,6 +75,8 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
   // Matches `getItemLayout`'s offset for padded-index `selectedIdx`, which is
   // also where `initialScrollIndex` lands the list before the first frame.
   const scrollY = useSharedValue(selectedIdx * ITEM_H);
+  const { colors: L } = useTheme();
+  const wh = useMemo(() => makeWheelStyles(L), [L]);
 
   const scrollHandler = useAnimatedScrollHandler((e) => {
     scrollY.set(e.contentOffset.y);
@@ -105,7 +110,7 @@ function Wheel({ items, labels, selectedIdx, onSelect }: WheelProps) {
   );
 }
 
-const wh = StyleSheet.create({
+const makeWheelStyles = (L: ColorPalette) => StyleSheet.create({
   wrap: { flex: 1, height: ITEM_H * 5, overflow: 'hidden' },
   item: { height: ITEM_H, justifyContent: 'center', alignItems: 'center' },
   label:    { fontFamily: fonts.body, color: L.t3, fontSize: 15 },
@@ -125,6 +130,8 @@ export default function DatePickerField({
   value, onChange, error, label = 'Date of birth',
 }: DatePickerFieldProps) {
   const [open, setOpen] = useState(false);
+  const { colors: L } = useTheme();
+  const dp = useMemo(() => makeStyles(L), [L]);
 
   const [dayIdx,   setDayIdx]   = useState(() => { const i = DAYS.indexOf(value.split('-')[2]);       return i >= 0 ? i : 0;  });
   const [monthIdx, setMonthIdx] = useState(() => { const i = MONTH_KEYS.indexOf(value.split('-')[1]); return i >= 0 ? i : 0;  });
@@ -152,8 +159,8 @@ export default function DatePickerField({
       </Pressable>
       {error ? <Text style={dp.error}>{error}</Text> : null}
 
-      <Modal visible={open} transparent animationType="fade">
-        <View style={dp.overlay}>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <View style={dp.overlay} accessibilityViewIsModal>
           <View style={dp.sheet}>
             <Text style={dp.sheetTitle}>{label}</Text>
             <View style={dp.wheelRow}>
@@ -183,7 +190,7 @@ export default function DatePickerField({
   );
 }
 
-const dp = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   wrapper:   { gap: 4 },
   fieldLabel: { fontFamily: fonts.body, fontSize: 13, fontWeight: '500', color: L.t2 },
   trigger: {

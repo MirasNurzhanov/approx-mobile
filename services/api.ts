@@ -1,9 +1,13 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { tokenStore } from './tokenStore';
+import { safeApiError } from './safeApiError';
 import axios, { create as createAxios } from 'axios';
 import * as Application from 'expo-application';
 import { router } from 'expo-router';
 
-export const BASE_URL = 'https://project-x-production-3261.up.railway.app';
+import { API_URL } from './apiUrl';
+
+/** The backend this build talks to. Set per build with EXPO_PUBLIC_API_URL; see services/apiUrl.ts. */
+export const BASE_URL = API_URL;
 
 /** Kept here rather than imported from ./presence: that module imports this
  * one, and the interceptor below needs the name at module scope. */
@@ -116,7 +120,8 @@ api.interceptors.request.use(async (config) => {
   // Cheaper and quieter than letting it round-trip to a guaranteed 401.
   if (sessionEnded) throw new SessionEndedError();
 
-  const token = await AsyncStorage.getItem('access_token');
+  const token = await tokenStore.getItem('access_token');
+  if (sessionEnded) throw new SessionEndedError();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -149,14 +154,14 @@ api.interceptors.request.use(async (config) => {
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
-  const refresh = await AsyncStorage.getItem('refresh_token');
+  const refresh = await tokenStore.getItem('refresh_token');
   if (!refresh) return null;
   try {
     // Bare axios: the api instance's interceptors must not run on this call.
     const { data } = await axios.post(`${BASE_URL}/api/users/token/refresh/`, { refresh });
-    await AsyncStorage.setItem('access_token', data.access);
-    if (data.refresh) await AsyncStorage.setItem('refresh_token', data.refresh);
-    return data.access as string;
+    if (sessionEnded) return null;
+    const saved = await tokenStore.rotateSession(refresh, data.access, data.refresh ?? refresh);
+    return saved && !sessionEnded ? data.access as string : null;
   } catch (e: any) {
     console.log('[Auth] token refresh failed:', e?.response?.status);
     return null;
@@ -170,7 +175,7 @@ api.interceptors.response.use(
       const original = error.config;
       // Nothing to recover: the tokens are already gone by design. Anything
       // still landing here is a straggler from before the switch flipped.
-      if (sessionEnded) return Promise.reject(error);
+      if (sessionEnded) return Promise.reject(safeApiError(error));
 
       if (error.response?.status === 401 && original && !original._retried) {
         original._retried = true;
@@ -190,19 +195,21 @@ api.interceptors.response.use(
         // Only the first one through tears the session down — every extra pass
         // would issue its own replace, which is what turned one dead session
         // into a navigation loop.
-        if (sessionEnded) return Promise.reject(error);
+        if (sessionEnded) return Promise.reject(safeApiError(error));
         beginSessionEnd();
 
-        await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+        await tokenStore.clearSession().catch(() => {
+          console.warn('[Auth] secure session cleanup needs retry');
+        });
         // The handler (AuthContext) owns the teardown *and* the navigation.
         // Falling back to a bare replace only when nothing is registered —
         // a 401 before the provider mounts still has to leave the tabs.
         if (onAuthFailure) onAuthFailure();
         else router.replace('/');
       }
-    } catch (e) {
-      console.log('[Auth] interceptor error:', e);
+    } catch {
+      console.warn('[Auth] session recovery failed');
     }
-    return Promise.reject(error);
+    return Promise.reject(safeApiError(error));
   }
 );

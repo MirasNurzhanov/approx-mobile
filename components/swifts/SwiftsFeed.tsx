@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   FlatList,
   LayoutChangeEvent,
@@ -29,11 +30,15 @@ import {
   revealSwiftLocation,
   setSwiftLiked,
   setSwiftReposted,
+  setSwiftSaved,
+  deleteSwift,
   SwiftLocationUnavailable,
   type Swift,
   type SwiftLocation,
 } from '@/services/swifts';
 import { useContentActions } from '@/components/ContentActions';
+import { SendToFriendsSheet } from '@/components/swifts/SendToFriendsSheet';
+import { sendSwiftTo } from '@/services/swiftComposer';
 import { flushSwiftSignals, reportSwiftSignal } from '@/services/swiftSignals';
 
 /**
@@ -97,6 +102,9 @@ export function SwiftsFeed() {
   const [muted, setMuted] = useState(true);
   const [height, setHeight] = useState(0);
   const [paging, setPaging] = useState(false);
+  /** The Swift whose "send to" sheet is open, if any. */
+  const [sendingFor, setSendingFor] = useState<Swift | null>(null);
+  const [sendBusy, setSendBusy] = useState(false);
   const [exhausted, setExhausted] = useState(false);
   /** The server's ranking session. Held in a ref rather than state because
    *  nothing renders from it and changing it must not re-render the list. */
@@ -340,6 +348,30 @@ export function SwiftsFeed() {
       });
   }, [patchSwift]);
 
+  /**
+   * Save / un-save, optimistically.
+   *
+   * No `reportSwiftSignal`, unlike a like or a repost, and that is the whole
+   * difference between a shortlist and a signal: saving a video to watch later
+   * must not feed the recommender, or the private shelf quietly becomes a
+   * public endorsement of everything on it.
+   *
+   * No counter to move either, so the rollback only has to put one boolean
+   * back. The request itself is idempotent — the server keeps one row per
+   * (swift, viewer) behind a unique constraint — so a double tap cannot end up
+   * with two entries no matter which order the responses land in.
+   */
+  const handleToggleSave = useCallback((id: number, saved: boolean) => {
+    setSwifts((prev) => prev.map((s) => (
+      s.id === id ? { ...s, viewer_saved: saved } : s
+    )));
+    setSwiftSaved(id, saved).catch(() => {
+      setSwifts((prev) => prev.map((s) => (
+        s.id === id ? { ...s, viewer_saved: !saved } : s
+      )));
+    });
+  }, []);
+
   const handleCommentCount = useCallback((swiftId: number, delta: number) => {
     setSwifts((prev) => prev.map((s) => (
       s.id === swiftId
@@ -381,9 +413,10 @@ export function SwiftsFeed() {
       setActiveReveal((prev) =>
         prev && prev.swiftId === swift.id ? { ...prev, error: message } : prev,
       );
-    } finally {
-      setRevealingId(null);
     }
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // Neither branch above returns early, so this still runs on both paths.
+    setRevealingId(null);
   }, []);
 
   function closeReveal() {
@@ -395,6 +428,41 @@ export function SwiftsFeed() {
     if (revealingId === swift.id) return 'loading';
     return revealedIds.has(swift.id) ? 'revealed' : 'idle';
   }
+
+  /**
+   * Forwarding a Swift into somebody's messages.
+   *
+   * The same sheet the composer uses, in `send` mode — see
+   * `SendToFriendsSheet`. What differs is only that there is already a Swift,
+   * so the ids are spent immediately rather than held on a draft.
+   *
+   * A refusal per person is ordinary and is reported rather than thrown: the
+   * recipient may have blocked this viewer since the list loaded, or may not
+   * be allowed to watch this particular Swift. See
+   * `services/swiftComposer.sendSwiftTo`.
+   */
+  const handleSend = useCallback((swift: Swift) => {
+    setSendingFor(swift);
+  }, []);
+
+  const confirmSend = useCallback(async (userIds: number[]) => {
+    const swift = sendingFor;
+    if (!swift) return;
+    setSendBusy(true);
+    const result = await sendSwiftTo(swift.id, userIds).catch(() => null);
+    setSendBusy(false);
+    setSendingFor(null);
+    if (result === null) {
+      Alert.alert('Could not send', 'Try again in a moment.');
+      return;
+    }
+    if (result.refused.length > 0) {
+      Alert.alert(
+        result.sent.length > 0 ? 'Sent to some people' : 'Could not send',
+        `${result.sent.length} sent. ${result.refused.length} could not be — they may not be able to watch this Swift.`,
+      );
+    }
+  }, [sendingFor]);
 
   const handleComment = useCallback((swift: Swift) => {
     reportSwiftSignal({
@@ -419,6 +487,20 @@ export function SwiftsFeed() {
       onRemoved: () => setSwifts((prev) => prev.filter(
         (s) => s.author.id !== swift.author.id,
       )),
+      // Only your own. `is_mine` is the server's word for it, carried on the
+      // row — not a client-side comparison of ids that a stale profile could
+      // get wrong.
+      ...(swift.is_mine ? {
+        deleteNoun: 'Swift',
+        onDelete: async () => {
+          await deleteSwift(swift.id);
+          // Dropped from the list only after the request succeeds. Removing it
+          // optimistically would show the video gone and then have to put it
+          // back on a failure, which reads as the delete having silently
+          // undone itself.
+          setSwifts((prev) => prev.filter((s) => s.id !== swift.id));
+        },
+      } : {}),
     });
   }, [present]);
   const handleToggleMute = useCallback(() => setMuted((m) => !m), []);
@@ -474,6 +556,14 @@ export function SwiftsFeed() {
   return (
     <View style={styles.root} onLayout={handleLayout}>
       {sheets}
+      <SendToFriendsSheet
+        visible={sendingFor !== null}
+        selected={[]}
+        mode="send"
+        busy={sendBusy}
+        onCancel={() => setSendingFor(null)}
+        onConfirm={confirmSend}
+      />
       {height > 0 && (
         <FlatList
           data={swifts}
@@ -493,6 +583,8 @@ export function SwiftsFeed() {
               onToggleMute={handleToggleMute}
               onToggleLike={handleToggleLike}
               onToggleRepost={handleToggleRepost}
+              onToggleSave={handleToggleSave}
+              onSend={handleSend}
               onComment={handleComment}
               onMore={handleMore}
             />
@@ -546,6 +638,7 @@ export function SwiftsFeed() {
         loading={activeReveal !== null && !activeReveal.location && !activeReveal.error}
         error={activeReveal?.error ?? null}
         authorName={activeReveal?.authorName ?? ''}
+        swiftId={activeReveal?.swiftId ?? null}
         onClose={closeReveal}
         onRetry={() => {
           const swift = swifts.find((s) => s.id === activeReveal?.swiftId);

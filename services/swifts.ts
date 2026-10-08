@@ -34,6 +34,39 @@ export interface SwiftTrackCredit {
   title: string;
   artist: string;
   artwork_url: string;
+  /**
+   * Where the audio is. Empty when the catalogue row is gone — a track pulled
+   * for a lapsed licence stops playing but keeps its credit, which is the
+   * whole reason the attribution is stored flat beside the relation. See
+   * `SwiftVideo.track` on the backend.
+   *
+   * Optional for the same reason the capture fields below are: a server older
+   * than this build sends a credit without it, and the right outcome there is
+   * a Swift that plays its own sound rather than one that crashes the card.
+   */
+  audio_url?: string;
+  duration_ms?: number;
+}
+
+/** One emoji placed over the video, positioned in fractions of the frame. */
+export interface SwiftStickerPlacement {
+  emoji: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+}
+
+/** A tag on a Swift. `display` is for showing, `name` for matching. */
+export interface SwiftHashtag {
+  name: string;
+  display: string;
+}
+
+/** Somebody named in a Swift. `username` is what the caption says. */
+export interface SwiftMention {
+  user_id: number;
+  username: string;
 }
 
 /**
@@ -99,11 +132,34 @@ export interface Swift {
   original_volume: number;
   overlay_text: string;
   overlay_position: 'top' | 'middle' | 'bottom';
+  // ── Optional, and deliberately so ────────────────────────────────────────
+  // Every field below was added after the first Swifts shipped, and a phone
+  // can be running a build newer than the API it is pointed at — an app-store
+  // update racing a deploy is the ordinary case, not an edge one. Marking them
+  // optional is what makes that a Swift which plays unfiltered rather than a
+  // crash on `.map` of undefined, and every read of them in this app is
+  // defaulted accordingly.
+  stickers?: SwiftStickerPlacement[];
+
+  /** Playback speed as a percentage: 50 is half, 200 is double. */
+  speed_percent?: number;
+  /** A quarter turn clockwise, applied by the player. */
+  rotation_deg?: 0 | 90 | 180 | 270;
+  /** A key from `constants/swiftEffects`; '' is untouched. */
+  effect?: string;
+  effect_intensity?: number;
 
   track: SwiftTrackCredit | null;
   audio_title: string;
   audio_artist: string;
   uses_original_audio: boolean;
+  /** 0–100, for the bed against the recording's own sound. */
+  music_volume?: number;
+  /** Where in the track the bed starts. */
+  music_start_ms?: number;
+
+  hashtags?: SwiftHashtag[];
+  mentions?: SwiftMention[];
 
   visibility: 'public' | 'friends' | 'private';
   allow_comments: boolean;
@@ -115,6 +171,9 @@ export interface Swift {
   view_count: number;
   viewer_liked: boolean;
   viewer_reposted: boolean;
+  /** On this viewer's shortlist. Private: there is no matching count,
+   *  because a saved-by number would leak a list nobody may read. */
+  viewer_saved: boolean;
   viewer_viewed: boolean;
 
   /** Whether to draw the reveal button. Never a coordinate. */
@@ -224,6 +283,57 @@ export async function setSwiftReposted(id: number, reposted: boolean): Promise<n
     ? await api.post<{ repost_count: number }>(`/api/swifts/${id}/repost/`)
     : await api.delete<{ repost_count: number }>(`/api/swifts/${id}/repost/`);
   return data?.repost_count ?? 0;
+}
+
+/**
+ * Put a Swift on the viewer's shortlist, or take it off.
+ *
+ * Returns nothing but the new state, because there is nothing else to return:
+ * saving moves no public counter, unlike a like or a repost. That is the whole
+ * difference between a bookmark and a signal.
+ *
+ * Safe to call twice. The server holds one row per (swift, viewer) — a unique
+ * constraint, not a check — so a double tap, a retry on a flaky connection, or
+ * the same Swift saved from the feed and from its detail screen all collapse to
+ * one entry. Callers do not need to guard against it.
+ */
+export async function setSwiftSaved(id: number, saved: boolean): Promise<boolean> {
+  const { data } = saved
+    ? await api.post<{ saved: boolean }>(`/api/swifts/${id}/save/`)
+    : await api.delete<{ saved: boolean }>(`/api/swifts/${id}/save/`);
+  return data?.saved ?? saved;
+}
+
+/**
+ * Take a Swift down for everyone.
+ *
+ * Author only — the server answers 404 to anybody else rather than 403, so a
+ * stranger cannot even learn the Swift exists. The client still gates the menu
+ * on `is_mine`, which is about not offering an action that would fail, not
+ * about enforcement.
+ *
+ * A soft delete server-side: the row survives so the location-reveal audit,
+ * the comments and the likes outlive it — the audit especially is worth more
+ * after a Swift comes down than before. Every read path filters it out, so it
+ * is gone from the product, and there is no undo in the app.
+ */
+export async function deleteSwift(id: number): Promise<void> {
+  await api.delete(`/api/swifts/${id}/`);
+}
+
+/**
+ * The viewer's shortlist, newest save first.
+ *
+ * Shorter than what was saved, sometimes: a Swift made private or taken down
+ * since it was saved drops out. The bookmark survives on the server — nothing
+ * is deleted from under anyone — but the list only ever shows what can still
+ * be watched.
+ */
+export async function fetchSavedSwifts(limit = 20, offset = 0): Promise<SwiftPage> {
+  const { data } = await api.get<SwiftPage>('/api/swifts/saved/', {
+    params: { limit, offset },
+  });
+  return { count: data?.count ?? 0, results: data?.results ?? [] };
 }
 
 /**

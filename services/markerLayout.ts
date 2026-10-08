@@ -19,6 +19,32 @@ export interface ZoneArea extends GeoPoint { radius: number }
 
 export const M_PER_DEG = 111_320;
 
+/** Refuse to hand the native map a coordinate it can crash on.
+ *
+ * `Number.isFinite` does not coerce, so this also rejects the string
+ * coordinates DRF sends for stories and meetups — which is precisely why
+ * people's markers survived the New Architecture and those two did not. The
+ * coercion in services/coords.ts is the real fix; this stays as the last gate
+ * in front of the native view, and additionally rejects the polar latitudes
+ * Mercator cannot project even though they are perfectly real places.
+ *
+ * Generic so `.filter(isDrawable)` narrows to the caller's own row type rather
+ * than flattening it to a bare point.
+ *
+ * Lives here rather than on the map screen because the slot pools in
+ * hooks/useMarkerSlots gate on it too, and a screen importing a hook that
+ * imports the screen back is a cycle. It is the same arithmetic-over-geometry
+ * this module already holds, and it still touches nothing React. */
+export function isDrawable<T extends GeoPoint>(p?: T | null): p is T {
+  return (
+    !!p &&
+    Number.isFinite(p.latitude) &&
+    Number.isFinite(p.longitude) &&
+    Math.abs(p.latitude) <= 85 &&
+    Math.abs(p.longitude) <= 180
+  );
+}
+
 /** Name plate under a marker. Shared by the avatar markers and by the stranger
  *  dots, which carry the interest that put them on your map. */
 export const CAPTION_GAP = 5;

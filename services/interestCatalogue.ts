@@ -20,7 +20,7 @@ import type { CategoryKey } from './interestCategories';
 
 /** Lowercased interest name → category key. */
 export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
-  // Sports — 186
+  // Sports — 196
   ['sports', [
     'football', 'futsal', 'basketball', 'american football', 'baseball',
     'softball', 'tennis', 'padel', 'squash', 'volleyball',
@@ -61,8 +61,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'formula 1', 'enduro', 'trial riding', 'longboarding', 'scootering',
     'inline skating', 'roller derby', 'rodeo', 'show jumping', 'dressage',
     'tug of war', 'powerboating', 'rock fishing', 'spearfishing',
+    'flag football', 'touch rugby', 'beach tennis',
+    'roundnet', 'beach handball', 'underwater hockey',
+    'wakesurfing', 'ski mountaineering', 'trampolining',
+    'sports analytics',
   ]],
-  // Fitness & Wellness — 40
+  // Fitness & Wellness — 50
   ['fitness', [
     'gym', 'weightlifting', 'powerlifting', 'crossfit', 'bodybuilding',
     'calisthenics', 'yoga', 'pilates', 'meditation', 'zumba', 'walking',
@@ -73,8 +77,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'breathwork', 'mindfulness', 'cold plunge', 'acupuncture',
     'physiotherapy', 'aromatherapy', 'reiki', 'sleep health',
     'intermittent fasting', 'personal training', 'marathon training',
+    'reformer pilates', 'hot yoga', 'aerial yoga',
+    'yin yoga', 'jump rope', 'resistance bands',
+    'functional training', 'nordic walking', 'rucking',
+    'sound baths',
   ]],
-  // Music — 67
+  // Music — 77
   ['music', [
     'music', 'singing', 'karaoke', 'guitar', 'bass guitar', 'ukulele',
     'piano', 'violin', 'cello', 'drums', 'saxophone', 'trumpet', 'banjo',
@@ -88,8 +96,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'blues', 'reggae', 'funk', 'soul', 'r&b', 'punk', 'indie music',
     'folk music', 'latin music', 'afrobeats', 'house music', 'drum & bass',
     'lo-fi', 'ambient music', 'vinyl collecting', 'live music', 'open mic',
+    'pop music', 'j-pop', 'mandopop',
+    'q-pop', 'disco', 'reggaeton',
+    'trance', 'dubstep', 'dombra',
+    'kobyz',
   ]],
-  // Arts & Creativity — 91
+  // Arts & Creativity — 101
   ['arts', [
     'drawing', 'painting', 'digital art', 'graphic design', 'animation',
     'sculpting', 'pottery', 'calligraphy', 'origami', 'photography',
@@ -111,8 +123,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'contemporary dance', 'jazz dance', 'tap dance', 'folk dance',
     'belly dance', 'pole dance', 'swing dance', 'bachata', 'kizomba',
     'flamenco', 'miniature painting',
+    'tufting', 'needle felting', 'cross-stitch',
+    'punch needle', 'diamond painting', 'stained glass',
+    'air-dry clay', 'digital collage', 'stop-motion animation',
+    'irish dance',
   ]],
-  // Food & Drink — 61
+  // Food & Drink — 71
   ['food', [
     'cooking', 'baking', 'bread making', 'bbq & grilling', 'coffee', 'tea',
     'bubble tea', 'wine tasting', 'craft beer', 'cocktails', 'sushi',
@@ -126,8 +142,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'seafood', 'steak', 'noodles', 'salads', 'soups', 'food photography',
     'food trucks', 'farmers markets', 'keto', 'gluten-free',
     'baking sourdough',
+    'korean food', 'thai food', 'indian food',
+    'italian food', 'georgian food', 'kazakh food',
+    'hot pot', 'kombucha', 'mocktails',
+    'coffee roasting',
   ]],
-  // Travel & Outdoors — 53
+  // Travel & Outdoors — 63
   ['travel', [
     'travel', 'solo travel', 'backpacking', 'camping', 'hiking',
     'road trips', 'van life', 'beach', 'cruises', 'train travel',
@@ -142,8 +162,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'permaculture', 'bonsai', 'terrariums', 'succulents',
     'vegetable gardening', 'urban gardening', 'kayak fishing', 'fly fishing',
     'ice fishing',
+    'nature walks', 'botanical gardens', 'forest bathing',
+    'tide pooling', 'rock collecting', 'beachcombing',
+    'scenic train rides', 'hostel travel', 'cultural travel',
+    'local exploring',
   ]],
-  // Games & Tech — 66
+  // Games & Tech — 76
   ['games', [
     'gaming', 'retro gaming', 'vr gaming', 'board games', 'card games',
     'poker', 'chess', 'puzzles', 'mahjong', 'trivia', 'd&d & tabletop rpgs',
@@ -159,8 +183,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'data science', 'cloud computing', 'app development', 'automation',
     'smart home', 'raspberry pi', 'arduino', 'ham radio', 'retro computing',
     'blockchain', 'trading', 'real estate', 'productivity', 'note-taking',
+    'co-op games', 'cozy games', 'indie games',
+    'rhythm games', 'fighting games', 'roguelikes',
+    'sim racing', 'flight simulation', 'mechanical keyboards',
+    'hackathons',
   ]],
-  // Entertainment & Culture — 58
+  // Entertainment & Culture — 68
   ['entertainment', [
     'movies', 'tv series', 'anime', 'manga', 'comics', 'reading', 'concerts',
     'music festivals', 'museums & galleries', 'history', 'architecture',
@@ -174,8 +202,12 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'economics', 'sociology', 'linguistics', 'physics', 'chemistry',
     'biology', 'geology', 'meteorology', 'paleontology', 'ancient history',
     'art history', 'debate', 'public speaking', 'chess puzzles',
+    'romance books', 'mystery books', 'historical fiction',
+    'nonfiction', 'webtoons', 'c-dramas',
+    'turkish drama', 'film clubs', 'ballet performances',
+    'cultural festivals',
   ]],
-  // Lifestyle & Social — 59
+  // Lifestyle & Social — 69
   ['lifestyle', [
     'dogs', 'cats', 'pets', 'horses', 'aquariums', 'reptiles',
     'volunteering', 'sustainability', 'thrifting', 'fashion', 'sneakers',
@@ -190,6 +222,10 @@ export const CATALOGUE_CATEGORIES: [Exclude<CategoryKey, ''>, string[]][] = [
     'board game nights', 'clubbing', 'bar hopping', 'karaoke nights',
     'meetups', 'festivals', 'watch collecting', 'sneaker collecting',
     'vintage cars', 'cycling commute',
+    'pet adoption', 'dog walking', 'cat cafes',
+    'community gardening', 'beach cleanups', 'clothing swaps',
+    'upcycling', 'repair cafes', 'pen pals',
+    'dinner parties',
   ]],
 ];
 

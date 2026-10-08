@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { tokenStore } from './tokenStore';
 import { File } from 'expo-file-system';
 
 import { BASE_URL } from './api';
@@ -139,13 +139,18 @@ export interface PublishedSwift {
  * location whatever this sends, which is the point.
  */
 export function buildForm(draft: SwiftDraft): FormData {
+  if (!draft.idempotencyKey) throw new UploadError('This take has no publish key.', false);
   const form = new FormData();
+  form.append('idempotency_key', draft.idempotencyKey);
   form.append('video', {
     uri: draft.uri as string,
     type: 'video/mp4',
     name: 'swift.mp4',
   } as any);
 
+  // The *played* length, which is what the sixty-second ceiling is on and what
+  // a viewer experiences — `keptDurationMs` already folds in the speed. See
+  // `services/swiftDraft`.
   form.append('duration_ms', String(keptDurationMs(draft)));
   if (draft.width) form.append('width', String(draft.width));
   if (draft.height) form.append('height', String(draft.height));
@@ -158,7 +163,42 @@ export function buildForm(draft: SwiftDraft): FormData {
   form.append('original_volume', String(Math.round(draft.originalVolume)));
   form.append('overlay_text', draft.overlayText.trim());
   form.append('overlay_position', draft.overlayPosition);
-  form.append('uses_original_audio', String(draft.originalVolume > 0));
+  // The mic being off means there is no recorded sound in the file at all, so
+  // the volume slider is moot — this has to say `false` even at volume 100, or
+  // the feed draws an "original sound" credit under a silent video.
+  form.append(
+    'uses_original_audio',
+    String(draft.micEnabled && draft.originalVolume > 0),
+  );
+
+  // ── Capture settings, applied by the player ───────────────────────────────
+  form.append('speed_percent', String(Math.round(draft.speedPercent)));
+  form.append('rotation_deg', String(draft.rotationDeg));
+  form.append('effect', draft.effect);
+  form.append('effect_intensity', String(Math.round(draft.effectIntensity)));
+
+  // `id` is local-only — it exists so React and the drag gesture have a stable
+  // key, and sending it would be storing a key nothing on the server reads.
+  // The server rebuilds each entry from exactly these five fields anyway; see
+  // `SwiftCreateSerializer.validate_stickers`.
+  form.append('stickers', JSON.stringify(
+    draft.stickers.map(({ emoji, x, y, scale, rotation }) => ({
+      emoji, x, y, scale, rotation,
+    })),
+  ));
+
+  if (draft.track) {
+    form.append('track', String(draft.track.id));
+    form.append('music_volume', String(Math.round(draft.musicVolume)));
+    form.append('music_start_ms', String(Math.round(draft.musicStartMs)));
+  }
+
+  // Only what the creator added *outside* the caption. The caption's own tags
+  // and mentions are parsed server-side — see `swifts/tagging.py` — so sending
+  // them again would be the client asserting a parse the server is about to do
+  // anyway, and the two disagreeing is a bug with no owner.
+  for (const tag of draft.hashtags) form.append('hashtags', tag);
+  for (const handle of draft.mentions) form.append('mentions', handle);
 
   form.append('visibility', draft.visibility);
   form.append('allow_comments', String(draft.allowComments));
@@ -320,6 +360,7 @@ export async function publishSwift(
   { onProgress, signal }: PublishOptions = {},
 ): Promise<PublishedSwift> {
   if (!draft.uri) throw new UploadError('Nothing to publish.', false);
+  if (!draft.idempotencyKey) throw new UploadError('This take has no publish key.', false);
 
   const file = inspectFile(draft.uri);
   if (file.size > 0 && file.size > MAX_UPLOAD_BYTES) {
@@ -327,7 +368,7 @@ export async function publishSwift(
     throw new UploadError(`That video is too large (limit ${limitMb}MB).`, false);
   }
 
-  const token = await AsyncStorage.getItem('access_token');
+  const token = await tokenStore.getItem('access_token');
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {

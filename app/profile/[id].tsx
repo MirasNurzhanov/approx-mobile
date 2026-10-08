@@ -1,8 +1,10 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  RefreshControl,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +22,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { IconBack, IconMore } from '@/components/ui/icons';
 import { RelationshipBadge } from '@/components/ui/RelationshipBadge';
 import { ProfileLinks } from '@/components/ProfileLinks';
+import { SwiftProfileSection } from '@/components/profile/SwiftProfileSection';
+import { hiddenProfileMessage, profileDetailsHidden } from '@/components/profile/profilePrivacy';
 import { PresenceDot } from '@/components/PresenceDot';
 import { fonts, radius } from '@/constants/theme';
 import { PROFESSIONS, COUNTRIES, flagEmoji } from '@/constants/onboardingData';
@@ -37,6 +41,7 @@ interface UserProfile {
   id: number;
   username: string;
   is_private?: boolean;
+  can_view_swifts?: boolean;
   bio?: string;
   date_joined?: string;
   interests?: Interest[];
@@ -45,14 +50,14 @@ interface UserProfile {
   stats?: { friends: number; connections: number };
   links?: ProfileLink[];
   presence?: Presence;
-  date_of_birth?: string | null;
+  age?: number | null;
   nationality?: string | null;
   profession?: string | null;
   clubs?: { id: number; name: string; emblem?: string; role: ClubRole }[];
 }
 
 function isLocked(profile: UserProfile): boolean {
-  return !!profile.is_private && !('bio' in profile);
+  return profileDetailsHidden(profile);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -165,11 +170,9 @@ function ProfileHero({ profile, relationship, relColor, metaLine, locked }: {
 
       {locked ? (
         <View style={styles.lockedBox}>
-          <Text style={styles.lockedTitle}>This account is private</Text>
+          <Text style={styles.lockedTitle}>Profile details hidden</Text>
           <Text style={styles.lockedBody}>
-            {relationship === 'hi_sent'
-              ? 'Your request is waiting for them to accept.'
-              : "Send a Hi to ask for access. If they accept, you'll see their full profile."}
+            {hiddenProfileMessage(profile, relationship)}
           </Text>
         </View>
       ) : (
@@ -330,43 +333,36 @@ export default function UserProfileScreen() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { present, sheets } = useContentActions();
 
-  useEffect(() => {
+  const profileRequest = useRef<AbortController | null>(null);
+  const loadProfile = useCallback(async () => {
+    profileRequest.current?.abort();
+    const controller = new AbortController();
+    profileRequest.current = controller;
+    // Revalidate before rendering personal details or starting a Swift request.
+    setProfile(null);
+    setRelationship('stranger');
+    setLoading(true);
     const numId = Number(id);
-
-    Promise.allSettled([
-      api.get<UserProfile>(`/api/users/profile/${numId}/`),
-      api.get<{ friends: { id: number }[]; connections: { id: number }[] }>('/api/friends/list/'),
-      api.get<{ id: number; sender?: { id: number }; from_user?: { id: number } }[]>('/api/friends/requests/'),
-      api.get<{ id: number; relationship?: string }[]>('/api/proximity/nearby/'),
-    ]).then(([profileRes, friendsRes, requestsRes, nearbyRes]) => {
-      if (profileRes.status === 'fulfilled') {
-        setProfile(profileRes.value.data);
-        if (profileRes.value.data.relationship) {
-          setRelationship(profileRes.value.data.relationship);
-          return;
-        }
-      } else {
-        console.log('[UserProfile] profile error:', profileRes.reason?.response?.status);
-      }
-
-      let rel: Relationship = 'stranger';
-      if (friendsRes.status === 'fulfilled') {
-        const { friends, connections } = friendsRes.value.data;
-        if (friends.some((u) => Number(u.id) === numId)) rel = 'friend';
-        else if (connections.some((u) => Number(u.id) === numId)) rel = 'connected';
-      }
-      if (rel === 'stranger' && requestsRes.status === 'fulfilled') {
-        const reqs = Array.isArray(requestsRes.value.data) ? requestsRes.value.data : [];
-        if (reqs.some((r) => Number(r.sender?.id ?? r.from_user?.id) === numId)) rel = 'hi_received';
-      }
-      if (rel === 'stranger' && nearbyRes.status === 'fulfilled') {
-        const found = (nearbyRes.value.data ?? []).find((u) => Number(u.id) === numId);
-        if (found?.relationship) rel = found.relationship as Relationship;
-      }
-
-      setRelationship(rel);
-    }).finally(() => setLoading(false));
+    if (!Number.isInteger(numId) || numId < 1) { setLoading(false); return; }
+    await api.get<UserProfile>(`/api/users/profile/${numId}/`, { signal: controller.signal }).then(({ data }) => {
+      if (controller.signal.aborted) return;
+      setProfile(data);
+      setRelationship(data.relationship ?? 'stranger');
+    }).catch(() => {
+      if (!controller.signal.aborted) setProfile(null);
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
   }, [id]);
+
+  useFocusEffect(useCallback(() => {
+    void loadProfile();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void loadProfile();
+      else { profileRequest.current?.abort(); setProfile(null); }
+    });
+    return () => { subscription.remove(); profileRequest.current?.abort(); setProfile(null); };
+  }, [loadProfile]));
 
 
   async function sendHi() {
@@ -451,17 +447,22 @@ export default function UserProfileScreen() {
   const interests = profile.interests ?? [];
   const locked   = isLocked(profile);
 
-  const _ageRaw = profile.date_of_birth
-    ? Math.floor((Date.now() - new Date(profile.date_of_birth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-    : null;
-  const age      = _ageRaw !== null && !Number.isNaN(_ageRaw) ? _ageRaw : null;
-  const natInfo  = profile.nationality ? COUNTRIES.find(c => c.code === profile.nationality) ?? null : null;
-  const profInfo = profile.profession  ? PROFESSIONS.find(p => p.key === profile.profession) ?? null  : null;
-  const metaLine = [
-    natInfo  ? `${flagEmoji(natInfo.code)} ${natInfo.name}` : null,
-    profInfo ? `${profInfo.emoji} ${profInfo.label}`        : null,
-    age !== null ? String(age)                              : null,
-  ].filter(Boolean).join(' · ') || null;
+  const age = typeof profile.age === 'number' && Number.isFinite(profile.age) ? profile.age : null;
+  // The lookup and the `?? null` are separate statements because a `??` inside
+  // a ternary branch is a logical test block React Compiler cannot lower, and
+  // it gives up on the whole screen when it meets one.
+  const natFound  = profile.nationality ? COUNTRIES.find(c => c.code === profile.nationality) : undefined;
+  const profFound = profile.profession  ? PROFESSIONS.find(p => p.key === profile.profession) : undefined;
+  const natInfo  = natFound  ?? null;
+  const profInfo = profFound ?? null;
+  // Built by pushing rather than as an array of ternaries filtered down: a
+  // ternary feeding a logical test is a shape React Compiler cannot lower, and
+  // it gives up on the whole screen when it meets one.
+  const metaParts: string[] = [];
+  if (natInfo) metaParts.push(`${flagEmoji(natInfo.code)} ${natInfo.name}`);
+  if (profInfo) metaParts.push(`${profInfo.emoji} ${profInfo.label}`);
+  if (age !== null) metaParts.push(String(age));
+  const metaLine = metaParts.length > 0 ? metaParts.join(' · ') : null;
 
   return (
     <View style={styles.root}>
@@ -474,7 +475,8 @@ export default function UserProfileScreen() {
         onMenu={openMenu}
       />
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void loadProfile(); }} tintColor={colors.teal} />}>
         <ProfileHero
           profile={profile}
           relationship={rel}
@@ -482,6 +484,8 @@ export default function UserProfileScreen() {
           metaLine={metaLine}
           locked={locked}
         />
+
+        {profile.can_view_swifts === true && !locked && <SwiftProfileSection creatorId={profile.id} canView />}
 
         <InterestsSection interests={interests} />
 

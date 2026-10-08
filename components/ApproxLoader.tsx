@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -118,11 +118,13 @@ function Ring({ styles, index, color }: {
 
 export function ApproxLoader() {
   const { colors } = useTheme();
-  // Kept despite react-doctor/react-compiler-no-manual-memoization: dropping it
-  // is not a no-op here. Compiling this file with and without the wrapper shows
-  // the cache shrinking from 37 slots to 23 — the compiler stops caching
-  // `makeStyles(colors)` and, with it, every `styles.*` read downstream.
-  const styles = useMemo(() => makeStyles(colors), [colors]);
+  // No wrapper here: React Compiler caches `makeStyles(colors)` and every
+  // `styles.*` read that hangs off it on its own. Compiling this file with and
+  // without a `useMemo` emits byte-identical output, cache steady at 19 slots.
+  // A previous comment claimed removal shrank the cache 37 → 23; that figure
+  // was measured before the rings and particles moved into `Core`/`Particle`/
+  // `Ring`, which take `styles` as a prop, and it no longer holds.
+  const styles = makeStyles(colors);
 
   return (
     <View style={styles.root}>

@@ -79,6 +79,8 @@ jest.mock('expo-video', () => ({
 }));
 
 jest.mock('expo', () => ({
+  // ThemeContext's app-icon module asks for its native side; there is none here.
+  requireOptionalNativeModule: () => null,
   useEvent: () => ({ currentTime: 0 }),
   useEventListener: jest.fn(),
 }));
@@ -156,6 +158,7 @@ function makeSwift(id: number, overrides: Partial<Swift> = {}): Swift {
     view_count: 0,
     viewer_liked: false,
     viewer_reposted: false,
+  viewer_saved: false,
     viewer_viewed: false,
     location_available: true,
     is_mine: false,
@@ -214,7 +217,7 @@ beforeEach(() => {
   });
 });
 
-/** React Native 0.81's `VirtualizedList` schedules `_updateCellsToRender` on a
+/** React Native's `VirtualizedList` schedules `_updateCellsToRender` on a
  *  `setTimeout`. Left mounted, that fires after the test has finished and logs
  *  an act() warning during teardown, which Jest reports as a failure in the
  *  suite that happens to run next. Unmounting ends the timer with the tree. */
@@ -415,7 +418,7 @@ describe('the Swift type carries no location fields', () => {
     // interface and vanishes at runtime, so this pins the *fixture* — which is
     // built to mirror the server's serializer field list — against the same
     // list `swifts/testing.py::FORBIDDEN_LOCATION_KEYS` uses.
-    const swift = makeSwift(1) as Record<string, unknown>;
+    const swift = makeSwift(1);
     for (const banned of [
       'latitude', 'longitude', 'lat', 'lng', 'lon',
       'place_name', 'place', 'coordinates', 'location',

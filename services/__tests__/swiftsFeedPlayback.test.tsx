@@ -67,9 +67,12 @@ const mockPlayers: { id: number; play: jest.Mock; pause: jest.Mock; source: unkn
 
 jest.mock('expo-video', () => ({
   useVideoPlayer: (source: unknown) => {
-    const React = require('react');
+    const React = jest.requireActual<typeof import('react')>('react');
     // One player per card instance, matching the real hook's lifetime.
-    const ref = React.useRef<any>(null);
+    const ref = React.useRef<(typeof mockPlayers)[number] & {
+      currentTime: number; duration: number; volume: number; muted: boolean;
+      loop: boolean; status: string; timeUpdateEventInterval: number;
+    } | null>(null);
     if (!ref.current) {
       ref.current = {
         id: mockPlayers.length,
@@ -88,6 +91,8 @@ jest.mock('expo-video', () => ({
 }));
 
 jest.mock('expo', () => ({
+  // ThemeContext's app-icon module asks for its native side; there is none here.
+  requireOptionalNativeModule: () => null,
   useEvent: (_p: unknown, name: string) =>
     name === 'statusChange'
       ? { status: 'readyToPlay', error: undefined }
@@ -143,7 +148,8 @@ function makeSwift(id: number, overrides: Partial<Swift> = {}): Swift {
     track: null, audio_title: '', audio_artist: '', uses_original_audio: true,
     visibility: 'public', allow_comments: true, allow_reposts: true,
     like_count: 10, comment_count: 2, repost_count: 1, view_count: 0,
-    viewer_liked: false, viewer_reposted: false, viewer_viewed: false,
+    viewer_liked: false, viewer_reposted: false,
+  viewer_saved: false, viewer_viewed: false,
     location_available: false, is_mine: false,
     created_at: '2026-08-01T10:00:00Z', updated_at: '2026-08-01T10:00:00Z',
     ...overrides,

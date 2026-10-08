@@ -10,8 +10,37 @@
  * Buttons that cannot work are not rendered. Google's needs a web client id
  * compiled into the build; Apple's exists only on iOS. Both check before
  * drawing rather than failing on tap.
+ *
+ * ── Why these are circles, and what that costs ───────────────────────────────
+ * Both marks are logo-only circles rather than full-width labelled bars.
+ *
+ * That is allowed, and the rule is worth stating because it is the one thing
+ * that constrains this file: Apple permits a **logo-only** Sign in with Apple
+ * button to be circular, while a button carrying the logo *and* text must stay
+ * rectangular. So the shape and the missing label are one decision, not two —
+ * a circle with "Continue with Apple" in it would not be a legal button.
+ *
+ * The cost is that this is now a *custom* Sign in with Apple button, where it
+ * used to be `AppleAuthentication.AppleAuthenticationButton` — Apple's own.
+ * Three things came free with that and now have to be held by hand:
+ *
+ *   the mark      Apple's rule is to use their downloaded logo artwork and
+ *                 never draw your own. This renders Ionicons' `logo-apple`,
+ *                 which is what Settings → Connected Accounts already uses, so
+ *                 the two Apple marks in the app at least match. Before
+ *                 submission it should be swapped for the artwork from Apple
+ *                 Design Resources — a one-line change here.
+ *   the label     the native button localised "Continue with Apple" into every
+ *                 language Apple ships. A logo-only button has no label to
+ *                 localise, so nothing regresses — but the accessibility label
+ *                 below is now the only wording, and it is English-only.
+ *   recognition   Apple asks that a custom button still read instantly as a
+ *                 Sign in with Apple button. Black circle, white mark (white
+ *                 circle, black mark in dark mode, Apple's dark-background
+ *                 style), sat next to Google under "or continue with" is the
+ *                 conventional form of exactly that.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,10 +49,7 @@ import {
   Text,
   View,
 } from 'react-native';
-// A plain import on both platforms. expo-apple-authentication is a no-op
-// module off iOS rather than a missing one, and the obvious-looking "fix" of a
-// conditional require breaks the New Architecture build.
-import * as AppleAuthentication from 'expo-apple-authentication';
+import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 
 import { useAuth } from '@/context/AuthContext';
@@ -36,10 +62,12 @@ import {
   SocialSignInCancelled,
   SocialSignInError,
 } from '@/services/socialAuth';
-import { fonts, lightColors as L } from '@/constants/theme';
+import { fonts, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
-const BTN_HEIGHT = 52;
-const BTN_RADIUS = 14;
+/** Diameter. Comfortably past the 44pt minimum touch target, and large enough
+ *  that a 24pt mark sits in it with room rather than filling it. */
+const CIRCLE = 56;
 
 // ── Brand glyphs ─────────────────────────────────────────────────────────────
 // Drawn rather than imported: lucide has no brand marks, and both Google and
@@ -75,14 +103,31 @@ export default function SocialAuthButtons({
   disabled = false,
   acceptedTerms = false,
 }: {
+  /** A *hard* stop — the form is mid-submit and nothing should start. Not the
+   *  terms checkbox: see `acceptedTerms`, which this used to be conflated with
+   *  and which now blocks the sign-in by itself. */
   disabled?: boolean;
-  /** Whether the user has ticked the agreement on the screen above. Passed to
-   *  the server, which refuses to create an account without it. Callers that
-   *  render the checkbox should also pass `disabled` when it is unticked — this
-   *  prop is what makes the *account* legitimate, not what stops the tap. */
+  /** Whether the user has ticked the agreement on the screen above.
+   *
+   *  Two jobs, and they used to be split across two props in a way that lost
+   *  one of them. It is passed to the server, which refuses to create an
+   *  account without it — and it also gates the tap here, rather than the
+   *  caller separately folding `!acceptedTerms` into `disabled`.
+   *
+   *  The reason it moved is that `disabled` cannot explain itself. A tap on a
+   *  disabled Pressable does not reach any handler, so an unticked checkbox
+   *  made both buttons completely inert with no message, no alert and nothing
+   *  but a 0.6 opacity — which on a white circle over a cream background is
+   *  very close to invisible. "The buttons do not work" is the correct reading
+   *  of that. Gating here means the tap lands, and says what is missing. */
   acceptedTerms?: boolean;
 }) {
   const { completeSocialSignIn } = useAuth();
+  const { colors: L, themeMode } = useTheme();
+  const dark = themeMode === 'dark';
+  const s = useMemo(() => makeStyles(L, dark), [L, dark]);
+  // Apple's dark-background style is the white button with a black mark.
+  const appleInk = dark ? '#000000' : '#FFFFFF';
   const [pending, setPending] = useState<'google' | 'apple' | null>(null);
   // Async, and iOS-only, so it starts false and the button appears once the
   // answer is in. Anything else flashes a button on Android for one frame.
@@ -96,6 +141,17 @@ export default function SocialAuthButtons({
 
   async function run(provider: 'google' | 'apple') {
     if (pending || disabled) return;
+    // Before anything else, and *not* by being disabled. The sign-in still
+    // cannot run without the agreement — `acceptedTerms` is checked here and
+    // sent to the server, which refuses the account on its own — but a person
+    // who taps now gets told why instead of watching nothing happen.
+    if (!acceptedTerms) {
+      Alert.alert(
+        'Agree to the Terms first',
+        'Tick the box above to agree to the Terms of Use, then continue with Google or Apple.',
+      );
+      return;
+    }
     setPending(provider);
     await runBusy(
       async () => {
@@ -120,7 +176,12 @@ export default function SocialAuthButtons({
 
   if (!isGoogleAvailable && !appleReady) return null;
 
+  /** Hard stop: nothing may start. The Pressable is genuinely disabled. */
   const busy = disabled || pending !== null;
+  /** Soft stop: dimmed to show it is not ready, but still receives the tap so
+   *  it can say what is missing. */
+  const blocked = !acceptedTerms;
+  const hint = blocked ? 'Agree to the Terms of Use first' : undefined;
 
   return (
     <View style={s.wrap}>
@@ -130,49 +191,48 @@ export default function SocialAuthButtons({
         <View style={s.rule} />
       </View>
 
-      {isGoogleAvailable ? (
-        <Pressable
-          onPress={() => run('google')}
-          disabled={busy}
-          style={({ pressed }) => [s.googleBtn, (pressed || busy) && s.dimmed]}
-          accessibilityRole="button"
-          accessibilityLabel="Continue with Google"
-          accessibilityState={{ disabled: busy, busy: pending === 'google' }}
-        >
-          {pending === 'google' ? (
-            <ActivityIndicator size="small" color={L.t2} />
-          ) : (
-            <>
-              <GoogleMark />
-              <Text style={s.googleLabel}>Continue with Google</Text>
-            </>
-          )}
-        </Pressable>
-      ) : null}
+      <View style={s.row}>
+        {isGoogleAvailable ? (
+          <Pressable
+            onPress={() => run('google')}
+            disabled={busy}
+            style={({ pressed }) => [s.circle, s.googleCircle, (pressed || busy || blocked) && s.dimmed]}
+            accessibilityRole="button"
+            // Load-bearing now in a way it was not before. The label used to be
+            // on screen as well; with the text gone this string is the only
+            // thing a screen reader has to go on, so it stays a full sentence
+            // rather than "Google".
+            accessibilityLabel="Continue with Google"
+            accessibilityHint={hint}
+            accessibilityState={{ disabled: busy, busy: pending === 'google' }}
+          >
+            {pending === 'google'
+              ? <ActivityIndicator size="small" color={L.t2} />
+              : <GoogleMark size={24} />}
+          </Pressable>
+        ) : null}
 
-      {appleReady ? (
-        // Apple's own button, not a lookalike. App Review rejects custom
-        // renderings of the Apple mark, and this one also localises its label
-        // and follows the system appearance for free.
-        pending === 'apple' ? (
-          <View style={s.applePlaceholder}>
-            <ActivityIndicator size="small" color="#fff" />
-          </View>
-        ) : (
-          <AppleAuthentication.AppleAuthenticationButton
-            buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-            cornerRadius={BTN_RADIUS}
-            style={s.appleBtn}
+        {appleReady ? (
+          <Pressable
             onPress={() => run('apple')}
-          />
-        )
-      ) : null}
+            disabled={busy}
+            style={({ pressed }) => [s.circle, s.appleCircle, (pressed || busy || blocked) && s.dimmed]}
+            accessibilityRole="button"
+            accessibilityLabel="Continue with Apple"
+            accessibilityHint={hint}
+            accessibilityState={{ disabled: busy, busy: pending === 'apple' }}
+          >
+            {pending === 'apple'
+              ? <ActivityIndicator size="small" color={appleInk} />
+              : <Ionicons name="logo-apple" size={26} color={appleInk} style={s.appleGlyph} />}
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette, dark: boolean) => StyleSheet.create({
   wrap: { gap: 12 },
 
   dividerRow: {
@@ -184,36 +244,36 @@ const s = StyleSheet.create({
   rule: { flex: 1, height: 1, backgroundColor: L.border },
   dividerText: { fontFamily: fonts.body, fontSize: 13, color: L.t2 },
 
-  googleBtn: {
+  /** The two marks sit together as a pair, centred, rather than stacked as two
+   *  full-width bars. With the labels gone there is nothing to left-align to. */
+  row: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    height: BTN_HEIGHT,
-    borderRadius: BTN_RADIUS,
-    // White on the cream background, per Google's light-theme button spec —
-    // the mark is only allowed on white or on Google Blue.
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: L.border,
-  },
-  googleLabel: {
-    fontFamily: fonts.body,
-    fontWeight: '600',
-    fontSize: 16,
-    // Not L.t1: Google's spec pins the label to its own greys, and L.t1 is a
-    // warm brown that reads as a tinted logo lockup next to the mark.
-    color: '#1F1F1F',
+    gap: 20,
+    marginTop: 4,
   },
 
-  appleBtn: { height: BTN_HEIGHT, width: '100%' },
-  applePlaceholder: {
-    height: BTN_HEIGHT,
-    borderRadius: BTN_RADIUS,
-    backgroundColor: '#000000',
+  circle: {
+    width: CIRCLE,
+    height: CIRCLE,
+    borderRadius: CIRCLE / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  googleCircle: {
+    // Google's own button themes: white with a light stroke on light pages,
+    // #131314 with an #8E918F stroke on dark ones. The mark keeps its colours
+    // in both, so the circle carries its own fill rather than the page's.
+    backgroundColor: dark ? '#131314' : '#FFFFFF',
+    borderWidth: 1,
+    borderColor: dark ? '#8E918F' : L.border,
+  },
+
+  appleCircle: { backgroundColor: dark ? '#FFFFFF' : '#000000' },
+  /** The Apple mark's leaf puts its optical centre below its bounding-box
+   *  centre, so a glyph centred by geometry reads as sitting low. */
+  appleGlyph: { marginTop: -2 },
 
   dimmed: { opacity: 0.6 },
 });

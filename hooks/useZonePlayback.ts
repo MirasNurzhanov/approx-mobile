@@ -83,9 +83,6 @@ export function useZonePlayback({
     soundRef.current = null;
     subRef.current?.remove();
     subRef.current = null;
-    setState('idle');
-    setPosition(0);
-    setDuration(null);
     // The playhead belongs to the sound; without this it would freeze mid-track
     // on a card whose audio has been unloaded.
     onPositionRef.current?.(null);
@@ -96,7 +93,8 @@ export function useZonePlayback({
     } catch {}
   }, []);
 
-  // Unload on unmount, and whenever the track itself changes.
+  // ZonePlayer keys its session by URL and access state. React resets the UI;
+  // cleanup only releases this session's native resource and external playhead.
   useEffect(() => {
     goneRef.current = false;
     return () => {
@@ -104,12 +102,6 @@ export function useZonePlayback({
       unload();
     };
   }, [url, unload]);
-
-  // Walking out of the zone stops the audio the zone was carrying. The card
-  // stays up — you can see what was playing, you just can't hear it any more.
-  useEffect(() => {
-    if (blocked && soundRef.current) unload();
-  }, [blocked, unload]);
 
   // Native looping is only correct while the window *is* the whole file: it
   // wraps to zero, which on a trimmed track is not where the loop restarts.
@@ -207,6 +199,8 @@ export function useZonePlayback({
         interruptionMode: 'duckOthers',
       });
 
+      if (goneRef.current) return;
+
       // Synchronous: the native player is created immediately and reports its
       // own load progress through the status listener rather than a promise —
       // there's no `androidImplementation` fallback to retry with any more, so
@@ -228,8 +222,13 @@ export function useZonePlayback({
       // `onStatus` turns it around at the end of the window instead.
       sound.loop = rangeRef.current.endMs == null;
 
-      const from = startAt || rangeRef.current.startMs;
+      // `||` is a "value block" React Compiler cannot lower inside a try/catch,
+      // so the fallback is spelled out as a statement instead.
+      let from = startAt;
+      if (!from) from = rangeRef.current.startMs;
       if (from) await sound.seekTo(from / 1000).catch(() => {});
+
+      if (goneRef.current || soundRef.current !== sound) return;
 
       // A blur that landed while this was still loading applies to it too —
       // otherwise a slow load starts playing into a screen you already left.
@@ -268,6 +267,7 @@ export function useZonePlayback({
     setPosition(from);
     setState('playing');
     await sound.seekTo(from / 1000).catch(() => {});
+    if (goneRef.current || soundRef.current !== sound) return;
     sound.play();
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '@/services/api';
 import { groupAll } from '@/services/interestCategories';
 import { InterestBubbleField } from '@/components/ui/InterestBubbleField';
-import { fonts, lightColors as L } from '@/constants/theme';
+import { fonts, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 
 // ─── What are you into? ───────────────────────────────────────────────────────
 // Nine bubbles, one per category, with the interests inside them: tapping one
@@ -31,6 +32,8 @@ interface Interest {
 
 export default function InterestsSetupScreen() {
   const { top, bottom } = useSafeAreaInsets();
+  const { colors: L } = useTheme();
+  const s = useMemo(() => makeStyles(L), [L]);
 
   const [interests, setInterests] = useState<Interest[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -140,8 +143,8 @@ export default function InterestsSetupScreen() {
           </Pressable>
         </View>
       ) : (
-        // Forced light: this runs before the user has ever seen the app's
-        // theme, and the whole onboarding flow is cream.
+        // The app's own theme, like the rest of sign-up: a device already set
+        // to dark gets a dark onboarding.
         <InterestBubbleField
           groups={groups}
           selected={selected}
@@ -165,7 +168,7 @@ export default function InterestsSetupScreen() {
           accessibilityLabel="Continue"
         >
           {saving
-            ? <ActivityIndicator color="#fff" size="small" />
+            ? <ActivityIndicator color={L.bg} size="small" />
             : <Text style={s.continueBtnLabel}>Continue</Text>
           }
         </Pressable>
@@ -175,7 +178,7 @@ export default function InterestsSetupScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   root:   { flex: 1, backgroundColor: L.bg },
   center: {
     flex: 1,
@@ -245,7 +248,7 @@ const s = StyleSheet.create({
     fontFamily: fonts.body,
     fontWeight: '600',
     fontSize: 17,
-    color: '#ffffff',
+    color: L.bg,
   },
 
   errorText: {

@@ -24,6 +24,7 @@ export interface NotificationData {
   club_name?: string;
   event_id?: number | string;
   story_id?: number | string;
+  swift_id?: number | string;
 }
 
 /** ids survive the round trip through APNs/FCM as strings on one platform and
@@ -79,6 +80,22 @@ export function routeFromNotification(data: NotificationData | undefined | null)
       if (!userId) return false;
       router.push({ pathname: '/profile/[id]', params: { id: userId } } as never);
       return true;
+
+    // Every Swift alert — a like, a comment, a repost, or being mentioned in
+    // one — opens the Swift itself. The permalink rather than the feed, for
+    // the reason the composer navigates there too: the ranked feed excludes
+    // Swifts you have already been served and never guarantees a particular
+    // one appears, so "open the thing this is about" has exactly one address.
+    //
+    // `notifications/utils.py` sends all four under one `type`, with the
+    // subject in `swift_id`. They differ in what they *say*, not in where they
+    // go, so one case is the whole handling rather than four that would drift.
+    case 'swift': {
+      const swiftId = asId(data.swift_id);
+      if (!swiftId) return false;
+      router.push({ pathname: '/swifts/[id]', params: { id: swiftId } } as never);
+      return true;
+    }
 
     // Story activity and incoming requests both belong to the alerts feed:
     // one because a reaction is a list entry rather than a screen, the other

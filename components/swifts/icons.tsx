@@ -96,6 +96,30 @@ export function SwiftCommentIcon({
 }
 
 /**
+ * Save.
+ *
+ * A bookmark with a mitred notch rather than the rounded pennant most packs
+ * ship — the same squared-terminal language as the heart and the bubble, so
+ * the rail reads as one set.
+ *
+ * A bookmark and not a star, deliberately. A star is already this app's
+ * language for a shortlist of your *own* posts (see starred stories). This
+ * shelf holds other people's videos, and at 28pt the two would be mistaken
+ * for each other.
+ */
+export function SwiftSaveIcon({
+  size = 28, color = '#FFFFFF', on = false, onColor,
+}: SwiftIconProps) {
+  const tint = on ? (onColor ?? color) : color
+  const d = 'M8 4.5h16v23l-8-6.5-8 6.5z'
+  return (
+    <Svg width={size} height={size} viewBox="0 0 32 32">
+      <Path d={d} {...stroke} stroke={tint} fill={on ? tint : 'none'} />
+    </Svg>
+  )
+}
+
+/**
  * Repost.
  *
  * Two straight runs joined by square corners with mitred arrowheads — a
@@ -259,6 +283,26 @@ export function SwiftEmptyIcon({ size = 32, color = '#FFFFFF' }: SwiftIconProps)
         <Rect x={4.5} y={6.5} width={23} height={19} />
         <Path d="M4.5 6.5l23 19" />
       </G>
+    </Svg>
+  )
+}
+
+/** A paper plane: send this Swift to somebody privately.
+ *
+ *  Its own glyph rather than `IconSend` from the design library, for the
+ *  reason stated at the top of `SwiftActions`: the rail sits over arbitrary
+ *  user video and needs a heavier stroke than a 1.5px UI icon to stay legible
+ *  against a bright frame. */
+export function SwiftSendIcon({ size = 28, color = '#FFFFFF' }: SwiftIconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21 3.5L10.5 14M21 3.5l-6.7 17.4-3.8-7.3-7.3-3.8L21 3.5z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
     </Svg>
   )
 }

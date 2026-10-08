@@ -7,6 +7,8 @@ import {
   SwiftMoreIcon,
   SwiftMuteIcon,
   SwiftRepostIcon,
+  SwiftSaveIcon,
+  SwiftSendIcon,
   SwiftSoundIcon,
   type SwiftIconComponent,
 } from '@/components/swifts/icons';
@@ -51,6 +53,9 @@ export interface SwiftActionsProps {
   commentCount: number;
   isReposted: boolean;
   repostCount: number;
+  /** On this viewer's shortlist. No count beside it: saving is private, so
+   *  there is no public number to show and none that could be leaked. */
+  isSaved: boolean;
   /** The creator turned reposts off; the control is hidden rather than inert. */
   allowReposts: boolean;
   allowComments: boolean;
@@ -59,6 +64,9 @@ export interface SwiftActionsProps {
   onLike: () => void;
   onComment: () => void;
   onRepost: () => void;
+  onSave: () => void;
+  /** Forward this Swift to people privately. */
+  onSend: () => void;
   onMore: () => void;
   onToggleMute: () => void;
   /** Distance from the bottom, worked out by the caller from the nav arc. */
@@ -112,9 +120,9 @@ function ActionButton({
 
 function SwiftActionsImpl({
   locationAvailable, revealState, onRevealLocation,
-  isLiked, likeCount, commentCount, isReposted, repostCount,
+  isLiked, likeCount, commentCount, isReposted, repostCount, isSaved,
   allowReposts, allowComments,
-  muted, onLike, onComment, onRepost, onMore, onToggleMute, bottom,
+  muted, onLike, onComment, onRepost, onSave, onSend, onMore, onToggleMute, bottom,
 }: SwiftActionsProps) {
   const { colors } = useTheme();
 
@@ -163,6 +171,31 @@ function SwiftActionsImpl({
         />
       )}
 
+      {/* No count, and always shown. A shortlist is private, so unlike
+          reposts there is no creator switch that can turn it off and no
+          number whose absence would say anything. */}
+      <ActionButton
+        Glyph={SwiftSaveIcon}
+        on={isSaved}
+        onColor={colors.teal}
+        accessibilityLabel={isSaved ? 'Remove from saved' : 'Save'}
+        accessibilityHint={isSaved
+          ? 'Takes this Swift off your saved list'
+          : 'Keeps this Swift on your profile, visible only to you'}
+        onPress={onSave}
+      />
+
+      {/* No count here either, and for a stronger reason than saving's: a
+          "sent 14 times" number would tell the author how far their Swift had
+          travelled through other people's private messages, which is a fact
+          about those conversations rather than about the Swift. */}
+      <ActionButton
+        Glyph={SwiftSendIcon}
+        accessibilityLabel="Send to a friend"
+        accessibilityHint="Sends this Swift as a private message"
+        onPress={onSend}
+      />
+
       {/* Only when this viewer could actually reveal it. A Swift whose
           location they could never see draws nothing, so the control's
           presence is not itself a signal about content out of reach. */}
@@ -183,6 +216,11 @@ function SwiftActionsImpl({
   );
 }
 
+// Kept despite react-doctor/react-compiler-no-manual-memoization: SwiftCard
+// wraps every handler it passes here in a `useCallback` specifically to keep
+// this `memo` honest (see the comment at SwiftCard's handler block), and
+// SwiftCard itself does not compile — so this boundary is the only thing
+// keeping the action rail out of each card's re-render in the feed.
 export const SwiftActions = memo(SwiftActionsImpl);
 
 const styles = StyleSheet.create({

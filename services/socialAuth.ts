@@ -14,7 +14,8 @@
  */
 import * as AppleAuthentication from 'expo-apple-authentication';
 import axios, { isAxiosError } from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeApiError } from './safeApiError';
+import { tokenStore } from './tokenStore';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import type * as GoogleSigninModule from '@react-native-google-signin/google-signin';
@@ -158,7 +159,8 @@ async function exchange(
       // users/views.py SocialLoginView.
       accept_terms: acceptedTerms,
     }));
-  } catch (err) {
+  } catch (source) {
+    const err = safeApiError(source);
     if (isAxiosError(err) && err.response?.data) {
       const body = err.response.data as { detail?: string; code?: string };
       throw new SocialSignInError(
@@ -172,8 +174,7 @@ async function exchange(
     );
   }
 
-  await AsyncStorage.setItem('access_token', data.tokens.access);
-  await AsyncStorage.setItem('refresh_token', data.tokens.refresh);
+  await tokenStore.setSession(data.tokens.access, data.tokens.refresh);
   resumeSession();
 
   return {
@@ -227,14 +228,6 @@ async function getGoogleIdToken(): Promise<ProviderToken> {
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     response = await GoogleSignin.signIn();
   } catch (err) {
-    // TEMP DIAGNOSTIC — remove once Google sign-in is confirmed working.
-    // The branches below only handle three known codes and otherwise throw a
-    // generic message, discarding the real error — this is what actually
-    // reaches Console.app/Metro before that happens.
-    console.log(
-      '[SocialAuth] GoogleSignin.signIn() threw:',
-      isErrorWithCode(err) ? { code: err.code, message: err.message } : String(err),
-    );
     if (isErrorWithCode(err)) {
       if (err.code === statusCodes.SIGN_IN_CANCELLED) throw new SocialSignInCancelled();
       if (err.code === statusCodes.IN_PROGRESS) throw new SocialSignInCancelled();
@@ -253,7 +246,6 @@ async function getGoogleIdToken(): Promise<ProviderToken> {
   if (!isSuccessResponse(response)) throw new SocialSignInCancelled();
 
   const { idToken, user } = response.data;
-  console.log('[SocialAuth] GoogleSignin.signIn() succeeded, idToken present:', !!idToken);
   if (!idToken) {
     // Almost always a missing or wrong `webClientId`: Google signs the person
     // in happily and simply declines to issue an identity token.
@@ -388,4 +380,17 @@ export async function clearGoogleSession() {
   } catch {
     // Nothing to do about it, and nothing that depends on it.
   }
+}
+
+/** Obtain fresh provider proof without replacing the current Approx session. */
+export async function getDeletionIdentity(provider: SocialProvider): Promise<string> {
+  if (provider === 'google') {
+    // Force the interactive account chooser rather than reuse a cached token.
+    const mod = loadGoogle();
+    if (!mod) throw new SocialSignInError('Google sign-in is unavailable in this build.');
+    configureGoogle();
+    await mod.GoogleSignin.signOut();
+    return (await getGoogleIdToken()).idToken;
+  }
+  return (await getAppleIdToken()).idToken;
 }

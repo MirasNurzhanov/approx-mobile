@@ -134,7 +134,13 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   pressed: { opacity: 0.7 },
 });
 
-export function ZonePlayer({
+export function ZonePlayer(props: ZonePlayerProps) {
+  // A new track or access state owns a new playback session. Trim edits keep
+  // the current session so its native playhead can follow the changing window.
+  return <ZonePlayerSession key={JSON.stringify([props.url, Boolean(props.blockedReason)])} {...props} />;
+}
+
+function ZonePlayerSession({
   url,
   title,
   subtitle,

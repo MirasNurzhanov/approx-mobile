@@ -73,6 +73,7 @@ type AlertRow =
   | { kind: 'activity'; key: string; notif: Notification };
 
 interface UserSummary {
+  archived?: boolean;
   id: number;
   username: string;
   last_message?: string;
@@ -86,9 +87,30 @@ interface UserSummary {
 interface FriendList {
   connections: UserSummary[];
   friends: UserSummary[];
+  archived?: UserSummary[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+/** Unread-per-friend, from either shape the breakdown endpoint answers with:
+ *  `{ [userId]: count }` or `[{ user_id, count }]`.
+ *
+ *  At module scope because the call site is inside a `try`, and the `??` chains
+ *  this needs are "value blocks" React Compiler cannot lower there. */
+function unreadByUser(data: unknown): Map<number, number> {
+  const counts = new Map<number, number>();
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+      counts.set(Number(k), Number(v) || 0);
+    }
+  } else if (Array.isArray(data)) {
+    for (const entry of data as any[]) {
+      const uid = entry.user_id ?? entry.id;
+      if (uid != null) counts.set(Number(uid), Number(entry.count ?? entry.unread_count) || 0);
+    }
+  }
+  return counts;
+}
+
 function fmtTime(iso?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -125,24 +147,20 @@ interface UserCardProps {
 }
 
 /**
- * Every chat row is the same card, whoever it holds.
- *
- * A connection's card used to carry a full-width "Add Friend" button inside it,
- * which made it a head taller than a friend's — so a list of both read as two
- * kinds of thing, and the ragged heights were the first thing you saw. Adding a
- * friend is now the compact action beside the menu: same row, same height, and
- * the card is still a chat you tap to open.
+ * The face on a chat row, wrapped in its own press target when there is a story
+ * behind it. The row opens the chat; the face opens the story. Nested Pressable
+ * rather than a second row, so a friend with a story is the same card at the
+ * same height as one without.
  */
-function UserCard({
-  user, type, requestSent, stories, onMessage, onAddFriend, onMenu, onOpenStory,
-}: UserCardProps) {
-  const { colors } = useTheme();
-  const styles = makeStyles(colors);
-  const ringColor = type === 'connected' ? colors.orange : colors.blue;
-  const hasMessage = !!user.last_message;
-  const unread = user.unread_count ?? 0;
+function UserCardAvatar({
+  user, ringColor, stories, onOpenStory,
+}: {
+  user: UserSummary;
+  ringColor: string;
+  stories?: FeedStory[];
+  onOpenStory?: (stories: FeedStory[]) => void;
+}) {
   const hasStory = !!stories?.length;
-
   const avatar = (
     <Avatar
       uri={user.profile_picture}
@@ -154,22 +172,95 @@ function UserCard({
     />
   );
 
+  if (!hasStory || !onOpenStory) return avatar;
+  return (
+    <Pressable
+      onPress={() => onOpenStory(stories!)}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${user.username}'s story`}
+    >
+      {avatar}
+    </Pressable>
+  );
+}
+
+/**
+ * The action pair at the end of a chat row: add-friend (connections only) and
+ * the overflow menu.
+ *
+ * A connection's card used to carry a full-width "Add Friend" button inside it,
+ * which made it a head taller than a friend's — so a list of both read as two
+ * kinds of thing, and the ragged heights were the first thing you saw. Adding a
+ * friend is now the compact action beside the menu: same row, same height.
+ */
+function UserCardActions({
+  user, type, requestSent, onAddFriend, onMenu,
+}: {
+  user: UserSummary;
+  type: 'connected' | 'friend';
+  requestSent?: boolean;
+  onAddFriend?: (user: UserSummary) => void;
+  onMenu: (user: UserSummary, type: 'connected' | 'friend') => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+
+  return (
+    <View style={styles.cardTail}>
+      {!user.archived && type === 'connected' && onAddFriend && (
+        <Pressable
+          style={[styles.addFriendBtn, requestSent && styles.addFriendBtnSent]}
+          onPress={() => { if (!requestSent) onAddFriend(user); }}
+          disabled={requestSent}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={
+            requestSent
+              ? `Friend request sent to ${user.username}`
+              : `Add ${user.username} as a friend`
+          }
+          accessibilityState={{ disabled: requestSent }}
+        >
+          <Ionicons
+            name={requestSent ? 'checkmark' : 'person-add-outline'}
+            size={15}
+            color={requestSent ? colors.teal : colors.t2}
+          />
+        </Pressable>
+      )}
+      <Pressable
+        style={styles.menuBtn}
+        onPress={() => onMenu(user, type)}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel={`More options for ${user.username}`}
+      >
+        <Ionicons name="ellipsis-vertical" size={16} color={colors.t3} />
+      </Pressable>
+    </View>
+  );
+}
+
+/** Every chat row is the same card, whoever it holds. */
+function UserCard({
+  user, type, requestSent, stories, onMessage, onAddFriend, onMenu, onOpenStory,
+}: UserCardProps) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const ringColor = type === 'connected' ? colors.orange : colors.blue;
+  const hasMessage = !!user.last_message;
+  const unread = user.unread_count ?? 0;
+
   return (
     <Card onPress={() => onMessage(user)}>
       <View style={styles.cardRow}>
-        {/* The row opens the chat; the face opens the story. Nested Pressable
-            rather than a second row, so a friend with a story is the same card
-            at the same height as one without. */}
-        {hasStory && onOpenStory ? (
-          <Pressable
-            onPress={() => onOpenStory(stories!)}
-            hitSlop={6}
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${user.username}'s story`}
-          >
-            {avatar}
-          </Pressable>
-        ) : avatar}
+        <UserCardAvatar
+          user={user}
+          ringColor={ringColor}
+          stories={stories}
+          onOpenStory={onOpenStory}
+        />
         <View style={styles.cardBody}>
           <View style={styles.cardNameRow}>
             <Text style={styles.cardName}>{user.username}</Text>
@@ -182,7 +273,7 @@ function UserCard({
               style={[styles.cardSub, !hasMessage && styles.cardSubEmpty]}
               numberOfLines={1}
             >
-              {hasMessage ? storyReplyPreview(user.last_message) : 'No messages yet'}
+              {user.archived ? 'Archived · ' : ''}{hasMessage ? storyReplyPreview(user.last_message) : 'No messages yet'}
             </Text>
             {unread > 0 && (
               <View style={styles.unreadBadge}>
@@ -192,38 +283,13 @@ function UserCard({
           </View>
         </View>
 
-        <View style={styles.cardTail}>
-          {type === 'connected' && onAddFriend && (
-            <Pressable
-              style={[styles.addFriendBtn, requestSent && styles.addFriendBtnSent]}
-              onPress={() => { if (!requestSent) onAddFriend(user); }}
-              disabled={requestSent}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel={
-                requestSent
-                  ? `Friend request sent to ${user.username}`
-                  : `Add ${user.username} as a friend`
-              }
-              accessibilityState={{ disabled: requestSent }}
-            >
-              <Ionicons
-                name={requestSent ? 'checkmark' : 'person-add-outline'}
-                size={15}
-                color={requestSent ? colors.teal : colors.t2}
-              />
-            </Pressable>
-          )}
-          <Pressable
-            style={styles.menuBtn}
-            onPress={() => onMenu(user, type)}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={`More options for ${user.username}`}
-          >
-            <Ionicons name="ellipsis-vertical" size={16} color={colors.t3} />
-          </Pressable>
-        </View>
+        <UserCardActions
+          user={user}
+          type={type}
+          requestSent={requestSent}
+          onAddFriend={onAddFriend}
+          onMenu={onMenu}
+        />
       </View>
     </Card>
   );
@@ -599,7 +665,7 @@ function ClubsTab({ myClubs, discoverClubs, clubPlace, loadingClubs, refreshingP
       }
     >
       <Pressable style={styles.createClubBtn} onPress={onCreateClub}>
-        <Ionicons name="add-circle-outline" size={18} color="#ffffff" />
+        <Ionicons name="add-circle-outline" size={18} color={colors.bg} />
         <Text style={styles.createClubBtnText}>Create Club</Text>
       </Pressable>
 
@@ -805,6 +871,7 @@ function usePeopleActions({ setFriendList, setSentRequestIds, onBlockFailed, rou
     setFriendList((prev) => ({
       connections: prev.connections.filter((u) => u.id !== user.id),
       friends:     prev.friends.filter((u) => u.id !== user.id),
+      archived:    prev.archived?.filter((u) => u.id !== user.id),
     }));
     blockUser(user)
       .then(() => triggerNearbyRefresh())
@@ -827,6 +894,13 @@ function usePeopleActions({ setFriendList, setSentRequestIds, onBlockFailed, rou
     },
 
     onMenu(user: UserSummary, type: 'connected' | 'friend') {
+      if (user.archived) {
+        Alert.alert(user.username, 'This conversation is archived.', [
+          { text: 'Block User', style: 'destructive', onPress: () => handleBlock(user) },
+          { text: 'Cancel', style: 'cancel' },
+        ]);
+        return;
+      }
       const isFriend = type === 'friend';
       Alert.alert(user.username, undefined, [
         {
@@ -845,6 +919,7 @@ function usePeopleActions({ setFriendList, setSentRequestIds, onBlockFailed, rou
       setFriendList((prev) => ({
         connections: prev.connections.map((u) => u.id === user.id ? { ...u, unread_count: 0 } : u),
         friends:     prev.friends.map((u)     => u.id === user.id ? { ...u, unread_count: 0 } : u),
+        archived:    prev.archived?.map((u)   => u.id === user.id ? { ...u, unread_count: 0 } : u),
       }));
       router.push({ pathname: '/messages/[id]', params: { id: user.id, username: user.username } } as any);
     },
@@ -869,6 +944,7 @@ function useChatSearch(
   const chatUsers: ChatUser[] = [
     ...friendList.friends.map((u) => ({ ...u, chatType: 'friend' as const })),
     ...connections.map((u) => ({ ...u, chatType: 'connected' as const })),
+    ...(friendList.archived ?? []).map((u) => ({ ...u, archived: true, chatType: 'connected' as const })),
   ].sort((a, b) => {
     if (a.chatType !== b.chatType) return a.chatType === 'friend' ? -1 : 1;
     if (a.last_message_at && b.last_message_at) return b.last_message_at.localeCompare(a.last_message_at);
@@ -907,133 +983,28 @@ function useChatSearch(
   return { chatUsers, trimmed, searching: trimmed.length > 0, searchRows };
 }
 
-export default function ChatScreen() {
-  const { colors } = useTheme();
-  const styles = makeStyles(colors);
-  const router = useRouter();
-  const { top } = useSafeAreaInsets();
-  const scrollProps = useScrollHandler();
-
-  const [activeTab, setActiveTab] = useState<Tab>('alerts');
-  const [tabOrder, setTabOrder] = useState<DraggableTabKey[]>(['alerts', 'chats', 'clubs']);
-  const [query, setQuery] = useState('');
-  const [friendList, setFriendList] = useState<FriendList>(_cache?.friendList ?? { connections: [], friends: [] });
-  const [alerts, setAlerts] = useState<AlertsData>(_cache?.alerts ?? EMPTY_ALERTS);
-  useBlockedUsers();
-  const [loading, setLoading] = useState(_cache === null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
+/**
+ * Everything the Alerts tab does with the alert payload: the two derived
+ * counts, the rows the list renders, and the five actions that mutate them.
+ *
+ * Split out of `ChatScreen` because it is self-contained — it reads `alerts`
+ * and writes `alerts`, and the only things it borrows are the shared refetch
+ * and the router. Keeping it here also keeps the three "busy" flags next to the
+ * handlers that set them, rather than in a block of a dozen `useState`s.
+ */
+function useChatAlerts({ alerts, setAlerts, fetchAll, router }: {
+  alerts: AlertsData;
+  setAlerts: React.Dispatch<React.SetStateAction<AlertsData>>;
+  fetchAll: () => Promise<void>;
+  router: ReturnType<typeof useRouter>;
+}) {
   const [markingRead, setMarkingRead] = useState(false);
   const [clearingAlerts, setClearingAlerts] = useState(false);
   const [actioning, setActioning] = useState<Record<string, 'accept' | 'decline'>>({});
-  // Live stories from friends, keyed by author. Not derived from anything on
-  // the map: a friend who has paused location sharing is off the map and still
-  // posts stories, which is exactly the case this surface exists to carry.
-  const [storyFeed, setStoryFeed] = useState<FeedStory[]>([]);
-  const [openStories, setOpenStories] = useState<FeedStory[] | null>(null);
-  const clubsTab = useClubsTab(activeTab === 'clubs');
-  const peopleActions = usePeopleActions({
-    setFriendList,
-    setSentRequestIds,
-    onBlockFailed: () => fetchAll(),
-    router,
-  });
 
-  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds the
-  // `useFocusEffect` dependency array below, alongside `fetchAll` — a hedge
-  // against re-subscribing every render if this hook ever bails compilation.
-  const fetchUnreadBreakdown = useCallback(async () => {
-    try {
-      const res = await api.get<unknown>('/api/friends/messages/unread/breakdown/');
-      const data = res.data;
-      // Accept { [userId]: count } or [{ user_id, count }]
-      const countMap = new Map<number, number>();
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
-          countMap.set(Number(k), Number(v) || 0);
-        }
-      } else if (Array.isArray(data)) {
-        for (const entry of data as any[]) {
-          const uid = entry.user_id ?? entry.id;
-          if (uid != null) countMap.set(Number(uid), Number(entry.count ?? entry.unread_count) || 0);
-        }
-      }
-      if (countMap.size === 0) return;
-      setFriendList((prev) => ({
-        connections: prev.connections.map((u) =>
-          countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
-        ),
-        friends: prev.friends.map((u) =>
-          countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
-        ),
-      }));
-    } catch {}
-  }, []);
-
-  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds the
-  // mount effect's and the `useFocusEffect` below's dependency arrays — a
-  // hedge against re-subscribing every render if this hook ever bails.
-  const fetchAll = useCallback(async () => {
-    const [listRes, alertsRes, storiesRes] = await Promise.allSettled([
-      api.get<FriendList>('/api/friends/list/'),
-      loadAlerts(),
-      fetchFriendStories(),
-      refreshBlocked(),
-    ]);
-    // Settled, not awaited in series: a story feed that fails must not cost
-    // the user their chat list, and an empty ring is a fine way to fail.
-    if (storiesRes.status === 'fulfilled') setStoryFeed(storiesRes.value);
-    let list = _cache?.friendList ?? { connections: [], friends: [] };
-    let alertsData = _cache?.alerts ?? EMPTY_ALERTS;
-    if (listRes.status === 'fulfilled') {
-      const data = listRes.value.data;
-      list = {
-        connections: data.connections ?? [],
-        friends:     data.friends     ?? [],
-      };
-      setFriendList(list);
-    }
-    if (alertsRes.status === 'fulfilled') {
-      alertsData = alertsRes.value;
-      setAlerts(alertsData);
-    }
-    _cache = { friendList: list, alerts: alertsData };
-    // The nav arc reads the same count from the shared store; nudge it so the
-    // wedge badge cannot lag behind the tab badge right next to it.
-    refreshAlertsCount();
-  }, []);
-
-  useEffect(() => {
-    AsyncStorage.setItem('chat_last_seen', new Date().toISOString());
-    fetchAll().finally(() => setLoading(false));
-  }, [fetchAll]);
-
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
-  // against `useFocusEffect` re-subscribing (and re-arming the poll interval)
-  // every render if this hook ever bails compilation.
-  useFocusEffect(useCallback(() => {
-    fetchAll();
-    fetchUnreadBreakdown();
-    pollRef.current = setInterval(fetchAll, 15_000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [fetchAll, fetchUnreadBreakdown]));
-
-  async function onRefresh() {
-    setRefreshing(true);
-    // Promise `.finally` rather than a `try/finally` block: it stops the spinner
-    // on rejection just the same, but React Compiler can compile it, and a
-    // `finally` statement makes it bail on this whole screen.
-    await fetchAll().finally(() => setRefreshing(false));
-  }
-
-  const storiesByAuthor = groupStoriesByAuthor(storyFeed);
-  const friendIds = new Set(friendList.friends.map((f) => f.id));
-  const connections = friendList.connections.filter((c) => !friendIds.has(c.id));
   const { requests, activity, unreadCount } = deriveAlerts(alerts);
   const hasUnreadActivity = activity.some((n) => !isRead(n));
 
-  // ── Alerts ─────────────────────────────────────────────────────────
   async function handleRequest(req: AlertRequest, action: 'accept' | 'decline') {
     const key = `${req.kind}-${req.id}`;
     setActioning((prev) => ({ ...prev, [key]: action }));
@@ -1048,8 +1019,25 @@ export default function ChatScreen() {
       triggerNearbyRefresh();
       // Accepting a Hi adds a connection, so the list behind this tab is stale.
       fetchAll();
-    } catch (e) {
-      console.log(`[Alerts] ${req.kind} ${action} failed`, e);
+      // Accepting a club invitation is joining the club: open it, which is
+      // where the new member wants to be and what proves the join landed.
+      if (req.kind === 'club' && action === 'accept' && req.club) {
+        router.push({ pathname: '/clubs/[id]', params: { id: req.club.id } } as any);
+      }
+    } catch (e: any) {
+      console.warn(`[Alerts] ${req.kind} ${action} failed`);
+      // A silent failure reads as a button that does nothing. A 404 means the
+      // request is no longer answerable — withdrawn, the club deleted, or a
+      // block since — so it leaves the list; anything else can be retried.
+      if (e?.response?.status === 404) {
+        setAlerts((prev) => ({
+          ...prev,
+          requests: prev.requests.filter((r) => !(r.id === req.id && r.kind === req.kind)),
+        }));
+        Alert.alert('No longer available', 'This request can’t be answered any more.');
+      } else {
+        Alert.alert('Something went wrong', 'Check your connection and try again.');
+      }
     }
     // Runs on both paths: the `catch` only logs, so nothing escapes it.
     setActioning((prev) => { const next = { ...prev }; delete next[key]; return next; });
@@ -1065,17 +1053,6 @@ export default function ChatScreen() {
     setMarkingRead(false);
   }
 
-  function confirmClearAll() {
-    Alert.alert(
-      'Clear all alerts?',
-      "This removes all activity from your alerts. Pending requests aren't affected.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear all', style: 'destructive', onPress: clearAll },
-      ],
-    );
-  }
-
   async function clearAll() {
     setClearingAlerts(true);
     // Optimistic: the feed empties now, the server catches up.
@@ -1086,6 +1063,17 @@ export default function ChatScreen() {
     // Refresh either way — a failed clear still wants the true state back.
     await fetchAll();
     setClearingAlerts(false);
+  }
+
+  function confirmClearAll() {
+    Alert.alert(
+      'Clear all alerts?',
+      "This removes all activity from your alerts. Pending requests aren't affected.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear all', style: 'destructive', onPress: clearAll },
+      ],
+    );
   }
 
   /** Follow an alert to whatever it is about. A reply lives in the chat it was
@@ -1136,12 +1124,246 @@ export default function ChatScreen() {
     ...activity.map((notif) => ({ kind: 'activity' as const, key: `a-${notif.id}`, notif })),
   ];
 
+  return {
+    alertRows,
+    actioning,
+    unreadCount,
+    hasUnreadActivity,
+    hasActivity: activity.length > 0,
+    markingRead,
+    clearingAlerts,
+    handleRequest,
+    openActivity,
+    markAllRead,
+    confirmClearAll,
+  };
+}
+
+/**
+ * Which of the four mutually exclusive bodies the screen is showing.
+ *
+ * Its own component rather than a ternary chain inside `ChatScreen`: the four
+ * arms are independent, and inlined they were the deepest nesting on the
+ * screen — the loading check wrapping the search check wrapping the tab check.
+ * Read top to bottom here instead.
+ */
+function ChatBody({
+  loading, searching, activeTab, searchRows, trimmed, alertsTab, chatUsers,
+  sentRequestIds, storiesByAuthor, clubsTab, peopleActions, refreshControl,
+  scrollProps, router, openClub, onOpenStory,
+}: {
+  loading: boolean;
+  searching: boolean;
+  activeTab: Tab;
+  searchRows: SearchRow[];
+  trimmed: string;
+  alertsTab: ReturnType<typeof useChatAlerts>;
+  chatUsers: ChatUser[];
+  sentRequestIds: Set<number>;
+  storiesByAuthor: Map<number, FeedStory[]>;
+  clubsTab: ReturnType<typeof useClubsTab>;
+  peopleActions: ReturnType<typeof usePeopleActions>;
+  refreshControl: React.ReactElement<React.ComponentProps<typeof RefreshControl>>;
+  scrollProps: ScrollProps;
+  router: ReturnType<typeof useRouter>;
+  openClub: (clubId: number) => void;
+  onOpenStory: (stories: FeedStory[]) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color={colors.teal} size="large" />
+      </View>
+    );
+  }
+
+  if (searching) {
+    return (
+      <SearchResultsList
+        rows={searchRows}
+        trimmed={trimmed}
+        scrollProps={scrollProps}
+        onMessage={peopleActions.onMessage}
+        onOpenClub={openClub}
+      />
+    );
+  }
+
+  if (activeTab === 'alerts') {
+    return (
+      <AlertsList
+        rows={alertsTab.alertRows}
+        actioning={alertsTab.actioning}
+        unreadCount={alertsTab.unreadCount}
+        hasUnreadActivity={alertsTab.hasUnreadActivity}
+        hasActivity={alertsTab.hasActivity}
+        markingRead={alertsTab.markingRead}
+        clearingAlerts={alertsTab.clearingAlerts}
+        refreshControl={refreshControl}
+        scrollProps={scrollProps}
+        onRequest={alertsTab.handleRequest}
+        onOpenActivity={alertsTab.openActivity}
+        onOpenProfile={(userId) => router.push({ pathname: '/profile/[id]', params: { id: userId } } as any)}
+        onMarkAllRead={alertsTab.markAllRead}
+        onClearAll={alertsTab.confirmClearAll}
+      />
+    );
+  }
+
+  if (activeTab === 'chats') {
+    return (
+      <ChatsList
+        users={chatUsers}
+        sentRequestIds={sentRequestIds}
+        storiesByAuthor={storiesByAuthor}
+        refreshControl={refreshControl}
+        scrollProps={scrollProps}
+        onMessage={peopleActions.onMessage}
+        onAddFriend={peopleActions.onAddFriend}
+        onMenu={peopleActions.onMenu}
+        onOpenStory={onOpenStory}
+      />
+    );
+  }
+
+  return (
+    <ClubsTab
+      {...clubsTab.tabProps}
+      onCreateClub={() => router.push('/create-club' as any)}
+      onOpenClub={openClub}
+    />
+  );
+}
+
+export default function ChatScreen() {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const router = useRouter();
+  const { top } = useSafeAreaInsets();
+  const scrollProps = useScrollHandler();
+
+  const [activeTab, setActiveTab] = useState<Tab>('alerts');
+  const [tabOrder, setTabOrder] = useState<DraggableTabKey[]>(['alerts', 'chats', 'clubs']);
+  const [query, setQuery] = useState('');
+  const [friendList, setFriendList] = useState<FriendList>(_cache?.friendList ?? { connections: [], friends: [] });
+  const [alerts, setAlerts] = useState<AlertsData>(_cache?.alerts ?? EMPTY_ALERTS);
+  useBlockedUsers();
+  const [loading, setLoading] = useState(_cache === null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
+  // Live stories from friends, keyed by author. Not derived from anything on
+  // the map: a friend who has paused location sharing is off the map and still
+  // posts stories, which is exactly the case this surface exists to carry.
+  const [storyFeed, setStoryFeed] = useState<FeedStory[]>([]);
+  const [openStories, setOpenStories] = useState<FeedStory[] | null>(null);
+  const clubsTab = useClubsTab(activeTab === 'clubs');
+  const peopleActions = usePeopleActions({
+    setFriendList,
+    setSentRequestIds,
+    onBlockFailed: () => fetchAll(),
+    router,
+  });
+
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds the
+  // `useFocusEffect` dependency array below, alongside `fetchAll` — a hedge
+  // against re-subscribing every render if this hook ever bails compilation.
+  const fetchUnreadBreakdown = useCallback(async () => {
+    // Only the request is inside the `try`. Everything below it needs `??` and
+    // ternaries, and those are "value blocks" React Compiler cannot lower
+    // inside a try/catch — it bails on the whole hook when it meets one.
+    let data: unknown;
+    try {
+      const res = await api.get<unknown>('/api/friends/messages/unread/breakdown/');
+      data = res.data;
+    } catch {
+      return;
+    }
+
+    const countMap = unreadByUser(data);
+    if (countMap.size === 0) return;
+    setFriendList((prev) => ({
+      connections: prev.connections.map((u) =>
+        countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
+      ),
+      friends: prev.friends.map((u) =>
+        countMap.has(u.id) ? { ...u, unread_count: countMap.get(u.id) } : u,
+      ),
+    }));
+  }, []);
+
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: feeds the
+  // mount effect's and the `useFocusEffect` below's dependency arrays — a
+  // hedge against re-subscribing every render if this hook ever bails.
+  const fetchAll = useCallback(async () => {
+    const [listRes, alertsRes, storiesRes] = await Promise.allSettled([
+      api.get<FriendList>('/api/friends/list/'),
+      loadAlerts(),
+      fetchFriendStories(),
+      refreshBlocked(),
+    ]);
+    // Settled, not awaited in series: a story feed that fails must not cost
+    // the user their chat list, and an empty ring is a fine way to fail.
+    if (storiesRes.status === 'fulfilled') setStoryFeed(storiesRes.value);
+    let list = _cache?.friendList ?? { connections: [], friends: [] };
+    let alertsData = _cache?.alerts ?? EMPTY_ALERTS;
+    if (listRes.status === 'fulfilled') {
+      const data = listRes.value.data;
+      list = {
+        connections: data.connections ?? [],
+        friends:     data.friends     ?? [],
+        archived:    data.archived    ?? [],
+      };
+      setFriendList(list);
+    }
+    if (alertsRes.status === 'fulfilled') {
+      alertsData = alertsRes.value;
+      setAlerts(alertsData);
+    }
+    _cache = { friendList: list, alerts: alertsData };
+    // The nav arc reads the same count from the shared store; nudge it so the
+    // wedge badge cannot lag behind the tab badge right next to it.
+    refreshAlertsCount();
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem('chat_last_seen', new Date().toISOString());
+    fetchAll().finally(() => setLoading(false));
+  }, [fetchAll]);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Kept despite react-doctor/react-compiler-no-manual-memoization: a hedge
+  // against `useFocusEffect` re-subscribing (and re-arming the poll interval)
+  // every render if this hook ever bails compilation.
+  useFocusEffect(useCallback(() => {
+    fetchAll();
+    fetchUnreadBreakdown();
+    pollRef.current = setInterval(fetchAll, 15_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [fetchAll, fetchUnreadBreakdown]));
+
+  async function onRefresh() {
+    setRefreshing(true);
+    // Promise `.finally` rather than a `try/finally` block: it stops the spinner
+    // on rejection just the same, but React Compiler can compile it, and a
+    // `finally` statement makes it bail on this whole screen.
+    await fetchAll().finally(() => setRefreshing(false));
+  }
+
+  const storiesByAuthor = groupStoriesByAuthor(storyFeed);
+  const friendIds = new Set(friendList.friends.map((f) => f.id));
+  const connections = friendList.connections.filter((c) => !friendIds.has(c.id));
+
+  const alertsTab = useChatAlerts({ alerts, setAlerts, fetchAll, router });
+
   const { chatUsers, trimmed, searching, searchRows } = useChatSearch(
     query, friendList, connections, clubsTab.tabProps.myClubs, clubsTab.tabProps.discoverClubs,
   );
 
   const TABS: { key: Tab; label: string; count: number }[] = [
-    { key: 'alerts', label: 'Alerts', count: unreadCount },
+    { key: 'alerts', label: 'Alerts', count: alertsTab.unreadCount },
     { key: 'chats',  label: 'Chats',  count: chatUsers.length },
     { key: 'clubs',  label: 'Clubs',  count: clubsTab.tabProps.myClubs.length },
   ];
@@ -1154,6 +1376,9 @@ export default function ChatScreen() {
       colors={[colors.teal]}
     />
   );
+
+  const openClub = (clubId: number) =>
+    router.push({ pathname: '/clubs/[id]', params: { id: clubId } } as any);
 
   return (
     <View style={[styles.container, { paddingTop: top }]}>
@@ -1181,54 +1406,24 @@ export default function ChatScreen() {
         />
       )}
 
-      {loading ? (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator color={colors.teal} size="large" />
-        </View>
-      ) : searching ? (
-        <SearchResultsList
-          rows={searchRows}
-          trimmed={trimmed}
-          scrollProps={scrollProps}
-          onMessage={peopleActions.onMessage}
-          onOpenClub={(clubId) => router.push({ pathname: '/clubs/[id]', params: { id: clubId } } as any)}
-        />
-      ) : activeTab === 'alerts' ? (
-        <AlertsList
-          rows={alertRows}
-          actioning={actioning}
-          unreadCount={unreadCount}
-          hasUnreadActivity={hasUnreadActivity}
-          hasActivity={activity.length > 0}
-          markingRead={markingRead}
-          clearingAlerts={clearingAlerts}
-          refreshControl={refreshControl}
-          scrollProps={scrollProps}
-          onRequest={handleRequest}
-          onOpenActivity={openActivity}
-          onOpenProfile={(userId) => router.push({ pathname: '/profile/[id]', params: { id: userId } } as any)}
-          onMarkAllRead={markAllRead}
-          onClearAll={confirmClearAll}
-        />
-      ) : activeTab === 'chats' ? (
-        <ChatsList
-          users={chatUsers}
-          sentRequestIds={sentRequestIds}
-          storiesByAuthor={storiesByAuthor}
-          refreshControl={refreshControl}
-          scrollProps={scrollProps}
-          onMessage={peopleActions.onMessage}
-          onAddFriend={peopleActions.onAddFriend}
-          onMenu={peopleActions.onMenu}
-          onOpenStory={setOpenStories}
-        />
-      ) : (
-        <ClubsTab
-          {...clubsTab.tabProps}
-          onCreateClub={() => router.push('/create-club' as any)}
-          onOpenClub={(clubId) => router.push({ pathname: '/clubs/[id]', params: { id: clubId } } as any)}
-        />
-      )}
+      <ChatBody
+        loading={loading}
+        searching={searching}
+        activeTab={activeTab}
+        searchRows={searchRows}
+        trimmed={trimmed}
+        alertsTab={alertsTab}
+        chatUsers={chatUsers}
+        sentRequestIds={sentRequestIds}
+        storiesByAuthor={storiesByAuthor}
+        clubsTab={clubsTab}
+        peopleActions={peopleActions}
+        refreshControl={refreshControl}
+        scrollProps={scrollProps}
+        router={router}
+        openClub={openClub}
+        onOpenStory={setOpenStories}
+      />
 
       {openStories && (
         // No `onReact`: reacting to a story that is a pin still takes standing
@@ -1438,7 +1633,9 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#E8714A',
+    // The theme's accent — coral in light mode, teal in dark — like every
+    // other primary button. A literal coral here stayed orange in dark mode.
+    backgroundColor: colors.teal,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 13,
@@ -1448,7 +1645,7 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 15,
     fontWeight: '600',
-    color: '#ffffff',
+    color: colors.bg,
   },
 
   clubsSectionLabel: {

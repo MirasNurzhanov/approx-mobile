@@ -20,7 +20,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { useAuth } from '@/context/AuthContext';
-import { syncBackgroundLocation } from '@/services/backgroundLocation';
 import { registerForPushNotifications } from '@/services/notifications';
 import { hasSeenZoneTutorial, markZoneTutorialSeen } from '@/services/tutorial';
 import { openDocument, refreshDocuments, useTerms } from '@/services/terms';
@@ -35,17 +34,8 @@ import {
 } from '@/services/socialAuth';
 import { GoogleMark } from '@/components/SocialAuthButtons';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
-import { LocationSharingConsent } from '@/components/LocationSharingConsent';
-import {
-  LocationVisibilityCard,
-  type SharingPrecision,
-} from '@/components/LocationVisibilityCard';
-import {
-  refreshPrivacy,
-  updatePrivacy,
-  usePrivacySettings,
-  type LocationSharing,
-} from '@/services/privacy';
+import { refreshPrivacy } from '@/services/privacy';
+import { describeZone, type SelfZone } from '@/services/zone';
 import { ApproxNav } from '@/components/ApproxNav';
 import { ZoneTutorialOverlay } from '@/components/tutorial/ZoneTutorialOverlay';
 import { Card } from '@/components/ui/Card';
@@ -53,6 +43,7 @@ import { Button } from '@/components/ui/Button';
 import {
   IconBell,
   IconBlocked,
+  IconBrush,
   IconChevron,
   IconGauge,
   IconInfo,
@@ -61,7 +52,6 @@ import {
   IconLock,
   IconLogout,
   IconMail,
-  IconMoon,
   IconMusic,
   IconShield,
   IconTrash,
@@ -69,18 +59,11 @@ import {
 } from '@/components/ui/icons';
 import { useScrollHandler } from '@/hooks/useScrollHandler';
 import { useNavContentPadding } from '@/hooks/useNavMetrics';
-import { fonts } from '@/constants/theme';
+import { fonts, getTheme } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useNavStyle } from '@/context/NavStyleContext';
 import { useTheme } from '@/context/ThemeContext';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface SelfZone {
-  zone_active?: boolean;
-  zone_radius?: number;
-  zone_mode?: 'radius' | 'region';
-  zone_region_detail?: { name: string } | null;
-}
+import { contentColumn, useLayoutSize } from '@/hooks/useLayout';
 
 const FEEDBACK_EMAIL = 'nurdauletaskar551@gmail.com';
 // Same inbox today, a different label on purpose: App Review asks for
@@ -90,10 +73,12 @@ const FEEDBACK_EMAIL = 'nurdauletaskar551@gmail.com';
 const SAFETY_EMAIL = 'nurdauletaskar551@gmail.com';
 
 // ─── Location visibility ──────────────────────────────────────────────────────
-// The status readout, the precision choice and the check in / check out button
-// all live in components/LocationVisibilityCard, shared with Privacy & safety.
-// Two screens carrying their own copy of the most consequential wording in the
-// app is how they end up describing it differently.
+// Not here. The status readout, the precision choice and the check in / check
+// out button live on Privacy & safety, in components/LocationVisibilityCard,
+// and this screen links to it rather than hosting a second copy: two screens
+// carrying the most consequential wording in the app is how they end up
+// describing it differently, and two hosts of the same control is two consent
+// sheets in front of one write.
 
 // ─── SettingsRow ──────────────────────────────────────────────────────────────
 /**
@@ -168,54 +153,6 @@ function PrefSwitch({
 // calls that change it; these only lay it out, which is what keeps the screen
 // readable as a list of sections rather than 350 lines of nested JSX.
 
-function LocationSharingSection({
-  settings, failed, saving, onRetry, onCheckIn, onCheckOut, onPrecision,
-}: {
-  settings: ReturnType<typeof usePrivacySettings>['settings'];
-  failed: boolean;
-  saving: boolean;
-  onRetry: () => void;
-  onCheckIn: (mode: SharingPrecision) => void;
-  onCheckOut: () => void;
-  onPrecision: (mode: SharingPrecision) => void;
-}) {
-  const { colors } = useTheme();
-  const styles = makeStyles(colors);
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>LOCATION VISIBILITY</Text>
-      {!settings ? (
-        <View style={styles.loadingWrap}>
-          {failed ? (
-            <Pressable onPress={onRetry} style={({ pressed }) => pressed && styles.pressed}>
-              <Text style={styles.modeNote}>
-                Couldn’t load your location setting. Tap to retry.
-              </Text>
-            </Pressable>
-          ) : (
-            <ActivityIndicator color={colors.teal} />
-          )}
-        </View>
-      ) : (
-        <>
-          <LocationVisibilityCard
-            settings={settings}
-            saving={saving}
-            onCheckIn={onCheckIn}
-            onCheckOut={onCheckOut}
-            onPrecision={onPrecision}
-          />
-          {settings.is_private && (
-            <Text style={styles.modeNote}>
-              Your account is private — this only controls where you appear on the map.
-            </Text>
-          )}
-        </>
-      )}
-    </View>
-  );
-}
-
 function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
   zoneActive: boolean | null;
   zoneShape: string | null;
@@ -280,15 +217,13 @@ function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
 function PreferencesSection({
   notifAllowed,
   onToggleNotifications,
-  darkMode,
-  onToggleTheme,
+  themeName,
   wheelNav,
   onToggleWheelNav,
 }: {
   notifAllowed: boolean | null;
   onToggleNotifications: (v: boolean) => void;
-  darkMode: boolean;
-  onToggleTheme: () => void;
+  themeName: string;
   wheelNav: boolean;
   onToggleWheelNav: (v: boolean) => void;
 }) {
@@ -309,11 +244,6 @@ function PreferencesSection({
             )
           }
         />
-        <SettingsRow
-          icon={IconMoon}
-          label="Dark mode"
-          right={<PrefSwitch value={darkMode} onValueChange={onToggleTheme} />}
-        />
         {/* No explanatory note: the nav being switched is at the bottom of this
             very screen, so flipping this shows the answer faster than any
             wording could. */}
@@ -321,6 +251,20 @@ function PreferencesSection({
           icon={IconGauge}
           label="Wheel navigation bar"
           right={<PrefSwitch value={wheelNav} onValueChange={onToggleWheelNav} />}
+        />
+        {/* Was a "Dark mode" switch. With more than two themes it is a choice,
+            not an on/off, so it moved below the switches — see the ordering
+            rule above SettingsRow. */}
+        <SettingsRow
+          icon={IconBrush}
+          label="Theme"
+          onPress={() => router.push('/appearance')}
+          right={
+            <View style={styles.rowTrailing}>
+              <Text style={styles.rowTrailingText}>{themeName}</Text>
+              <IconChevron size={16} color={colors.t3} />
+            </View>
+          }
         />
         <SettingsRow
           icon={IconList}
@@ -472,20 +416,12 @@ function LegalSection() {
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>LEGAL &amp; SAFETY</Text>
 
-      {/* The zero-tolerance statement, in the app rather than only in the
-          linked document. App Review looks for it, and so does anybody
-          wondering whether reporting something here achieves anything. */}
-      <Card style={styles.legalCard}>
-        <Text style={styles.legalTitle}>Zero tolerance</Text>
-        <Text style={styles.legalBody}>
-          Objectionable content and abusive users are not tolerated on Approx.
-          Anything you post can be reported by anyone who sees it, any account
-          can be blocked, and reports are reviewed by a person. Content that
-          breaks the guidelines is removed and the accounts behind it are
-          suspended or banned.
-        </Text>
-      </Card>
-
+      {/* The zero-tolerance statement used to sit here as its own card. It is
+          still shown — at sign-up, by `TermsAgreement`, and by `TermsGate` to
+          anybody who has not agreed to the current version — which is where
+          App Review is looking for it. This screen keeps the part that is
+          actionable rather than declarative: the guidelines themselves, the
+          blocked-users list, and a way to report a safety concern. */}
       <Card style={styles.rowsCard}>
         <SettingsRow
           icon={IconShield}
@@ -600,28 +536,17 @@ function AccountActions({ isSigningOut, onSignOut, onDeleteAccount }: {
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
-/** The one-line summary on the Zone size row, so the current shape is legible
- *  without opening the screen. */
-function describeZone(zone: SelfZone): string {
-  if (zone.zone_mode === 'region' && zone.zone_region_detail?.name) {
-    return zone.zone_region_detail.name;
-  }
-  const m = zone.zone_radius && zone.zone_radius > 0 ? zone.zone_radius : 500;
-  return m < 1000 ? `${m} m` : `${(m / 1000) % 1 === 0 ? m / 1000 : (m / 1000).toFixed(1)} km`;
-}
-
 export default function SettingsScreen() {
-  const { colors, themeMode, toggleTheme } = useTheme();
+  const { colors, themeId } = useTheme();
   const { navStyle, setNavStyle } = useNavStyle();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const { logout, confirmLogout, isSigningOut } = useAuth();
+  const { confirmLogout, isSigningOut } = useAuth();
   const { top } = useSafeAreaInsets();
+  const layout = useLayoutSize();
   const scrollProps = useScrollHandler();
   const navPadding = useNavContentPadding();
 
-  const { settings } = usePrivacySettings();
   const [saving, setSaving] = useState(false);
-  const [privacyFailed, setPrivacyFailed] = useState(false);
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
 
   const [zoneActive, setZoneActive] = useState<boolean | null>(null);
@@ -711,8 +636,11 @@ export default function SettingsScreen() {
     return () => sub.remove();
   }, [refreshNotifPermission]);
 
+  // Kept although this screen no longer renders the sharing card: the store it
+  // fills is what the map's paused notice and the background task's mirror read
+  // from, and Settings is a tab people land on often.
   useEffect(() => {
-    refreshPrivacy().catch(() => setPrivacyFailed(true));
+    refreshPrivacy().catch(() => {});
   }, []);
 
   // Re-read on every focus, not once per mount. This is a tab, so it stays
@@ -729,25 +657,6 @@ export default function SettingsScreen() {
         .catch(() => setZoneActive(false));
     }, []),
   );
-
-  // The precision asked for but not yet agreed to. Checking *in* publishes your
-  // position, so it goes through the consent sheet first; checking out applies
-  // at once, because a confirmation on the way out would stand between a user
-  // and hiding.
-  const [pendingMode, setPendingMode] = useState<SharingPrecision | null>(null);
-
-  async function applyLocationSharing(mode: LocationSharing) {
-    setSaving(true);
-    await runBusy(async () => {
-      await updatePrivacy({ location_sharing: mode });
-      // Pausing must stop OS tracking now, not at the next app launch — and
-      // resuming must start it, or the position would go stale the moment the
-      // app was backgrounded.
-      await syncBackgroundLocation();
-      setPendingMode(null);
-    }, () => setSaving(false))
-      .catch(() => Alert.alert('Could not update', 'Your previous setting is still in effect.'));
-  }
 
   async function toggleZone(value: boolean) {
     if (zoneSaving) return;
@@ -797,21 +706,7 @@ export default function SettingsScreen() {
   }
 
   function confirmDeleteAccount() {
-    Alert.alert(
-      'Delete Account',
-      'This cannot be undone. All your data will be permanently deleted.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try { await api.delete('/api/users/delete/'); } catch {}
-            await logout();
-          },
-        },
-      ],
-    );
+    router.push('/delete-account');
   }
 
   const version = Constants.expoConfig?.version ?? '1.0.0';
@@ -819,7 +714,11 @@ export default function SettingsScreen() {
   return (
     <View style={styles.root}>
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: top + 20, paddingBottom: navPadding }]}
+        contentContainerStyle={[
+          styles.scroll,
+          contentColumn(layout),
+          { paddingHorizontal: layout.gutter, paddingTop: top + 20, paddingBottom: navPadding },
+        ]}
         showsVerticalScrollIndicator={false}
         {...scrollProps}
       >
@@ -829,25 +728,10 @@ export default function SettingsScreen() {
           {saving && <ActivityIndicator color={colors.teal} size="small" />}
         </View>
 
-        <LocationSharingSection
-          settings={settings}
-          failed={privacyFailed}
-          onRetry={() => {
-            setPrivacyFailed(false);
-            refreshPrivacy().catch(() => setPrivacyFailed(true));
-          }}
-          saving={saving}
-          onCheckIn={setPendingMode}
-          onCheckOut={() => applyLocationSharing('paused')}
-          onPrecision={applyLocationSharing}
-        />
-
-        <LocationSharingConsent
-          mode={pendingMode}
-          busy={saving}
-          onCancel={() => setPendingMode(null)}
-          onConfirm={applyLocationSharing}
-        />
+        {/* Location visibility lives on Privacy & safety only — one card, one
+            screen. It was on both, which meant two hosts of the same control
+            and two consent sheets in front of the same write; the row further
+            down this screen is how you get to it. */}
 
         <ZoneSection
           zoneActive={zoneActive}
@@ -859,8 +743,7 @@ export default function SettingsScreen() {
         <PreferencesSection
           notifAllowed={notifAllowed}
           onToggleNotifications={toggleNotifications}
-          darkMode={themeMode === 'dark'}
-          onToggleTheme={toggleTheme}
+          themeName={getTheme(themeId).name}
           wheelNav={navStyle === 'wheel'}
           onToggleWheelNav={(on) => setNavStyle(on ? 'wheel' : 'bar')}
         />
@@ -897,7 +780,8 @@ export default function SettingsScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 20 },
+  // See app/zone.tsx — gutter and column cap come from the layout.
+  scroll: {},
 
   // Header
   header: {
@@ -959,19 +843,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   settingsRight: { flexDirection: 'row', alignItems: 'center' },
   rowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rowTrailingText: { fontFamily: fonts.body, fontSize: 13, color: colors.t3 },
-  legalCard: { marginBottom: 10, gap: 6 },
-  legalTitle: {
-    fontFamily: fonts.display,
-    fontWeight: '700',
-    fontSize: 15,
-    color: colors.t1,
-  },
-  legalBody: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.t2,
-  },
   legalFootnote: {
     fontFamily: fonts.body,
     fontSize: 12,

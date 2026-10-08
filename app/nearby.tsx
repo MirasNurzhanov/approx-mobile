@@ -15,6 +15,7 @@ import { useScreenTopInset } from '@/hooks/useScreenTopInset';
 import * as Location from 'expo-location';
 
 import { fetchNearbyUsers, isLocationNotAvailable } from '@/services/discovery';
+import { describeZoneReach, fetchSelfZone, type SelfZone } from '@/services/zone';
 import { runBusy } from '@/services/busy';
 import { Avatar } from '@/components/ui/Avatar';
 import { motionLabel, presenceLabel, type MotionClass, type Presence } from '@/services/presence';
@@ -57,6 +58,13 @@ interface NearbyUser {
 
 /** Whose name and face are ours to show. Matches the map's rule exactly: a Hi
  *  in one direction is not an introduction, so `hi_sent` stays anonymous. */
+/** A response that isn't a list means nobody is nearby, not an error.
+ *  At module scope because the call site is inside a `try`, and a ternary there
+ *  is a "value block" React Compiler cannot lower. */
+function listOf(data: unknown): NearbyUser[] {
+  return Array.isArray(data) ? data : [];
+}
+
 function identified(user: NearbyUser): boolean {
   return user.relationship === 'friend' || user.relationship === 'connected';
 }
@@ -147,6 +155,10 @@ export default function NearbyListScreen() {
    * Held apart from `error` because it is not one: nothing has gone wrong and
    * there is nothing for the reader to do about it. */
   const [awaitingFix, setAwaitingFix] = useState(false);
+  /** The viewer's own reach, so the empty state can name it instead of
+   *  quoting a fixed number the server stopped using. `null` until it loads —
+   *  `describeZoneReach` degrades to a plain "nearby" rather than guessing. */
+  const [zone, setZone] = useState<SelfZone | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -158,21 +170,23 @@ export default function NearbyListScreen() {
       // for GPS.
       let coords: { latitude: number; longitude: number } | null = null;
       try {
-        const fix =
-          (await Location.getLastKnownPositionAsync()) ??
-          (await Location.getCurrentPositionAsync({
+        // Two statements rather than `??` between the awaits: a nullish
+        // coalesce inside a `try` is a "value block", which React Compiler
+        // cannot lower. The cheap cached fix still wins when there is one.
+        let fix = await Location.getLastKnownPositionAsync();
+        if (!fix) {
+          fix = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
-          }));
-        coords = fix
-          ? { latitude: fix.coords.latitude, longitude: fix.coords.longitude }
-          : null;
+          });
+        }
+        if (fix) coords = { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
       } catch {
         // No permission, or no fix. `fetchNearbyUsers` returns an empty list
         // for a paused caller without one, which the empty state explains.
       }
 
       const data = await fetchNearbyUsers<NearbyUser>(coords);
-      setUsers(Array.isArray(data) ? data : []);
+      setUsers(listOf(data));
       setAwaitingFix(false);
       setError(null);
     } catch (e: any) {
@@ -198,6 +212,12 @@ export default function NearbyListScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Separate from `load`: this is copy, not content, and a zone fetch that
+  // fails should leave the list working rather than take the screen down.
+  useEffect(() => {
+    fetchSelfZone().then(setZone).catch(() => {});
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -263,7 +283,7 @@ export default function NearbyListScreen() {
                 {error ? 'Nothing to show' : 'Nobody nearby right now'}
               </Text>
               <Text style={styles.emptyBody}>
-                {error ?? 'Approx shows people with shared interests within about 500 metres.'}
+                {error ?? `Approx shows people with shared interests ${describeZoneReach(zone)}. Change how far you see in Zone size.`}
               </Text>
             </View>
           }

@@ -1015,3 +1015,133 @@ export function IconVolume({ size = 24, color = colors.t2 }: IconProps) {
     </Svg>
   )
 }
+
+/** A walking figure, for the travel-mode picker. Deliberately not `IconHiking`
+ *  — that one is a mountain, which reads as "a hike" rather than "on foot". */
+export function IconWalk({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={13.2} cy={4.6} r={1.7} />
+        <Path d="M13.4 8.2l-3 1.7-1.3 3.6M13.4 8.2l1.9 1.4 1.5 2.9M13.4 8.2l-.6 5.4 2.3 2.6.9 4.1M12.8 13.6l-2.9 2.6-1.5 3.9" />
+      </G>
+    </Svg>
+  )
+}
+
+/** A bus, for the transit mode. A bus rather than a train because it is the
+ *  vehicle every city in the app's reach actually has. */
+export function IconTransit({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M5.5 16.5V6.2a2 2 0 012-2h9a2 2 0 012 2v10.3M5.5 16.5h13M5.5 9.2h13M7.5 16.5v2.2M16.5 16.5v2.2" />
+      </G>
+      <Circle cx={8.4} cy={13.3} r={1} fill={color} />
+      <Circle cx={15.6} cy={13.3} r={1} fill={color} />
+    </Svg>
+  )
+}
+
+/** The microphone, struck through: audio is not being recorded at all.
+ *
+ *  Deliberately not `IconMute`, which is a speaker and means "this is not
+ *  being played". The composer needs both and they are different promises —
+ *  see `SwiftDraft.micEnabled`. */
+export function IconMicOff({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M14.5 5.5A2.5 2.5 0 009.5 5.5v3M9.5 11v1.5a2.5 2.5 0 004.3 1.7" />
+        <Path d="M6.5 11.5a5.5 5.5 0 008.2 4.8M17.5 11.5a5.5 5.5 0 01-.4 2.2" />
+        <Path d="M12 17v3.5M9 20.5h6" />
+        <Line x1={4} y1={4} x2={20} y2={20} />
+      </G>
+    </Svg>
+  )
+}
+
+/** A stopwatch, for the countdown and the length cap. */
+export function IconTimer({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={13.5} r={7.5} />
+        <Path d="M12 9.5v4l2.5 1.8M9.5 2.5h5M12 2.5v3.5M18.5 6l1.5-1.5" />
+      </G>
+    </Svg>
+  )
+}
+
+/** A paper plane: send this to somebody. */
+export function IconSend({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M20.5 3.5L10.5 13.5M20.5 3.5l-6.4 17-3.6-7-7-3.6 17-6.4z" />
+      </G>
+    </Svg>
+  )
+}
+
+/** A sparkle, for the colour effects. */
+export function IconSparkle({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M10 3.5l1.8 4.7 4.7 1.8-4.7 1.8L10 16.5l-1.8-4.7L3.5 10l4.7-1.8L10 3.5z" />
+        <Path d="M17.5 14.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1z" />
+      </G>
+    </Svg>
+  )
+}
+
+/** An arrow curving around a frame: turn the picture a quarter. */
+export function IconRotate({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Rect x={3.5} y={10.5} width={10} height={10} rx={1.5} />
+        <Path d="M13.5 6.5h4a3 3 0 013 3v3M20.5 12.5l-2-2M20.5 12.5l2-2" />
+        <Path d="M13.5 6.5l2.5-2.5M13.5 6.5L16 9" />
+      </G>
+    </Svg>
+  )
+}
+
+/** A smiling face, for the sticker and emoji tray. */
+export function IconSticker({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M20.5 12a8.5 8.5 0 10-8.5 8.5c1 0 2.4-2.1 4.4-4.1s4.1-3.4 4.1-4.4z" />
+        <Path d="M8.5 14.5a4 4 0 005.2 1.2" />
+      </G>
+      <Circle cx={9} cy={10} r={1} fill={color} />
+      <Circle cx={15} cy={10} r={1} fill={color} />
+    </Svg>
+  )
+}
+
+/** A hash, for tags. */
+export function IconHash({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Path d="M9.5 3.5L7.5 20.5M16.5 3.5l-2 17M3.5 8.5h17M3 15.5h17" />
+      </G>
+    </Svg>
+  )
+}
+
+/** An at-sign, for mentions. */
+export function IconAt({ size = 24, color = colors.t2 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <G stroke={color} {...stroke}>
+        <Circle cx={12} cy={12} r={4} />
+        <Path d="M16 8v5a2.5 2.5 0 005 0v-1a9 9 0 10-3.5 7.1" />
+      </G>
+    </Svg>
+  )
+}

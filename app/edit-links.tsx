@@ -67,8 +67,11 @@ export default function EditLinksScreen() {
     if (!trimmed || adding) return;
     setAdding(true);
     setError(null);
+    // Narrowed before the `try`: a `??` inside one is a "value block", which
+    // React Compiler cannot lower — it bails on the whole component.
+    const chosen = platform ?? undefined;
     try {
-      const created = await addLink(trimmed, platform ?? undefined);
+      const created = await addLink(trimmed, chosen);
       setLinks((prev) => [...(prev ?? []), created]);
       setValue('');
       setPlatform(null);

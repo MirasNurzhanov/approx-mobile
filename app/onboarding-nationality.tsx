@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,11 +13,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
-import { fonts, lightColors as L, radius } from '@/constants/theme';
+import { fonts, radius, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { COUNTRIES, flagEmoji as flag } from '@/constants/onboardingData';
 
 export default function OnboardingNationalityScreen() {
   const { top, bottom } = useSafeAreaInsets();
+  const { colors: L } = useTheme();
+  const s = useMemo(() => makeStyles(L), [L]);
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
@@ -121,7 +124,7 @@ export default function OnboardingNationalityScreen() {
           accessibilityLabel="Continue"
         >
           {saving
-            ? <ActivityIndicator color="#ffffff" size="small" />
+            ? <ActivityIndicator color={L.bg} size="small" />
             : <Text style={s.continueBtnLabel}>Continue</Text>
           }
         </Pressable>
@@ -130,7 +133,7 @@ export default function OnboardingNationalityScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: L.bg },
 
   topRow: {
@@ -231,7 +234,7 @@ const s = StyleSheet.create({
     fontFamily: fonts.body,
     fontWeight: '600',
     fontSize: 17,
-    color: '#ffffff',
+    color: L.bg,
   },
   dimmed: { opacity: 0.5 },
 });

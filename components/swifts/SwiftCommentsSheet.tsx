@@ -98,11 +98,12 @@ function CommentsBody({
   const styles = makeStyles(colors);
   const insets = useSafeAreaInsets();
 
-  const [comments, setComments] = useState<SwiftComment[]>([]);
+  const [{ comments, exhausted }, setThread] = useState<{
+    comments: SwiftComment[]; exhausted: boolean;
+  }>({ comments: [], exhausted: false });
   const [total, setTotal] = useState(0);
   const [state, setState] = useState<LoadState>('loading');
   const [paging, setPaging] = useState(false);
-  const [exhausted, setExhausted] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const { present, sheets } = useContentActions();
@@ -115,9 +116,8 @@ function CommentsBody({
   const load = useCallback(() => {
     fetchSwiftComments(swiftId, 0)
       .then((page) => {
-        setComments(page.results);
+        setThread({ comments: page.results, exhausted: page.results.length >= page.count });
         setTotal(page.count);
-        setExhausted(page.results.length >= page.count);
         setState('ready');
       })
       .catch(() => setState('error'));
@@ -130,14 +130,13 @@ function CommentsBody({
     setPaging(true);
     fetchSwiftComments(swiftId, comments.length)
       .then((page) => {
-        setComments((prev) => {
-          const next = [...prev, ...page.results];
-          if (next.length >= page.count) setExhausted(true);
-          return next;
+        setThread((previous) => {
+          const comments = [...previous.comments, ...page.results];
+          return { comments, exhausted: previous.exhausted || comments.length >= page.count };
         });
         setTotal(page.count);
       })
-      .catch(() => setExhausted(true))
+      .catch(() => setThread((previous) => ({ ...previous, exhausted: true })))
       .finally(() => setPaging(false));
   }
 
@@ -152,16 +151,17 @@ function CommentsBody({
     setDraft('');
     try {
       const comment = await postSwiftComment(swiftId, text);
-      setComments((prev) => [comment, ...prev]);
+      setThread((previous) => ({ ...previous, comments: [comment, ...previous.comments] }));
       setTotal((n) => n + 1);
       onCountChange(swiftId, 1);
     } catch {
       // Hand the words back rather than losing them.
       setDraft(text);
       Alert.alert('Couldn’t post that', 'Check your connection and try again.');
-    } finally {
-      setSending(false);
     }
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // Neither branch above returns early, so this still runs on both paths.
+    setSending(false);
   }
 
   function reportComment(comment: SwiftComment) {
@@ -175,9 +175,9 @@ function CommentsBody({
       // Blocking from here drops every comment that author has on this thread,
       // not just the one that was reported. The server will do the same on the
       // next fetch; this is what makes the thread agree with it now.
-      onRemoved: () => setComments((prev) => prev.filter(
-        (c) => c.author.id !== comment.author.id,
-      )),
+      onRemoved: () => setThread((previous) => ({ ...previous,
+        comments: previous.comments.filter((c) => c.author.id !== comment.author.id),
+      })),
     });
   }
 
@@ -190,16 +190,18 @@ function CommentsBody({
         onPress: async () => {
           // Optimistic, with the row kept so it can go back if the write fails.
           const index = comments.findIndex((c) => c.id === comment.id);
-          setComments((prev) => prev.filter((c) => c.id !== comment.id));
+          setThread((previous) => ({ ...previous,
+            comments: previous.comments.filter((c) => c.id !== comment.id),
+          }));
           setTotal((n) => Math.max(0, n - 1));
           onCountChange(swiftId, -1);
           try {
             await deleteSwiftComment(comment.id);
           } catch {
-            setComments((prev) => {
-              const next = [...prev];
+            setThread((previous) => {
+              const next = [...previous.comments];
               next.splice(Math.max(0, index), 0, comment);
-              return next;
+              return { ...previous, comments: next };
             });
             setTotal((n) => n + 1);
             onCountChange(swiftId, 1);
@@ -217,6 +219,7 @@ function CommentsBody({
       // resizes the window itself.
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
+      accessibilityViewIsModal
     >
       {sheets}
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>

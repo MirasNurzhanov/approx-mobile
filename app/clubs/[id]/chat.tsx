@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -20,14 +19,22 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import MapView, { PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import type { Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { useChatSocket } from '@/hooks/useChatSocket';
+import { CHAT_SOCKET_LABEL, type ChatSocketStatus } from '@/services/chatSocket';
+import { catchUpHistory, mergeMessages } from '@/services/chatHistory';
 import { runBusy } from '@/services/busy';
 import { clubsApi } from '@/services/clubs';
+import { venuesApi, type Venue } from '@/services/venues';
+import { PlacePicker } from '@/components/map/PlacePicker';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
+import {
+  MAX_PINS, pinIdFor, pinMeetup, unpinPlace, useIsPinned,
+} from '@/services/pinnedPlaces';
 import { useContentActions } from '@/components/ContentActions';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
@@ -36,12 +43,12 @@ import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
 
-const WS_BASE = 'wss://project-x-production-3261.up.railway.app';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ProposalStatus = 'pending' | 'approved' | 'rejected';
 
 interface MeetupProposal {
+  meeting_point?: string;
   id: number;
   title: string;
   description?: string;
@@ -50,6 +57,10 @@ interface MeetupProposal {
   latitude?: number;
   longitude?: number;
   status: ProposalStatus;
+  /** When the event stops existing — the same field the map filters on. Read
+   *  here so a meetup pinned from the chat drops off the viewer's map at the
+   *  same moment as one pinned from the map itself. */
+  expires_at?: string;
 }
 
 interface ClubMessage {
@@ -103,6 +114,31 @@ function fmtPickerDate(d: Date) {
 
 function fmtPickerTime(d: Date) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** The messages endpoint answers with a bare array or a paginated envelope
+ *  depending on the query; both mean the same list here.
+ *
+ *  At module scope rather than inline at the two call sites because one of them
+ *  sits inside a `try`, and a ternary there is a "value block" — something
+ *  React Compiler cannot lower, so it gives up on the whole component. */
+function pageOf(data: unknown): RawMsg[] {
+  return Array.isArray(data) ? data : ((data as any)?.results ?? []);
+}
+
+/** Nothing to show: no words and no picture. Proposals are allowed through
+ *  without either, since the card is the content.
+ *
+ *  At module scope for the same reason as `pageOf` — the call site is inside a
+ *  `try`, where a `&&` chain is a "value block" the compiler cannot lower. */
+function isBlank(m: ClubMessage): boolean {
+  return !m.text && !m.image && m.message_type !== 'meetup_proposal';
+}
+
+/** The reason the socket gave for refusing a message, or a plain fallback.
+ *  At module scope for the same reason as `pageOf`. */
+function detailOf(raw: unknown): string {
+  return (raw as { detail?: string }).detail ?? 'That message could not be sent.';
 }
 
 function normalise(raw: RawMsg, fallbackId?: string): ClubMessage {
@@ -233,15 +269,26 @@ const makeDtStyles = (colors: ColorPalette) => StyleSheet.create({
 });
 
 // ─── ProposalCard ─────────────────────────────────────────────────────────────
-const STATUS_COLORS: Record<ProposalStatus, { bg: string; text: string }> = {
-  pending:  { bg: '#FEF3C7', text: '#92400E' },
-  approved: { bg: '#D1FAE5', text: '#065F46' },
-  rejected: { bg: '#FEE2E2', text: '#991B1B' },
+// Pale chips with dark ink on the light theme; on the dark theme the same hues
+// as a faint tint with light ink, so a card on near-black does not carry three
+// glaring pastel pills.
+const STATUS_COLORS: Record<'light' | 'dark', Record<ProposalStatus, { bg: string; text: string }>> = {
+  light: {
+    pending:  { bg: '#FEF3C7', text: '#92400E' },
+    approved: { bg: '#D1FAE5', text: '#065F46' },
+    rejected: { bg: '#FEE2E2', text: '#991B1B' },
+  },
+  dark: {
+    pending:  { bg: 'rgba(245,158,11,0.16)', text: '#FCD34D' },
+    approved: { bg: 'rgba(16,185,129,0.16)', text: '#6EE7B7' },
+    rejected: { bg: 'rgba(239,68,68,0.16)',  text: '#FCA5A5' },
+  },
 };
 
 function ProposalCard({
   proposal,
   proposerUsername,
+  clubName,
   viewerIsOwner,
   viewerIsProposer,
   onApprove,
@@ -251,6 +298,7 @@ function ProposalCard({
 }: {
   proposal: MeetupProposal;
   proposerUsername?: string;
+  clubName?: string;
   viewerIsOwner: boolean;
   viewerIsProposer: boolean;
   onApprove: (id: number) => void;
@@ -258,11 +306,54 @@ function ProposalCard({
   onDelete: (id: number) => void;
   actioningId: number | null;
 }) {
-  const { colors } = useTheme();
+  const { colors, themeMode } = useTheme();
   const cardStyles = makeCardStyles(colors);
-  const statusColor = STATUS_COLORS[proposal.status] ?? STATUS_COLORS.pending;
+  const statusPalette = STATUS_COLORS[themeMode === 'dark' ? 'dark' : 'light'];
+  const statusColor = statusPalette[proposal.status] ?? statusPalette.pending;
   const isActioning = actioningId === proposal.id;
   const canDelete = viewerIsOwner || viewerIsProposer;
+
+  // ── Going ────────────────────────────────────────────────────────────────
+  // Saying you are going pins the meetup to your own map and does nothing else
+  // — no RSVP, nothing the club or the proposer can see. That is the whole
+  // feature deliberately: an attendance list is a different thing to build,
+  // and this button should not quietly become one. See services/pinnedPlaces.
+  //
+  // Offered on approved proposals only, because a pending one is not on
+  // anybody's map yet, and only when it has somewhere to be.
+  const going = useIsPinned('meetup', proposal.id);
+  const [saving, setSaving] = useState(false);
+  const canAttend =
+    proposal.status === 'approved'
+    && typeof proposal.latitude === 'number'
+    && typeof proposal.longitude === 'number';
+
+  function toggleGoing() {
+    if (saving || !canAttend) return;
+    setSaving(true);
+    void runBusy(async () => {
+      if (going) {
+        await unpinPlace(pinIdFor('meetup', proposal.id));
+        return;
+      }
+      const result = await pinMeetup({
+        meetupId: proposal.id,
+        latitude: proposal.latitude as number,
+        longitude: proposal.longitude as number,
+        title: proposal.title,
+        clubName,
+        locationName: proposal.location_name,
+        eventDatetime: proposal.event_datetime,
+        expiresAt: proposal.expires_at,
+      });
+      if (!result.ok && result.reason === 'limit') {
+        Alert.alert(
+          'Your map is full',
+          `You can keep ${MAX_PINS} pinned places. Remove one to add this meetup.`,
+        );
+      }
+    }, () => setSaving(false));
+  }
 
   function confirmDelete() {
     Alert.alert(
@@ -304,6 +395,7 @@ function ProposalCard({
           <Ionicons name="time-outline" size={13} color={colors.t3} />
           <Text style={cardStyles.metaText}>{fmtDateTime(proposal.event_datetime)}</Text>
         </View>
+        {!!proposal.meeting_point && <Text style={cardStyles.metaText}>{proposal.meeting_point}</Text>}
         {proposal.location_name ? (
           <View style={cardStyles.metaRow}>
             <Ionicons name="location-outline" size={13} color={colors.t3} />
@@ -315,6 +407,40 @@ function ProposalCard({
         ) : null}
         <Text style={cardStyles.proposer}>Proposed by @{proposerUsername ?? 'member'}</Text>
       </View>
+
+      {/* Going — approved meetups the viewer could actually get to */}
+      {canAttend && (
+        <View style={cardStyles.actions}>
+          <Pressable
+            style={[cardStyles.goingBtn, going && cardStyles.goingBtnOn, saving && cardStyles.actionBtnDisabled]}
+            onPress={toggleGoing}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityState={{ selected: going, busy: saving }}
+            accessibilityLabel={
+              going
+                ? 'Going. Tap to remove this meetup from your map.'
+                : 'I am going. Pins this meetup to your map.'
+            }
+            accessibilityHint="Saved to your own map only — the club is not told."
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.teal} />
+            ) : (
+              <>
+                <Ionicons
+                  name={going ? 'bookmark' : 'bookmark-outline'}
+                  size={14}
+                  color={going ? colors.teal : colors.t2}
+                />
+                <Text style={[cardStyles.goingBtnText, going && cardStyles.goingBtnTextOn]}>
+                  {going ? 'Going · pinned to your map' : "I'm going"}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      )}
 
       {/* Owner actions — pending only */}
       {viewerIsOwner && proposal.status === 'pending' && (
@@ -374,6 +500,21 @@ const makeCardStyles = (colors: ColorPalette) => StyleSheet.create({
   desc: { fontFamily: fonts.body, fontSize: 13, color: colors.t2, lineHeight: 19, marginTop: 4 },
   proposer: { fontFamily: fonts.body, fontSize: 11, color: colors.t3, marginTop: 6 },
 
+  goingBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radius.m,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface2,
+  },
+  goingBtnOn: { borderColor: colors.tealLine, backgroundColor: colors.tealTint },
+  goingBtnText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.t2 },
+  goingBtnTextOn: { color: colors.teal },
   actions: {
     flexDirection: 'row',
     gap: 10,
@@ -407,11 +548,11 @@ const makeCardStyles = (colors: ColorPalette) => StyleSheet.create({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 // ─── Chat pieces ──────────────────────────────────────────────────────────────
 
-function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
+function ClubChatHeader({ name, emblem, memberCount, socketStatus, top, onBack }: {
   name?: string;
   emblem?: string;
   memberCount?: string;
-  wsReady: boolean;
+  socketStatus: ChatSocketStatus;
   top: number;
   onBack: () => void;
 }) {
@@ -433,7 +574,7 @@ function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
         <Text style={styles.headerName} numberOfLines={1}>{name ?? 'Club Chat'}</Text>
         <Text style={styles.headerSub}>
           {memberCount ? `${memberCount} members` : 'Group chat'}
-          {!wsReady ? '  ·  Reconnecting…' : ''}
+          {socketStatus !== 'connected' ? `  ·  ${CHAT_SOCKET_LABEL[socketStatus]}` : ''}
         </Text>
       </View>
     </Pressable>
@@ -441,11 +582,12 @@ function ClubChatHeader({ name, emblem, memberCount, wsReady, top, onBack }: {
 }
 
 /** One message: a meetup proposal card, or an ordinary bubble. */
-function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerIsOwner, actioningId, onApprove, onReject, onDelete, onReport }: {
+function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, clubName, viewerIsOwner, actioningId, onApprove, onReject, onDelete, onReport }: {
   item: ClubMessage;
   isMine: boolean;
   hydratedItem: ClubMessage;
   showSenderHeader: boolean;
+  clubName?: string;
   viewerIsOwner: boolean;
   actioningId: number | null;
   onApprove: (id: number) => void;
@@ -462,6 +604,7 @@ function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, viewerI
         <ProposalCard
           proposal={item.proposal}
           proposerUsername={hydratedItem.sender_username}
+          clubName={clubName}
           viewerIsOwner={viewerIsOwner}
           viewerIsProposer={isMine}
           onApprove={onApprove}
@@ -587,19 +730,21 @@ function ClubChatInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
  *  leaves the first one's backdrop over the second. */
 function MeetupProposalModal({
   modalView, top, bottom,
-  propTitle, propDesc, propDateTime, propLocation,
+  propTitle, propDesc, propDateTime, propLocation, meetingPoint, onMeetingPointChange,
   gettingLocation, proposalSubmitting, mapRegion,
   onTitleChange, onDescChange, onDateTimeChange, onClearLocation,
   onCurrentLocation, onOpenMap, onBackToForm, onRegionChange,
-  onConfirmMapLocation, onSubmit, onDismiss,
+  onConfirmMapLocation, onConfirmVenue, onSubmit, onDismiss,
 }: {
   modalView: 'proposal' | 'map' | null;
   top: number;
   bottom: number;
   propTitle: string;
+  meetingPoint: string;
+  onMeetingPointChange: (value: string) => void;
   propDesc: string;
   propDateTime: Date;
-  propLocation: { name: string; lat: number; lng: number } | null;
+  propLocation: { name: string; lat: number; lng: number; venue_id?: number } | null;
   gettingLocation: boolean;
   proposalSubmitting: boolean;
   mapRegion: Region;
@@ -612,6 +757,7 @@ function MeetupProposalModal({
   onBackToForm: () => void;
   onRegionChange: (r: Region) => void;
   onConfirmMapLocation: () => void;
+  onConfirmVenue: (venue: Venue) => void;
   onSubmit: () => void;
   onDismiss: () => void;
 }) {
@@ -625,14 +771,22 @@ function MeetupProposalModal({
       onRequestClose={modalView === 'map' ? onBackToForm : onDismiss}
     >
       {modalView === 'proposal' ? (
-        <>
-          <Pressable style={styles.modalBackdrop} onPress={onDismiss} />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
+        // One container for the backdrop and the sheet, so a screen reader stays
+        // inside the proposal and can still reach the backdrop's close.
+        <View style={{ flex: 1 }} accessibilityViewIsModal>
+          <Pressable
+            testID="meetup-proposal-backdrop"
+            style={styles.modalBackdrop}
+            onPress={onDismiss}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          />
+          <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
             <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Propose a Meetup</Text>
-                <Pressable onPress={onDismiss} hitSlop={10}>
+                <Pressable onPress={onDismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
                   <Ionicons name="close" size={22} color={colors.t2} />
                 </Pressable>
               </View>
@@ -688,13 +842,20 @@ function MeetupProposalModal({
                 </View>
                 {propLocation && (
                   <View style={styles.locationPreview}>
-                    <Ionicons name="location" size={14} color={colors.teal} />
+                    <Ionicons name={propLocation.venue_id ? 'storefront' : 'location'} size={14} color={colors.teal} />
                     <Text style={styles.locationPreviewText} numberOfLines={1}>{propLocation.name}</Text>
                     <Pressable onPress={onClearLocation} hitSlop={8}>
                       <Ionicons name="close-circle" size={16} color={colors.t3} />
                     </Pressable>
                   </View>
                 )}
+
+                {!!propLocation && <>
+                  <Text style={styles.fieldLabel}>Meeting point (optional)</Text>
+                  <TextInput style={styles.fieldInput} value={meetingPoint} onChangeText={onMeetingPointChange}
+                    accessibilityLabel="Meeting point" placeholder="e.g. Main entrance, near the fountain"
+                    placeholderTextColor={colors.t3} maxLength={200} />
+                </>}
 
                 {/* Submit */}
                 <Pressable
@@ -710,46 +871,19 @@ function MeetupProposalModal({
               </ScrollView>
             </View>
           </KeyboardAvoidingView>
-        </>
+        </View>
       ) : (
-        <View style={styles.mapPickerRoot}>
-          {/* Map header */}
-          <View style={[styles.mapPickerHeader, { paddingTop: top + 6 }]}>
-            <Pressable onPress={onBackToForm} hitSlop={12} style={styles.backBtn}>
-              <Ionicons name="chevron-back" size={24} color={colors.t1} />
-            </Pressable>
-            <Text style={styles.mapPickerTitle}>Drop a pin</Text>
-            <View style={{ width: 36 }} />
-          </View>
-
-          {/* Map */}
-          <View style={styles.mapWrap}>
-            <MapView
-              style={StyleSheet.absoluteFill}
-              provider={PROVIDER_GOOGLE}
-              initialRegion={mapRegion}
-              onRegionChangeComplete={onRegionChange}
-            />
-            {/* Fixed center pin */}
-            <View pointerEvents="none" style={styles.centerPin}>
-              <Ionicons name="location" size={36} color={colors.teal} />
-              <View style={styles.centerPinDot} />
-            </View>
-          </View>
-
-          {/* Confirm */}
-          <View style={[styles.mapConfirmBar, { paddingBottom: bottom + 16 }]}>
-            <Pressable
-              style={[styles.mapConfirmBtn, gettingLocation && styles.submitBtnBusy]}
-              onPress={onConfirmMapLocation}
-              disabled={gettingLocation}
-            >
-              {gettingLocation
-                ? <ActivityIndicator color={colors.bg} size="small" />
-                : <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
-              }
-            </Pressable>
-          </View>
+        <View style={{ flex: 1 }} accessibilityViewIsModal>
+          <PlacePicker
+            initialRegion={mapRegion}
+            top={top}
+            bottom={bottom}
+            busy={gettingLocation}
+            onRegionChange={onRegionChange}
+            onBack={onBackToForm}
+            onConfirmPoint={onConfirmMapLocation}
+            onConfirmVenue={onConfirmVenue}
+          />
         </View>
       )}
     </Modal>
@@ -771,20 +905,22 @@ function useClubChat(
   const [messages, setMessages] = useState<ClubMessage[]>([]);
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
-  const [wsReady, setWsReady] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
   const currentUserIdRef = useRef<number | null>(null);
   const senderCache = useRef<Map<number, { username: string; avatar?: string }>>(new Map());
-  const ws = useRef<WebSocket | null>(null);
+  const lifecycle = useRef(0);
+  const latestSnapshot = useRef<number | null>(null);
+  const syncing = useRef(false);
+  const syncAgain = useRef(false);
   const flatListRef = useRef<FlatList>(null);
 
-  function cacheSender(msg: ClubMessage) {
+  const cacheSender = useCallback((msg: ClubMessage) => {
     if (msg.sender_id > 0 && msg.sender_username) {
       senderCache.current.set(msg.sender_id, { username: msg.sender_username, avatar: msg.sender_avatar });
     }
-  }
+  }, []);
 
   function hydrate(msg: ClubMessage): ClubMessage {
     if (msg.sender_username) return msg;
@@ -800,19 +936,47 @@ function useClubChat(
       .catch(() => {});
   }, []);
 
-  // ── History ───────────────────────────────────────────────────────────────
+  // Rebuild any gap, including one longer than the server's 50-message page.
+  const refreshHistory = useCallback(async () => {
+    if (syncing.current) { syncAgain.current = true; return; }
+    syncing.current = true;
+    const epoch = lifecycle.current;
+    try {
+      do {
+        syncAgain.current = false;
+        const result = await catchUpHistory<RawMsg>(async before => {
+          const response = await api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/`, {
+            params: before ? { before } : {},
+          });
+          const results = pageOf(response.data);
+          const hasMore = results.length === 50;
+          return { results, has_more: hasMore,
+            next_before: hasMore ? Math.min(...results.map(row => Number(row.id))) : null };
+        }, latestSnapshot.current, () => epoch === lifecycle.current);
+        if (!result || epoch !== lifecycle.current) return;
+        const incoming = result.rows.map(row => normalise(row));
+        incoming.forEach(cacheSender);
+        setMessages(previous => mergeMessages(previous, incoming));
+        if (latestSnapshot.current === null) setHasMore(result.firstPage.has_more);
+        latestSnapshot.current = Math.max(latestSnapshot.current ?? 0, ...incoming.map(row => Number(row.id)), 0);
+      } while (syncAgain.current && epoch === lifecycle.current);
+    } catch {
+      if (epoch === lifecycle.current) Alert.alert('Messages not refreshed', 'Reconnect or reopen the chat to try again.');
+    } finally {
+      if (epoch === lifecycle.current) { syncing.current = false; setLoading(false); }
+    }
+  }, [clubId, cacheSender]);
+
   useEffect(() => {
-    api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/`)
-      .then((r) => {
-        const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
-        const msgs = raw.map((m) => normalise(m));
-        msgs.forEach(cacheSender);
-        setMessages(msgs);
-        if (raw.length === 0) setHasMore(false);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [clubId]);
+    lifecycle.current += 1;
+    latestSnapshot.current = null;
+    syncing.current = false;
+    setMessages([]);
+    setLoading(true);
+    setHasMore(true);
+    void refreshHistory();
+    return () => { lifecycle.current += 1; };
+  }, [clubId, refreshHistory]);
 
   // ── Infinite scroll up ────────────────────────────────────────────────────
   const loadOlderMessages = useCallback(async () => {
@@ -821,51 +985,44 @@ function useClubChat(
     setLoadingMore(true);
     try {
       const r = await api.get<RawMsg[]>(`/api/clubs/${clubId}/messages/?before=${oldestId}`);
-      const raw: RawMsg[] = Array.isArray(r.data) ? r.data : (r.data as any).results ?? [];
-      if (raw.length === 0) { setHasMore(false); return; }
-      const older = raw.map((m) => normalise(m));
-      older.forEach(cacheSender);
-      setMessages((prev) => [...older, ...prev]);
-    } catch {} finally { setLoadingMore(false); }
-  }, [clubId, loadingMore, hasMore, messages]);
+      const raw = pageOf(r.data);
+      if (raw.length === 0) {
+        setHasMore(false);
+      } else {
+        const older = raw.map((m) => normalise(m));
+        older.forEach(cacheSender);
+        setMessages((prev) => [...older, ...prev]);
+      }
+    } catch {}
+    // Not a `finally` — React Compiler bails on any component containing one.
+    // The empty-page case is an `else` rather than an early return for the same
+    // reason: it used to return out of the `try`, which only a `finally` could
+    // have caught.
+    setLoadingMore(false);
+  }, [clubId, loadingMore, hasMore, messages, cacheSender]);
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     if (e.nativeEvent.contentOffset.y < 60 && hasMore && !loadingMore) loadOlderMessages();
   }
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    let active = true;
-
-    async function connect() {
-      const token = await AsyncStorage.getItem('access_token');
-      if (!token || !active) return;
-      const socket = new WebSocket(`${WS_BASE}/ws/clubs/${clubId}/?token=${token}`);
-
-      socket.onopen = () => {
-        if (!active) { socket.close(); return; }
-        ws.current = socket;
-        setWsReady(true);
-      };
-
-      socket.onmessage = (event) => {
+  const { status: socketStatus, send: sendSocket } = useChatSocket(`/ws/clubs/${clubId}/`, {
+    onOpen: () => { void refreshHistory(); },
+    onMessage: data => {
         try {
-          const raw: RawMsg = JSON.parse(event.data);
+          const raw: RawMsg = JSON.parse(data);
 
           // A refusal from the content filter (see clubs/consumers.py). Drop
           // the optimistic bubble and say why — otherwise it hangs "pending"
           // forever and looks like a stalled network.
           if ((raw as { type?: string }).type === 'error') {
-            const detail = (raw as { detail?: string }).detail
-              ?? 'That message could not be sent.';
+            const detail = detailOf(raw);
             setMessages((prev) => prev.filter((m) => !m.pending));
             Alert.alert('Message not sent', detail);
             return;
           }
 
           const incoming = hydrate(normalise(raw));
-          // Allow proposals through even without text/image
-          if (!incoming.text && !incoming.image && incoming.message_type !== 'meetup_proposal') return;
+          if (isBlank(incoming)) return;
           cacheSender(incoming);
 
           setMessages((prev) => {
@@ -883,32 +1040,15 @@ function useClubChat(
             return [...prev, incoming];
           });
         } catch {}
-      };
-
-      socket.onclose = (event) => {
-        if (!active) return;
-        setWsReady(false);
-        if (event.code === 4003) {
-          Alert.alert('Removed from club', 'You are no longer a member of this club.', [
-            { text: 'OK', onPress: () => router.replace('/(tabs)/chat' as any) },
-          ]);
-        } else if (event.code === 4001) {
-          router.back();
-        }
-      };
-
-      socket.onerror = () => { if (active) setWsReady(false); };
-    }
-
-    connect();
-    return () => {
-      active = false;
-      ws.current?.close();
-      ws.current = null;
-    };
-    // expo-router's `router` is a module singleton, so it never changes and
-    // listing it cannot reconnect the socket.
-  }, [clubId, router]);
+    },
+    onClose: code => {
+      if (code === 4003) {
+        Alert.alert('Removed from club', 'You are no longer a member of this club.', [
+          { text: 'OK', onPress: () => router.replace('/(tabs)/chat' as any) },
+        ]);
+      } else if (code === 4001) router.back();
+    },
+  });
 
   // ── Scroll to bottom ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -931,9 +1071,7 @@ function useClubChat(
       sender_id: currentUserIdRef.current ?? -1,
       created_at: new Date().toISOString(), pending: true,
     }]);
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ content: trimmed }));
-    } else {
+    if (!sendSocket(JSON.stringify({ content: trimmed }))) {
       api.post<RawMsg>(`/api/clubs/${clubId}/messages/`, { content: trimmed })
         .then((r) => {
           const confirmed = normalise(r.data);
@@ -986,7 +1124,7 @@ function useClubChat(
   }
 
   return {
-    messages, setMessages, text, setText, loading, wsReady, loadingMore,
+    messages, setMessages, text, setText, loading, socketStatus, loadingMore,
     flatListRef, currentUserIdRef, hydrate, onScroll, sendText, handleAttach, handleCamera,
   };
 }
@@ -1001,21 +1139,53 @@ function useClubChat(
  * socket like anyone else's. So it lives here rather than among the messaging
  * state it would otherwise be interleaved with.
  */
-function useMeetupProposal(
+export function useMeetupProposal(
   clubId: number,
   // Passed in rather than calling `usePermissionPrimer` again: two instances of
   // that hook in one screen means two Modals racing to present, and only one of
   // them is rendered. The screen owns the primer; this hook borrows its `ensure`.
   ensurePermission: (key: 'location') => Promise<boolean>,
+  venueId?: string,
+  venueRequest?: string,
 ) {
   const [modalView, setModalView] = useState<'proposal' | 'map' | null>(null);
   const [propTitle, setPropTitle] = useState('');
   const [propDesc, setPropDesc] = useState('');
   const [propDateTime, setPropDateTime] = useState<Date>(defaultProposalDate);
-  const [propLocation, setPropLocation] = useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [propLocation, setPropLocation] = useState<{ name: string; lat: number; lng: number; venue_id?: number } | null>(null);
+  const [meetingPoint, setMeetingPoint] = useState('');
   const [proposalSubmitting, setProposalSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_REGION);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const consumedVenue = useRef<string | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    if (!venueId) return;
+    const requestKey = `${clubId}|${venueId}|${venueRequest ?? ''}`;
+    if (consumedVenue.current === requestKey) return;
+    let active = true;
+    if (!/^[1-9]\d*$/.test(venueId) || !Number.isSafeInteger(Number(venueId))) {
+      consumedVenue.current = requestKey;
+      Alert.alert('Venue unavailable', 'Return to the map and choose a venue again.');
+      return;
+    }
+    venuesApi.get(Number(venueId)).then(({ data: venue }) => {
+      if (!active) return;
+      consumedVenue.current = requestKey;
+      setPropTitle(''); setPropDesc(''); setMeetingPoint('');
+      setPropDateTime(defaultProposalDate());
+      setPropLocation({ name: venue.name, lat: venue.latitude, lng: venue.longitude, venue_id: venue.id });
+      setMapRegion({ latitude: venue.latitude, longitude: venue.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+      setModalView('proposal');
+    }).catch(() => {
+      if (active) {
+        consumedVenue.current = requestKey;
+        Alert.alert('Venue unavailable', 'This place could not be loaded. Return to the map and try again.');
+      }
+    });
+    return () => { active = false; };
+  }, [clubId, venueId, venueRequest]));
 
   /** Best human-readable name for a point, falling back to the given label. */
   async function placeName(latitude: number, longitude: number, fallback: string) {
@@ -1060,19 +1230,30 @@ function useMeetupProposal(
     setModalView('proposal');
   }
 
+  /** A venue from the picker: its own name and pin, and the id that lets the
+   *  server treat it as the managed place rather than a free point. */
+  function confirmVenue(venue: Venue) {
+    setPropLocation({ name: venue.name, lat: venue.latitude, lng: venue.longitude, venue_id: venue.id });
+    setMapRegion(region => ({ ...region, latitude: venue.latitude, longitude: venue.longitude }));
+    setModalView('proposal');
+  }
+
   function close() {
     setModalView(null);
     setPropTitle('');
     setPropDesc('');
     setPropDateTime(defaultProposalDate());
     setPropLocation(null);
+    setMeetingPoint('');
   }
 
   async function handleSubmit() {
+    if (submittingRef.current) return;
     if (!propTitle.trim()) {
       Alert.alert('Title required', 'Give your meetup a title.');
       return;
     }
+    submittingRef.current = true;
     setProposalSubmitting(true);
     await runBusy(async () => {
       await api.post(`/api/clubs/${clubId}/events/`, {
@@ -1082,9 +1263,11 @@ function useMeetupProposal(
         location_name: propLocation?.name,
         latitude: propLocation?.lat,
         longitude: propLocation?.lng,
+        venue_id: propLocation?.venue_id,
+        meeting_point: propLocation ? meetingPoint.trim() : '',
       });
       close();
-    }, () => setProposalSubmitting(false)).catch((e: any) =>
+    }, () => { submittingRef.current = false; setProposalSubmitting(false); }).catch((e: any) =>
       Alert.alert('Error', e?.response?.data?.detail ?? 'Could not create proposal.'),
     );
   }
@@ -1098,20 +1281,23 @@ function useMeetupProposal(
       propDesc,
       propDateTime,
       propLocation,
+      meetingPoint,
+      onMeetingPointChange: setMeetingPoint,
       gettingLocation,
       proposalSubmitting,
       mapRegion,
       onTitleChange: setPropTitle,
       onDescChange: setPropDesc,
       onDateTimeChange: setPropDateTime,
-      onClearLocation: () => setPropLocation(null),
+      onClearLocation: () => { setPropLocation(null); setMeetingPoint(''); },
       onCurrentLocation: handleCurrentLocation,
       onOpenMap: () => setModalView('map'),
       onBackToForm: () => setModalView('proposal'),
       onRegionChange: setMapRegion,
       onConfirmMapLocation: confirmMapLocation,
+      onConfirmVenue: confirmVenue,
       onSubmit: handleSubmit,
-      onDismiss: close,
+      onDismiss: () => { if (!submittingRef.current) close(); },
     },
   };
 }
@@ -1119,11 +1305,13 @@ function useMeetupProposal(
 export default function ClubChatScreen() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
-  const { id, name, emblem, memberCount } = useLocalSearchParams<{
+  const { id, name, emblem, memberCount, venueId, venueRequest } = useLocalSearchParams<{
     id: string;
     name?: string;
     emblem?: string;
     memberCount?: string;
+    venueId?: string;
+    venueRequest?: string;
   }>();
   const router = useRouter();
   const { top, bottom } = useSafeAreaInsets();
@@ -1146,10 +1334,10 @@ export default function ClubChatScreen() {
 
   const [actioningEventId, setActioningEventId] = useState<number | null>(null);
 
-  const proposal = useMeetupProposal(clubId, ensurePermission);
+  const proposal = useMeetupProposal(clubId, ensurePermission, venueId, venueRequest);
   const chat = useClubChat(clubId, router, ensurePermission);
   const {
-    messages, setMessages, text, setText, loading, wsReady, loadingMore,
+    messages, setMessages, text, setText, loading, socketStatus, loadingMore,
     flatListRef, currentUserIdRef, hydrate, onScroll, sendText, handleAttach, handleCamera,
   } = chat;
 
@@ -1222,7 +1410,7 @@ export default function ClubChatScreen() {
         name={name}
         emblem={emblem}
         memberCount={memberCount}
-        wsReady={wsReady}
+        socketStatus={socketStatus}
         top={top}
         onBack={() => router.back()}
       />
@@ -1260,6 +1448,7 @@ export default function ClubChatScreen() {
                 isMine={isMine}
                 hydratedItem={hydrate(item)}
                 showSenderHeader={!isMine && (!prevMsg || prevMsg.sender_id !== item.sender_id)}
+                clubName={name}
                 viewerIsOwner={viewerIsOwner}
                 actioningId={actioningEventId}
                 onApprove={handleApprove}
@@ -1373,8 +1562,10 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   sendBtnActive: { backgroundColor: colors.teal, borderColor: colors.teal },
 
   // Proposal modal
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalKav: { justifyContent: 'flex-end' },
+  // Independent of sheet height and keyboard padding: no undimmed gap above
+  // the sheet, around its rounded corners, or while the keyboard animates.
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalKav: { flex: 1, justifyContent: 'flex-end' },
   modalSheet: {
     backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
     paddingHorizontal: 20, maxHeight: '92%',
@@ -1422,31 +1613,4 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   submitBtnText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.bg },
 
   // Map picker
-  mapPickerRoot: { flex: 1, backgroundColor: colors.bg },
-  mapPickerHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
-  },
-  mapPickerTitle: { fontFamily: fonts.display, fontSize: 17, fontWeight: '600', color: colors.t1 },
-  mapWrap: { flex: 1, position: 'relative' },
-  centerPin: {
-    position: 'absolute', top: '50%', left: '50%',
-    transform: [{ translateX: -18 }, { translateY: -36 }],
-    alignItems: 'center',
-  },
-  centerPinDot: {
-    width: 6, height: 6, borderRadius: 3, backgroundColor: colors.teal,
-    marginTop: -2,
-  },
-  mapConfirmBar: {
-    paddingHorizontal: 20, paddingTop: 16,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  mapConfirmBtn: {
-    backgroundColor: colors.teal, borderRadius: radius.l,
-    paddingVertical: 14, alignItems: 'center',
-  },
-  mapConfirmBtnText: { fontFamily: fonts.body, fontSize: 16, fontWeight: '700', color: colors.bg },
 });

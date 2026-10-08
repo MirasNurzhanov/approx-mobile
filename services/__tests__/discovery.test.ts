@@ -2,8 +2,11 @@
  * Which endpoint the client asks, and what it does when the answer is "not yet".
  *
  * Two rules:
- *   - Paused browses through the private query and never touches the public
- *     read, because there is no stored position for the public read to use.
+ *   - Ghost Mode browses through the private query and never touches the
+ *     public read. The server will not answer a ghost from the stored
+ *     position — Ghost is mutual — so the private path is the one that works,
+ *     and it comes back empty, which is the correct answer rather than an
+ *     error.
  *   - `location_not_available` is a wait, not an empty result. It falls back to
  *     the private query once, using the fix we already have, and never turns
  *     into a loop.
@@ -19,7 +22,7 @@ jest.mock('../api', () => ({
 }));
 
 const { api } = jest.requireMock('../api');
-const SHARING_STORAGE = 'aura:privacy:locationSharing';
+const GHOST_STORAGE = 'aura:privacy:ghostMode';
 const HERE = { latitude: 10, longitude: 10 };
 
 function notAvailable() {
@@ -32,9 +35,9 @@ beforeEach(async () => {
   jest.clearAllMocks();
 });
 
-describe('while paused', () => {
+describe('while ghosted', () => {
   beforeEach(async () => {
-    await AsyncStorage.setItem(SHARING_STORAGE, 'paused');
+    await AsyncStorage.setItem(GHOST_STORAGE, '1');
   });
 
   it('browses through the private query and never the public read', async () => {
@@ -66,7 +69,7 @@ describe('while paused', () => {
 
 describe('while sharing', () => {
   beforeEach(async () => {
-    await AsyncStorage.setItem(SHARING_STORAGE, 'live');
+    await AsyncStorage.setItem(GHOST_STORAGE, '0');
   });
 
   it('uses the public read, anchored on the stored position', async () => {
@@ -129,10 +132,32 @@ describe('while sharing', () => {
   });
 });
 
-describe('with no cached sharing state at all', () => {
-  it('takes the private path, because unknown means paused', async () => {
-    // Fail-closed all the way through: a cold start does not reach for the
-    // public read, which is the one that assumes a published position exists.
+describe('with no cached ghost state at all', () => {
+  it('takes the public path, because unknown means not ghosted', async () => {
+    // The default flipped with the model, and deliberately.
+    //
+    // Unknown used to mean paused, which was fail-closed: a cold start never
+    // reached for the public read. Sharing follows the OS permission now, so
+    // the overwhelmingly common cold start is somebody perfectly visible, and
+    // guessing ghosted would answer their first map tick from the private
+    // query — an empty map for a moment on every launch, which is the bug this
+    // whole change set out to remove.
+    //
+    // Guessing wrong the other way costs one public read for a ghost before
+    // their settings land, and that read publishes nothing: the mirror is
+    // written on every change, so a real ghost has '1' on disk before this is
+    // ever consulted. What protects a cold *install* from transmitting is the
+    // disclosure gate in services/location.ts, not this default.
+    api.get.mockResolvedValue({ data: [] });
+
+    await fetchNearbyUsers(HERE);
+
+    expect(api.get).toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('still takes the private path once the mirror says ghosted', async () => {
+    await AsyncStorage.setItem(GHOST_STORAGE, '1');
     api.post.mockResolvedValue({ data: [] });
 
     await fetchNearbyUsers(HERE);

@@ -1,12 +1,10 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
 
-import { api } from './api';
 import { reportLocation } from './location';
-import { getCachedLocationSharing } from './privacy';
+import { getCachedGhostMode } from './privacy';
 
 // Same guard as services/socialAuth.ts and services/notifications.ts, for the
 // same reason: Expo Go's shell app has no way to declare the background modes
@@ -14,14 +12,6 @@ import { getCachedLocationSharing } from './privacy';
 // calling it there is a native call the binary cannot actually service —
 // exactly the shape of crash that leaves no JS error to catch.
 const isExpoGo = Constants.appOwnership === 'expo';
-
-const LAST_ZONE_NOTIFIED_KEY = 'last_zone_notified';
-const ZONE_NOTIFICATION_COOLDOWN_MS = 30 * 60 * 1000;
-
-interface LastZoneNotified {
-  username: string;
-  timestamp: number;
-}
 
 export const BACKGROUND_LOCATION_TASK = 'aura-background-location';
 
@@ -31,28 +21,42 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
   BACKGROUND_LOCATION_TASK,
   async ({ data, error }) => {
     if (error) {
+      // iOS can temporarily lack a location fix at startup. Core Location keeps
+      // trying; skip this event without opening LogBox or restarting tracking.
+      // SDK 54 exposes the NSError domain only in its description.
+      const isLocationUnknown =
+        Platform.OS === 'ios' &&
+        (error.code === 0 || error.code === '0') &&
+        /^Error Domain=kCLErrorDomain Code=0(?:\s|$)/.test(error.message);
+      if (isLocationUnknown) {
+        console.log('[BG Location] location temporarily unavailable; waiting for next update');
+        return;
+      }
       console.error('[BG Location] task error:', error.message);
       return;
     }
-    const location = data?.locations?.at(-1);
+    const location = data?.locations?.reduce<Location.LocationObject | undefined>(
+      (latest, fix) => Number.isFinite(fix.timestamp) &&
+        (!latest || fix.timestamp > latest.timestamp) ? fix : latest,
+      undefined,
+    );
     if (!location) return;
 
-    // Paused means there is nothing this task can usefully do, and the server
-    // would refuse the write anyway. Checked here as well as in
-    // `startBackgroundLocationUpdates` because the two answer different
-    // questions: that one stops the OS task at the moment the setting changes,
-    // this one covers a task the OS kept alive across an app update or a
-    // reinstall — expo-task-manager restores registrations, so a task can
-    // outlive the choice that started it.
-    if ((await getCachedLocationSharing()) === 'paused') {
-      console.log('[BG Location] sharing paused, nothing sent');
+    // Ghost Mode means there is nothing this task can usefully do. Checked
+    // here as well as in `startBackgroundLocationUpdates` because the two
+    // answer different questions: that one stops the OS task at the moment the
+    // switch is flipped, this one covers a task the OS kept alive across an
+    // app update or a reinstall — expo-task-manager restores registrations, so
+    // a task can outlive the choice that started it.
+    if (await getCachedGhostMode()) {
+      console.log('[BG Location] ghost mode, nothing sent');
       await stopBackgroundLocationUpdates().catch(() => {});
       return;
     }
 
     try {
-      // Honours the Location sharing setting: paused sends nothing at all,
-      // approximate coarsens before transmitting.
+      // Honours both gates in services/location.ts: Ghost Mode sends nothing,
+      // and neither does an install that has not shown the disclosure yet.
       const sent = await reportLocation(
         {
           latitude: location.coords.latitude,
@@ -60,6 +64,7 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
         },
         location.coords.speed,
         location.coords.accuracy,
+        location.timestamp,
       );
       if (!sent) {
         console.log('[BG Location] sharing paused, nothing sent');
@@ -69,65 +74,9 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
       console.log('[BG Location] patch failed:', e?.response?.status);
     }
 
-    try {
-      const { data: nearbyUsers } = await api.get<
-        {
-          id: number; username: string; distance_km?: number;
-          zone_audio_url?: string | null;
-          music_zone_radius?: number;
-        }[]
-      >('/api/proximity/nearby/');
+    // Entry alerts are server-only: nearby map distances may be stale or
+    // privacy-adjusted and cannot establish physical presence in a music zone.
 
-      // "You entered a zone — tap to listen", so this has to agree with what is
-      // actually audible. Two rules, both mirroring _trigger_zone_music_alerts
-      // on the server, because a push that fires on different terms to the
-      // server's own alert is two features disagreeing about one event.
-      const zoneUser = nearbyUsers.find((u) => {
-        // 1. There must be something to listen to. Not `zone_active` — that
-        //    switch removes the circle drawn around someone on the map, which
-        //    is a different question. The server only sends `zone_audio_url`
-        //    to viewers allowed to hear it, and withholds it entirely from
-        //    someone who has switched their music zone off, so its presence
-        //    already means all three of "there is music", "it is playing" and
-        //    "you may play it".
-        if (!u.zone_audio_url) return false;
-
-        // 2. The music zone, not the map zone. `music_zone_radius` is always
-        //    the music zone's own number — it never inherits `zone_radius`,
-        //    and `zone_mode` does not come into it: a music zone is a circle
-        //    even for someone whose map zone is a city border. Comparing
-        //    against `zone_radius` fired at the wrong distance in both
-        //    directions.
-        const reach = u.music_zone_radius ?? 0;
-        return (u.distance_km ?? Infinity) * 1000 < reach;
-      });
-      if (zoneUser) {
-        const stored = await AsyncStorage.getItem(LAST_ZONE_NOTIFIED_KEY);
-        const lastNotified: LastZoneNotified | null = stored ? JSON.parse(stored) : null;
-        const withinCooldown =
-          lastNotified != null &&
-          lastNotified.username === zoneUser.username &&
-          Date.now() - lastNotified.timestamp < ZONE_NOTIFICATION_COOLDOWN_MS;
-
-        if (!withinCooldown) {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: '🎵 You entered a zone!',
-              body: `You are in @${zoneUser.username}'s zone - tap to listen`,
-            },
-            trigger: null,
-          });
-          await AsyncStorage.setItem(
-            LAST_ZONE_NOTIFIED_KEY,
-            JSON.stringify({ username: zoneUser.username, timestamp: Date.now() }),
-          );
-        }
-      } else {
-        await AsyncStorage.removeItem(LAST_ZONE_NOTIFIED_KEY);
-      }
-    } catch (e: any) {
-      console.log('[BG Task] nearby fetch failed:', e?.response?.status);
-    }
   },
 );
 
@@ -137,15 +86,15 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
     return;
   }
 
-  // Paused should stop the phone tracking us at all, not just stop the
+  // Ghost Mode should stop the phone tracking us at all, not just stop the
   // uploads: background tracking exists to keep a *published* position
   // current, and a background-location indicator burning on the status bar of
   // someone invisible to everyone is the app claiming a need it does not have.
   // The per-update check in the task is the correctness guarantee; this is the
-  // one that saves the battery. Reached from both mode buttons through
-  // `syncBackgroundLocation`, so it starts on resume as well as stopping.
-  if ((await getCachedLocationSharing()) === 'paused') {
-    console.log('[BG Location] sharing paused, not starting');
+  // one that saves the battery. Reached through `syncBackgroundLocation`, so
+  // it starts on leaving Ghost Mode as well as stopping on entering it.
+  if (await getCachedGhostMode()) {
+    console.log('[BG Location] ghost mode, not starting');
     await stopBackgroundLocationUpdates();
     return;
   }

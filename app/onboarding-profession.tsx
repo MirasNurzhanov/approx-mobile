@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -12,7 +12,8 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api } from '@/services/api';
-import { fonts, lightColors as L, radius } from '@/constants/theme';
+import { fonts, radius, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { PROFESSIONS } from '@/constants/onboardingData';
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -22,6 +23,8 @@ const CARD_W = (SCREEN_W - H_PAD * 2 - COL_GAP) / 2;
 
 export default function OnboardingProfessionScreen() {
   const { top, bottom } = useSafeAreaInsets();
+  const { colors: L } = useTheme();
+  const s = useMemo(() => makeStyles(L), [L]);
   const [selected, setSelected] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -96,7 +99,7 @@ export default function OnboardingProfessionScreen() {
           accessibilityLabel="Continue"
         >
           {saving
-            ? <ActivityIndicator color="#ffffff" size="small" />
+            ? <ActivityIndicator color={L.bg} size="small" />
             : <Text style={s.continueBtnLabel}>Continue</Text>
           }
         </Pressable>
@@ -105,7 +108,7 @@ export default function OnboardingProfessionScreen() {
   );
 }
 
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   root: { flex: 1, backgroundColor: L.bg },
 
   topRow: {
@@ -186,7 +189,7 @@ const s = StyleSheet.create({
     fontFamily: fonts.body,
     fontWeight: '600',
     fontSize: 17,
-    color: '#ffffff',
+    color: L.bg,
   },
   dimmed: { opacity: 0.5 },
 });

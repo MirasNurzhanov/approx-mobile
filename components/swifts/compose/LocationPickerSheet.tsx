@@ -144,6 +144,29 @@ function PickerBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Best-effort name for a coordinate. A failure is not an error — an unnamed
+   *  point is still a perfectly good place to attach.
+   *
+   *  Declared above `goToCurrentPosition`, which calls it: React Compiler cannot
+   *  rewrite a reference to a function hoisted from further down the component
+   *  ([PruneHoistedContexts]) and gives up on the whole sheet when it finds one.
+   */
+  async function describe(at: { latitude: number; longitude: number }) {
+    // Only the lookup is inside the `try`. Reading the result needs `?.`, and an
+    // optional chain there is a "value block" the compiler cannot lower either.
+    let places: Location.LocationGeocodedAddress[] = [];
+    try {
+      places = await Location.reverseGeocodeAsync(at);
+    } catch {
+      setPlaceName('');
+      return;
+    }
+    const place = places[0];
+    setPlaceName(
+      [place?.name, place?.city].filter(Boolean).join(', ').slice(0, 200),
+    );
+  }
+
   /**
    * Centre the map on the user.
    *
@@ -160,47 +183,35 @@ function PickerBody({
       const granted = existing.granted
         ? true
         : (prompt ? await ensurePermission('location') : false);
+      // An `else` rather than an early return: that path only stopped the
+      // spinner because a `finally` caught it, and React Compiler bails on any
+      // component containing one.
       if (!granted) {
         setError(
           prompt
             ? 'Approx needs location access to find where you are. You can still pan the map.'
             : null,
         );
-        return;
+      } else {
+        const position = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        const next = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        setCentre(next);
+        centreRef.current = next;
+        setRegion({ ...next, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA });
+        mapRef.current?.animateToRegion(
+          { ...next, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA }, 350,
+        );
+        void describe(next);
       }
-
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      const next = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      };
-      setCentre(next);
-      centreRef.current = next;
-      setRegion({ ...next, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA });
-      mapRef.current?.animateToRegion(
-        { ...next, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA }, 350,
-      );
-      void describe(next);
     } catch {
       setError('Couldn’t find your position. Pan the map to choose a spot.');
-    } finally {
-      setLocating(false);
     }
-  }
-
-  /** Best-effort name for a coordinate. A failure is not an error — an unnamed
-   *  point is still a perfectly good place to attach. */
-  async function describe(at: { latitude: number; longitude: number }) {
-    try {
-      const [place] = await Location.reverseGeocodeAsync(at);
-      setPlaceName(
-        [place?.name, place?.city].filter(Boolean).join(', ').slice(0, 200),
-      );
-    } catch {
-      setPlaceName('');
-    }
+    setLocating(false);
   }
 
   function handleRegionChangeComplete(next: Region) {
@@ -216,7 +227,7 @@ function PickerBody({
     : false;
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} accessibilityViewIsModal>
         {primer}
         <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <Pressable

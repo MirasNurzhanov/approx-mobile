@@ -65,6 +65,7 @@ import {
 // falls back to the star.
 const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
   [IconBall, [
+    'flag football', 'touch rugby', 'beach tennis', 'roundnet', 'beach handball',
     'football', 'soccer', 'futsal', 'basketball', 'american football', 'baseball',
     'softball', 'tennis', 'padel', 'squash', 'volleyball', 'beach volleyball',
     'netball', 'rugby', 'cricket', 'ice hockey', 'field hockey', 'lacrosse',
@@ -89,6 +90,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'roller derby',
   ]],
   [IconActivity, [
+    'trampolining', 'jump rope',
     'boxing', 'kickboxing', 'mma', 'muay thai', 'karate', 'judo', 'taekwondo',
     'jiu-jitsu', 'wrestling', 'sumo', 'fencing', 'running', 'marathon',
     'trail running', 'track & field', 'walking', 'triathlon', 'gymnastics',
@@ -122,6 +124,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'tug of war',
   ]],
   [IconWave, [
+    'underwater hockey', 'wakesurfing', 'tide pooling', 'beachcombing',
     'swimming', 'diving', 'scuba diving', 'snorkeling', 'rowing', 'kayaking',
     'canoeing', 'paddleboarding', 'sailing', 'surfing', 'windsurfing',
     'wakeboarding', 'kitesurfing', 'jet skiing', 'fishing', 'beach', 'cruises',
@@ -154,6 +157,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'cycling commute',
   ]],
   [IconSnow, [
+    'ski mountaineering',
     'ice skating', 'figure skating', 'skiing', 'snowboarding', 'sledding',
     'curling', 'ice baths',
   
@@ -170,6 +174,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'ice fishing',
   ]],
   [IconHiking, [
+    'nordic walking', 'rucking', 'nature walks',
     'hiking', 'rock climbing', 'bouldering', 'mountaineering', 'backpacking',
     'national parks',
   
@@ -182,6 +187,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'waterfalls',
   ]],
   [IconPlane, [
+    'scenic train rides', 'hostel travel', 'flight simulation',
     'travel', 'solo travel', 'adventure travel', 'train travel', 'aviation',
     'paragliding', 'skydiving',
   
@@ -199,6 +205,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'pilgrimage',
   ]],
   [IconCar, [
+    'sim racing',
     'cars', 'motorsport', 'karting', 'motocross', 'motorcycles', 'car tuning',
     'off-roading', 'road trips', 'van life',
   
@@ -212,7 +219,9 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'motorcycle touring',
     'vintage cars',
   ]],
-  [IconDumbbell, ['gym', 'weightlifting', 'powerlifting', 'crossfit', 'bodybuilding',
+  [IconDumbbell, [
+    'resistance bands', 'functional training',
+    'gym', 'weightlifting', 'powerlifting', 'crossfit', 'bodybuilding',
     'mobility training',
     'foam rolling',
     'kettlebells',
@@ -227,6 +236,8 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'marathon training',
   ]],
   [IconLeaf, [
+    'reformer pilates', 'hot yoga', 'aerial yoga', 'yin yoga', 'botanical gardens',
+    'forest bathing', 'community gardening',
     'yoga', 'pilates', 'meditation', 'massage & spa', 'veganism', 'vegetarian',
     'healthy eating', 'nutrition', 'gardening', 'houseplants', 'beekeeping',
     'farming', 'sustainability', 'flower arranging', 'fragrances', 'foraging',
@@ -281,13 +292,17 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'synthesizer',
     'organ',
   ]],
-  [IconHeadphones, ['djing', 'music production', 'electronic music', 'techno',
+  [IconHeadphones, [
+    'trance', 'dubstep',
+    'djing', 'music production', 'electronic music', 'techno',
     'house music',
     'drum & bass',
     'lo-fi',
     'ambient music',
   ]],
   [IconMusic, [
+    'pop music', 'j-pop', 'mandopop', 'q-pop', 'disco', 'reggaeton', 'dombra', 'kobyz',
+    'irish dance',
     'music', 'guitar', 'bass guitar', 'ukulele', 'banjo', 'violin', 'cello',
     'drums', 'saxophone', 'trumpet', 'songwriting', 'rock', 'metal', 'jazz',
     'classical music', 'k-pop', 'country music', 'dancing', 'ballet',
@@ -321,7 +336,9 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'latin music',
     'afrobeats',
   ]],
-  [IconSound, ['concerts', 'music festivals',
+  [IconSound, [
+    'sound baths',
+    'concerts', 'music festivals',
     'vinyl collecting',
     'live music',
     'festivals',
@@ -337,6 +354,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'storytelling',
   ]],
   [IconBrush, [
+    'diamond painting', 'stained glass', 'air-dry clay', 'upcycling',
     'art', 'painting', 'digital art', 'graphic design', 'animation', 'sculpting',
     'pottery', 'makeup artistry', 'nail art', 'tattoos', 'diy & crafts',
     'woodworking', 'jewelry making', 'candle making', 'soap making',
@@ -376,6 +394,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'home decor',
   ]],
   [IconScissors, [
+    'tufting', 'needle felting', 'cross-stitch', 'punch needle',
     'sewing', 'knitting', 'crochet', 'embroidery', 'fashion design', 'scrapbooking',
   
     'macrame',
@@ -395,6 +414,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'vlogging',
   ]],
   [IconFilm, [
+    'stop-motion animation', 'film clubs',
     'film', 'movies', 'cinema', 'filmmaking', 'videography', 'documentaries', 'anime',
   
     'thrillers',
@@ -404,6 +424,7 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'bollywood',
   ]],
   [IconMask, [
+    'ballet performances',
     'theater', 'improv', 'cosplay', 'magic tricks', 'juggling', 'circus arts',
   
     'puppetry',
@@ -411,6 +432,8 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'theatre trips',
   ]],
   [IconUtensils, [
+    'korean food', 'thai food', 'indian food', 'italian food', 'georgian food',
+    'kazakh food', 'hot pot',
     'cooking', 'foodie', 'fine dining', 'street food', 'sushi', 'pizza',
     'burgers', 'ramen', 'brunch', 'cheese', 'picnics',
   
@@ -439,12 +462,16 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'baking sourdough',
   ]],
   [IconFire, ['bbq & grilling', 'sauna']],
-  [IconCoffee, ['coffee', 'tea', 'bubble tea', 'smoothies',
+  [IconCoffee, [
+    'kombucha', 'coffee roasting',
+    'coffee', 'tea', 'bubble tea', 'smoothies',
     'espresso',
     'latte art',
     'matcha',
   ]],
-  [IconGlass, ['wine tasting', 'craft beer', 'cocktails', 'nightlife',
+  [IconGlass, [
+    'mocktails',
+    'wine tasting', 'craft beer', 'cocktails', 'nightlife',
     'home brewing',
     'winemaking',
     'mixology',
@@ -458,7 +485,9 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'hot springs',
     'glamping',
   ]],
-  [IconPin, ['geocaching']],
+  [IconPin, [
+    'local exploring',
+    'geocaching']],
   [IconStar, ['stargazing', 'astronomy', 'astrology']],
   [IconRocket, ['space exploration', 'sci-fi', 'startups', 'entrepreneurship']],
   [IconEye, ['birdwatching', 'tarot',
@@ -466,6 +495,8 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'whale watching',
   ]],
   [IconGamepad, [
+    'co-op games', 'cozy games', 'indie games', 'rhythm games', 'fighting games',
+    'roguelikes',
     'gaming', 'games', 'retro gaming', 'vr gaming', 'game development', 'esports',
   
     'console gaming',
@@ -496,12 +527,15 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'chess puzzles',
     'board game nights',
   ]],
-  [IconCode, ['coding', 'web development',
+  [IconCode, [
+    'hackathons',
+    'coding', 'web development',
     'open source',
     'linux',
     'app development',
   ]],
   [IconChip, [
+    'mechanical keyboards', 'repair cafes',
     'ai & machine learning', 'robotics', 'pc building', '3d printing',
     'electronics', 'drones',
   
@@ -514,19 +548,25 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'retro computing',
   ]],
   [IconShield, ['cybersecurity']],
-  [IconChart, ['crypto', 'investing', 'personal finance', 'coin collecting',
+  [IconChart, [
+    'sports analytics',
+    'crypto', 'investing', 'personal finance', 'coin collecting',
     'data science',
     'blockchain',
     'trading',
     'real estate',
     'economics',
   ]],
-  [IconTv, ['tv series', 'streaming',
+  [IconTv, [
+    'c-dramas', 'turkish drama',
+    'tv series', 'streaming',
     'reality tv',
     'sitcoms',
     'korean drama',
   ]],
-  [IconGlobe, ['languages',
+  [IconGlobe, [
+    'cultural travel', 'cultural festivals',
+    'languages',
     'language exchange',
     'linguistics',
   ]],
@@ -537,24 +577,31 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'geology',
     'meteorology',
   ]],
-  [IconBook, ['books', 'reading', 'manga', 'comics', 'history', 'fantasy',
+  [IconBook, [
+    'romance books', 'mystery books', 'historical fiction', 'nonfiction', 'webtoons',
+    'books', 'reading', 'manga', 'comics', 'history', 'fantasy',
     'audiobooks',
     'book clubs',
     'libraries',
     'mythology',
     'religion',
   ]],
-  [IconSearch, ['true crime', 'antiques',
+  [IconSearch, [
+    'rock collecting',
+    'true crime', 'antiques',
     'archaeology',
     'anthropology',
     'paleontology',
     'ancient history',
   ]],
   [IconGhost, ['horror']],
-  [IconImage, ['museums & galleries',
+  [IconImage, [
+    'digital collage',
+    'museums & galleries',
     'art history',
   ]],
   [IconPaw, [
+    'pet adoption', 'dog walking', 'cat cafes',
     'dogs', 'cats', 'pets', 'horses', 'horse riding', 'polo', 'reptiles',
   
     'rodeo',
@@ -567,14 +614,18 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'dog training',
     'animal rescue',
   ]],
-  [IconHeart, ['volunteering', 'skincare',
+  [IconHeart, [
+    'beach cleanups',
+    'volunteering', 'skincare',
     'minimalism',
     'organising',
     'perfume',
     'haircare',
     'charity',
   ]],
-  [IconShirt, ['fashion', 'thrifting', 'sneakers', 'streetwear', 'vintage fashion',
+  [IconShirt, [
+    'clothing swaps',
+    'fashion', 'thrifting', 'sneakers', 'streetwear', 'vintage fashion',
     'sneaker collecting',
   ]],
   [IconTarget, ['darts', 'archery', 'watches',
@@ -595,8 +646,12 @@ const INTEREST_ICON_GROUPS: [IconComponent, string[]][] = [
     'laser tag',
     'watch collecting',
   ]],
-  [IconMail, ['stamp collecting']],
-  [IconPeople, ['genealogy',
+  [IconMail, [
+    'pen pals',
+    'stamp collecting']],
+  [IconPeople, [
+    'dinner parties',
+    'genealogy',
     'networking',
     'mentoring',
     'community building',

@@ -1,6 +1,5 @@
-import { useSyncExternalStore } from 'react';
-
 import { api } from '@/services/api';
+import { getNavBadges, refreshNavBadges, resetNavBadges, useSharedNavBadges } from '@/services/navBadges';
 
 // Everything that is waiting for the user, in one place: Hi requests (formerly
 // the Chat "Pending" tab), friend requests, and story activity. The alerts
@@ -28,16 +27,24 @@ export interface AlertUser {
  *  accept/decline hits and what the row says. */
 export interface AlertRequest {
   id: number;
-  kind: 'hi' | 'friend';
+  kind: 'hi' | 'friend' | 'club';
   user: AlertUser;
+  /** The club a `club` request invites the user to join. */
+  club?: AlertClub;
   created_at?: string;
 }
 
-/** Raw shape from either requests endpoint — the sender key has varied. */
+export interface AlertClub {
+  id: number;
+  name: string;
+}
+
+/** Raw shape from the requests endpoints — the sender key has varied. */
 interface RawRequest {
   id: number;
   sender?: AlertUser;
   from_user?: AlertUser;
+  club?: AlertClub;
   created_at?: string;
 }
 
@@ -124,11 +131,15 @@ export function isClubAlert(n: Notification): boolean {
   return t === 'club_event' || t === 'club_event_status' || t === 'club_invite';
 }
 
+const REQUEST_ENDPOINTS: Record<AlertRequest['kind'], string> = {
+  hi: '/api/friends/hi',
+  friend: '/api/friends/request',
+  club: '/api/clubs/invitations',
+};
+
 /** Endpoint paths for answering a request, by kind. */
 export function requestActionUrl(req: AlertRequest, action: 'accept' | 'decline'): string {
-  return req.kind === 'hi'
-    ? `/api/friends/hi/${req.id}/${action}/`
-    : `/api/friends/request/${req.id}/${action}/`;
+  return `${REQUEST_ENDPOINTS[req.kind]}/${req.id}/${action}/`;
 }
 
 // ─── Parsing ──────────────────────────────────────────────────────────────────
@@ -155,7 +166,7 @@ function toRequests(raw: unknown, kind: AlertRequest['kind']): AlertRequest[] {
   if (!Array.isArray(raw)) return [];
   return (raw as RawRequest[]).flatMap((r) => {
     const user = r.sender ?? r.from_user;
-    return user ? [{ id: r.id, kind, user, created_at: r.created_at }] : [];
+    return user ? [{ id: r.id, kind, user, created_at: r.created_at, ...(r.club ? { club: r.club } : {}) }] : [];
   });
 }
 
@@ -165,15 +176,17 @@ function byDateDesc(a: { created_at?: string }, b: { created_at?: string }): num
 
 // ─── Loading ──────────────────────────────────────────────────────────────────
 export async function loadAlerts(): Promise<AlertsData> {
-  const [hiRes, friendRes, notifRes] = await Promise.allSettled([
+  const [hiRes, friendRes, clubRes, notifRes] = await Promise.allSettled([
     api.get<unknown>('/api/friends/requests/'),
     api.get<unknown>('/api/friends/requests/incoming/'),
+    api.get<unknown>('/api/clubs/invitations/'),
     api.get<unknown>('/api/notifications/'),
   ]);
 
   const requests = [
     ...(hiRes.status === 'fulfilled' ? toRequests(hiRes.value.data, 'hi') : []),
     ...(friendRes.status === 'fulfilled' ? toRequests(friendRes.value.data, 'friend') : []),
+    ...(clubRes.status === 'fulfilled' ? toRequests(clubRes.value.data, 'club') : []),
   ].sort(byDateDesc);
 
   const notifications =
@@ -195,7 +208,8 @@ export function deriveAlerts(data: AlertsData): DerivedAlerts {
 }
 
 export async function countUnreadAlerts(): Promise<number> {
-  return deriveAlerts(await loadAlerts()).unreadCount;
+  await refreshNavBadges();
+  return getNavBadges().alerts;
 }
 
 /** Deletes every notification (story activity, club activity, …) server-side.
@@ -207,55 +221,15 @@ export async function clearAllAlerts(): Promise<void> {
 }
 
 // ─── Unread store ─────────────────────────────────────────────────────────────
-// The count has two subscribers that are on screen at the same time — the nav
-// arc's Chat badge and the Alerts tab in Chat. One shared poll rather than one
-// per hook instance, or the Chat tab would issue four requests every ten
-// seconds to answer a single question. Same shape as services/blocked.ts.
-
-const POLL_MS = 10_000;
-
-let unreadCount = 0;
-let timer: ReturnType<typeof setInterval> | null = null;
-let inFlight = false;
-const listeners = new Set<() => void>();
-
+// The alerts tab, native tab bar and wheel subscribe to the same small request.
 export function refreshAlertsCount(): void {
-  if (inFlight) return;
-  inFlight = true;
-  countUnreadAlerts()
-    .then((next) => {
-      if (next === unreadCount) return;
-      unreadCount = next;
-      listeners.forEach((l) => l());
-    })
-    .catch(() => {})
-    .finally(() => { inFlight = false; });
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  // Polling is tied to having subscribers, so no timer survives on screens
-  // that never show the count.
-  if (listeners.size === 1) {
-    refreshAlertsCount();
-    timer = setInterval(refreshAlertsCount, POLL_MS);
-  }
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0 && timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-  };
+  void refreshNavBadges();
 }
 
 export function useAlertsCount(): number {
-  return useSyncExternalStore(subscribe, () => unreadCount);
+  return useSharedNavBadges().alerts;
 }
 
-/** Drop the previous account's badge on sign-out, so the next person to use
- *  this device does not briefly see a count that was never theirs. */
 export function resetAlertsCount(): void {
-  unreadCount = 0;
-  listeners.forEach((l) => l());
+  resetNavBadges();
 }

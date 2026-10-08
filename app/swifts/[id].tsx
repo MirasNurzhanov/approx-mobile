@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, LayoutChangeEvent, Pressable, StyleSheet, Text, View,
+  ActivityIndicator, Alert, LayoutChangeEvent, Pressable, StyleSheet, Text, View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SwiftCard } from '@/components/swifts/SwiftCard';
+import { SendToFriendsSheet } from '@/components/swifts/SendToFriendsSheet';
 import { SwiftCommentsSheet } from '@/components/swifts/SwiftCommentsSheet';
 import { SwiftReviewNotice } from '@/components/swifts/SwiftReviewNotice';
 import { SwiftLocationSheet } from '@/components/swifts/SwiftLocationSheet';
 import type { RevealState } from '@/components/swifts/SwiftLocationButton';
 import { SwiftEmptyIcon } from '@/components/swifts/icons';
-import { IconClose } from '@/components/ui/icons';
+import { IconChart, IconClose } from '@/components/ui/icons';
 import { fonts, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -21,12 +22,15 @@ import {
   revealSwiftLocation,
   setSwiftLiked,
   setSwiftReposted,
+  setSwiftSaved,
+  deleteSwift,
   SwiftLocationUnavailable,
   type Swift,
   type SwiftLocation,
 } from '@/services/swifts';
 import { useContentActions } from '@/components/ContentActions';
 import { reportSwiftSignal } from '@/services/swiftSignals';
+import { sendSwiftTo } from '@/services/swiftComposer';
 
 /**
  * One Swift, on its own — reached from `swifts/compose` on publish, and by
@@ -65,6 +69,10 @@ export default function SwiftDetailScreen() {
   const [muted, setMuted] = useState(true);
   const [commentsOpen, setCommentsOpen] = useState(false);
 
+  /** Whether the "send privately" sheet is open, and whether a send is in
+   *  flight — the sheet cannot be submitted twice. */
+  const [sending, setSending] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
   const [revealState, setRevealState] = useState<RevealState>('idle');
   const [reveal, setReveal] = useState<{
     location: SwiftLocation | null;
@@ -74,8 +82,11 @@ export default function SwiftDetailScreen() {
   /** One `view` per mount, matching the feed's per-session dedupe — the server
    *  is idempotent anyway, this just saves the round trip. */
   const viewedRef = useRef(false);
+  const requestVersion = useRef(0);
 
   const load = useCallback(() => {
+    const version = ++requestVersion.current;
+    setSwift(null);
     if (!Number.isFinite(swiftId)) {
       setState('error');
       return;
@@ -83,13 +94,26 @@ export default function SwiftDetailScreen() {
     setState('loading');
     fetchSwift(swiftId)
       .then((s) => {
+        if (version !== requestVersion.current) return;
         setSwift(s);
         setState('ready');
       })
-      .catch(() => setState('error'));
+      .catch(() => { if (version === requestVersion.current) setState('error'); });
   }, [swiftId]);
 
-  useEffect(load, [load]);
+  // Revalidate saved links when returning from settings or analytics. A hidden
+  // creator must not survive as a cached video after the screen was left.
+  useFocusEffect(useCallback(() => {
+    load();
+    return () => {
+      requestVersion.current += 1;
+      setSwift(null);
+      setState('loading');
+      setReveal(null);
+      setRevealState('idle');
+      setCommentsOpen(false);
+    };
+  }, [load]));
 
   useEffect(() => {
     if (state === 'ready' && swift && !viewedRef.current) {
@@ -126,7 +150,10 @@ export default function SwiftDetailScreen() {
 
     const timer = setTimeout(() => {
       pollsRef.current += 1;
-      fetchSwift(swiftId).then(setSwift).catch(() => {
+      const version = requestVersion.current;
+      fetchSwift(swiftId).then((fresh) => {
+        if (version === requestVersion.current) setSwift(fresh);
+      }).catch(() => {
         // A transient failure here is not worth surfacing: the Swift on screen
         // is still the last good copy, and the next tick tries again.
       });
@@ -194,16 +221,32 @@ export default function SwiftDetailScreen() {
       });
   }, []);
 
+  /** Save / un-save. No signal reported and no counter to move — see the feed
+   *  handler for why a shortlist must not feed the recommender. */
+  const handleToggleSave = useCallback((swiftId: number, saved: boolean) => {
+    setSwift((prev) => (
+      prev && prev.id === swiftId ? { ...prev, viewer_saved: saved } : prev
+    ));
+    setSwiftSaved(swiftId, saved).catch(() => {
+      setSwift((prev) => (
+        prev && prev.id === swiftId ? { ...prev, viewer_saved: !saved } : prev
+      ));
+    });
+  }, []);
+
   // ── Reveal — same rule as the feed: only ever called from a press. ─────────
   const handleReveal = useCallback(async (target: Swift) => {
+    const version = requestVersion.current;
     reportSwiftSignal({ kind: 'location_reveal', swift_id: target.id });
     setRevealState('loading');
     setReveal({ location: null, error: null });
     try {
       const location = await revealSwiftLocation(target.id);
+      if (version !== requestVersion.current) return;
       setReveal({ location, error: null });
       setRevealState('revealed');
     } catch (e) {
+      if (version !== requestVersion.current) return;
       const message = e instanceof SwiftLocationUnavailable
         ? e.message
         : 'Couldn’t load the location.';
@@ -226,6 +269,34 @@ export default function SwiftDetailScreen() {
   // Same menu as the feed's. On a permalink there is no list to prune, so a
   // block closes the screen instead — leaving a blocked author's Swift on
   // screen would read as the block not having worked.
+  const handleSend = useCallback(() => setSending(true), []);
+
+  /**
+   * Spend the chosen recipients.
+   *
+   * A refusal per person is ordinary rather than exceptional — they may have
+   * blocked you since the sheet loaded, or may not be allowed to watch this
+   * particular Swift — so the result is read rather than thrown, and said
+   * once. See `services/swiftComposer.sendSwiftTo`.
+   */
+  const confirmSend = useCallback(async (userIds: number[]) => {
+    if (!swift) return;
+    setSendBusy(true);
+    const result = await sendSwiftTo(swift.id, userIds).catch(() => null);
+    setSendBusy(false);
+    setSending(false);
+    if (result === null) {
+      Alert.alert('Could not send', 'Try again in a moment.');
+      return;
+    }
+    if (result.refused.length > 0) {
+      Alert.alert(
+        result.sent.length > 0 ? 'Sent to some people' : 'Could not send',
+        `${result.sent.length} sent. ${result.refused.length} could not be — they may not be able to watch this Swift.`,
+      );
+    }
+  }, [swift]);
+
   const handleMore = useCallback((target: Swift) => {
     present({
       target: 'swift',
@@ -235,6 +306,14 @@ export default function SwiftDetailScreen() {
       authorUsername: target.author.username,
       authorAvatar: target.author.profile_picture ?? undefined,
       onRemoved: close,
+      // Only your own — same `is_mine` gate as the feed. Leaving the screen is
+      // the whole cleanup here: there is no list to splice, and staying on the
+      // detail page for a Swift that no longer exists would just 404 on the
+      // next fetch.
+      ...(target.is_mine ? {
+        deleteNoun: 'Swift',
+        onDelete: async () => { await deleteSwift(target.id); close(); },
+      } : {}),
     });
   }, [present, close]);
   const handleTogglePause = useCallback(() => setPaused((p) => !p), []);
@@ -278,10 +357,24 @@ export default function SwiftDetailScreen() {
           onToggleMute={handleToggleMute}
           onToggleLike={handleToggleLike}
           onToggleRepost={handleToggleRepost}
+          onToggleSave={handleToggleSave}
+          onSend={handleSend}
           onComment={handleComment}
           onMore={handleMore}
         />
       )}
+
+      {/* Forwarding, from the permalink as well as from the feed. This is the
+          screen a mention notification and a shared card both land on, so it
+          is where somebody is most likely to want to pass a Swift along. */}
+      <SendToFriendsSheet
+        visible={sending}
+        selected={[]}
+        mode="send"
+        busy={sendBusy}
+        onCancel={() => setSending(false)}
+        onConfirm={confirmSend}
+      />
 
       <Pressable
         style={[styles.closeBtn, { top: insets.top + 10 }]}
@@ -292,6 +385,15 @@ export default function SwiftDetailScreen() {
       >
         <IconClose size={20} color="#FFFFFF" />
       </Pressable>
+
+      {state === 'ready' && swift?.is_mine && <Pressable
+        style={[styles.analyticsBtn, { top: insets.top + 10 }]}
+        accessibilityRole="button"
+        accessibilityLabel="View analytics for this Swift"
+        onPress={() => router.push({ pathname: '/swifts/analytics', params: { swift_id: String(swift.id) } })}
+      >
+        <IconChart size={18} color="#FFFFFF" /><Text style={styles.analyticsText}>Analytics</Text>
+      </Pressable>}
 
       <SwiftCommentsSheet
         visible={commentsOpen}
@@ -307,6 +409,7 @@ export default function SwiftDetailScreen() {
         loading={reveal !== null && !reveal.location && !reveal.error}
         error={reveal?.error ?? null}
         authorName={swift?.author.username ?? ''}
+        swiftId={swift?.id ?? null}
         onClose={() => setReveal(null)}
         onRetry={() => { if (swift) void handleReveal(swift); }}
       />
@@ -335,6 +438,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.teal,
     marginTop: 4,
   },
+  analyticsBtn: {
+    position: 'absolute', right: 14, minHeight: 40, paddingHorizontal: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.65)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
+  },
+  analyticsText: { fontFamily: fonts.body, fontSize: 12, color: '#FFFFFF', fontWeight: '600' },
   closeBtn: {
     position: 'absolute',
     left: 14,

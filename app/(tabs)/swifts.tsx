@@ -24,7 +24,7 @@ export default function SwiftsScreen() {
         <SwiftsFeed />
       </View>
 
-      <ApproxNav />
+      <ApproxNav compact />
     </View>
   );
 }

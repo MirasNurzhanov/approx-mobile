@@ -85,16 +85,16 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   location: {
     title: 'Location',
     primer:
-      'Approx shows people with shared interests near you right now. Without location the map has nothing to show. You control how precise it is, and can pause it any time.',
-    purpose: 'Find people nearby and place you on the map.',
+      'Approx shows your friends where you are, and shows you people nearby who share your interests. Friends see you whenever Ghost Mode is off; anyone else only after you tap Check in on the map, for that session. Granting this never makes you visible to them by itself.',
+    purpose: 'Show you to your friends, and find people nearby.',
     denied:
       'The map can’t show anyone nearby without location access.',
   },
   locationBackground: {
     title: 'Keep sharing while Approx is closed',
     primer:
-      'iOS will ask whether Approx may use your location Always. That is what keeps your place on the map current while Approx is closed and your phone is locked — only while you are sharing, and only until you turn this off, choose Paused, or close Approx.',
-    purpose: 'Keep your place on the map current while Approx is closed.',
+      'iOS will ask whether Approx may use your location Always. That keeps your place on your friends’ maps current while Approx is closed and your phone is locked — and, during a session you checked in, on the maps of people nearby. It stops when you turn this off or turn on Ghost Mode.',
+    purpose: 'Keep your place on your friends’ maps current while Approx is closed.',
     denied:
       'Approx will only update your location while the app is open. You can change this in Settings → Approx → Location.',
   },

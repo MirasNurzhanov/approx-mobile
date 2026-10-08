@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -121,7 +121,9 @@ export function ReportSheet({
     try {
       await reportContent(target, targetId, reason, note);
       setDone(true);
-      onReported?.();
+      // Spelled out rather than `onReported?.()`: an optional call is a "value
+      // block", which React Compiler cannot lower inside a try/catch.
+      if (onReported) onReported();
     } catch (e) {
       setError(
         e instanceof ReportFailed
@@ -138,7 +140,7 @@ export function ReportSheet({
   //
   // React Native's `Modal` still mounts its children when `visible` is false,
   // so returning the tree unconditionally meant every render of a host screen
-  // also rendered this sheet's eight reason rows, its ScrollView and its
+  // also rendered this sheet's eight reason rows, its list and its
   // TextInput. On the Swifts feed — which re-renders on every scroll tick and
   // every optimistic count change — that is a lot of work for something nobody
   // is looking at, and it showed up first as the feed's own tests crossing
@@ -155,7 +157,7 @@ export function ReportSheet({
       transparent
       onRequestClose={handleClose}
     >
-      <View style={styles.root}>
+      <View style={styles.root} accessibilityViewIsModal>
         <Pressable
           style={styles.backdrop}
           onPress={handleClose}
@@ -213,16 +215,17 @@ export function ReportSheet({
                 it in front of the right person fastest.
               </Text>
 
-              <ScrollView
+              <FlatList
+                data={REPORT_REASONS}
+                keyExtractor={(item) => item.value}
+                extraData={{ reason, busy }}
                 style={styles.reasons}
                 contentContainerStyle={styles.reasonsContent}
                 showsVerticalScrollIndicator={false}
-              >
-                {REPORT_REASONS.map((r) => {
+                renderItem={({ item: r }) => {
                   const selected = reason === r.value;
                   return (
                     <Pressable
-                      key={r.value}
                       onPress={() => setReason(r.value)}
                       disabled={busy}
                       style={({ pressed }) => [
@@ -246,9 +249,8 @@ export function ReportSheet({
                       </View>
                     </Pressable>
                   );
-                })}
-
-                <TextInput
+                }}
+                ListFooterComponent={<TextInput
                   value={note}
                   onChangeText={setNote}
                   editable={!busy}
@@ -258,8 +260,8 @@ export function ReportSheet({
                   placeholderTextColor={colors.t3}
                   style={styles.note}
                   accessibilityLabel="Additional details, optional"
-                />
-              </ScrollView>
+                />}
+              />
 
               {error ? <Text style={styles.error}>{error}</Text> : null}
 

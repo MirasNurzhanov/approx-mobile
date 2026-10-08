@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,11 +16,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/context/AuthContext';
 import { runBusy } from '@/services/busy';
-import { fonts, lightColors as L } from '@/constants/theme';
+import { fonts, withAlpha, type ColorPalette } from '@/constants/theme';
+import { useTheme } from '@/context/ThemeContext';
 import { TermsAgreement } from '@/components/TermsAgreement';
 
 export default function LoginScreen() {
   const { login } = useAuth();
+  // The signed-out screens follow the app's theme like every other screen:
+  // signing out of a dark app must not drop the user onto a light page.
+  const { colors: L } = useTheme();
+  const s = useMemo(() => makeStyles(L), [L]);
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [focused, setFocused]   = useState<'email' | 'password' | null>(null);
@@ -201,7 +206,7 @@ export default function LoginScreen() {
 
 const BLOB = 300;
 
-const s = StyleSheet.create({
+const makeStyles = (L: ColorPalette) => StyleSheet.create({
   terms: { marginTop: 20, paddingHorizontal: 4 },
 
   root: {
@@ -217,7 +222,7 @@ const s = StyleSheet.create({
     width: BLOB,
     height: BLOB,
     borderRadius: BLOB / 2,
-    backgroundColor: L.surface2,   // #FCEEE8 — coral tint
+    backgroundColor: L.tealTint,   // accent tint: coral in light, teal in dark
   },
   blobBR: {
     position: 'absolute',
@@ -226,7 +231,7 @@ const s = StyleSheet.create({
     width: BLOB,
     height: BLOB,
     borderRadius: BLOB / 2,
-    backgroundColor: '#E8E4F5',    // violet tint — not in palette
+    backgroundColor: withAlpha(L.purple, 0.16),   // violet tint
   },
 
   flex: { flex: 1 },

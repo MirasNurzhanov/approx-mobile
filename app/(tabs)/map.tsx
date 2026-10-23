@@ -107,6 +107,7 @@ export default function MapScreen() {
   const {
     nearby, currentUserId, friendIds, connectionIds, selfProfile, selfZone,
     stories, clubMeetups, awaitingFix, fetchFriends, reactToStory, createStory,
+    zoneRetry, retryZoneBoundary,
   } = useMapData(coordsRef, speedRef, !!coords, accuracyRef, fixTimestampRef);
 
   // The places this viewer saved — where a Swift was made, and the meetups
@@ -298,9 +299,14 @@ export default function MapScreen() {
   // the same line and the two would otherwise land exactly on each other.
   const ghostNoticeVisible = chromeVisible && ghost === true;
   const noticeTop = overlayTop + (ghostNoticeVisible ? 56 : 0);
-  // Below whatever notices are showing: the basemap-offset notice shares
-  // `noticeTop`, so the check-in pill steps under it when it is up.
-  const checkInTop = noticeTop + (overlays.chinaOffsetNotice && mapVisible ? 56 : 0);
+  // The zone-boundary notice sits under the basemap-offset one when both are up.
+  const zoneNoticeTop = noticeTop + (overlays.chinaOffsetNotice && mapVisible ? 56 : 0);
+  // Not while ghosted: that notice already explains an empty map, and better.
+  const zoneFallback = chromeVisible && ghost === false && selfZone?.boundary_missing
+    ? { radius: selfZone.zone_radius, placeName: selfZone.place_name, retry: zoneRetry }
+    : null;
+  // Below whatever notices are showing, so the check-in pill steps under them.
+  const checkInTop = zoneNoticeTop + (zoneFallback ? 64 : 0);
 
   const region: Region | undefined = displayCoords
     ? { ...displayCoords, latitudeDelta: 0.012, longitudeDelta: 0.012 }
@@ -385,10 +391,13 @@ export default function MapScreen() {
         topInset={topInset}
         overlayTop={overlayTop}
         noticeTop={noticeTop}
+        zoneNoticeTop={zoneNoticeTop}
         pending={chromeVisible && awaitingFix}
         ghostNotice={ghostNoticeVisible}
         offsetNotice={!!overlays.chinaOffsetNotice && mapVisible}
+        zoneFallback={zoneFallback}
         onOpenPrivacy={() => router.push('/privacy')}
+        onRetryZone={() => { retryZoneBoundary().catch(() => {}); }}
       />
 
       {/* Visibility to non-friends, this session only. Draws nothing when

@@ -23,6 +23,7 @@ import { reportLocation } from '@/services/location';
 import type { ClubMeetup, MapNearbyResponse, NearbyUser, SelfZone } from '@/services/mapTypes';
 import { registerMeetupRemove, registerNearbyRefresh } from '@/services/nearbyRefresh';
 import { useGhostMode } from '@/services/privacy';
+import { retryZoneBoundary as requestZoneBoundary } from '@/services/zone';
 import {
   normalizeStories,
   placedStories,
@@ -33,6 +34,34 @@ import {
 
 const POLL_MS = 10_000;
 const NO_PEOPLE: NearbyUser[] = [];
+
+export type ZoneRetryState = 'idle' | 'retrying' | 'failed' | 'too_soon';
+
+/** The zone endpoint, in the shape the map draws. */
+function normalizeSelfZone(d: Record<string, any>): SelfZone {
+  return {
+    zone_active: Boolean(d.zone_active ?? d.active ?? false),
+    zone_radius: Number(d.zone_radius) > 0 ? Number(d.zone_radius) : 500,
+    // `effective_zone_mode`, not the raw one: a city zone whose boundary has
+    // not loaded yet still says 'city' while discovery uses the circle.
+    zone_mode: (d.effective_zone_mode ?? d.zone_mode) === 'region' ? 'region' : 'radius',
+    zone_region_id: d.zone_region ?? null,
+    // The music zone's own radius, never the map zone's. The server used
+    // to resolve a "separate or inherited" question into `music_radius_m`
+    // for this; there is no question left to resolve.
+    music_zone_radius:
+      Number(d.music_zone_radius) > 0 ? Number(d.music_zone_radius) : 200,
+    // `!== false`, not `Boolean(...)`: on is the server's default and an
+    // older build's response has no such key. Reading a missing field as
+    // off would take the ring off the map for everyone who has not
+    // touched the switch.
+    music_zone_active: d.music_zone_active !== false,
+    has_track: Boolean(d.zone_audio_url),
+    // `=== true`: an older server says nothing, and nothing is missing then.
+    boundary_missing: d.zone_boundary_missing === true,
+    place_name: typeof d.zone_place_name === 'string' ? d.zone_place_name : '',
+  };
+}
 
 export interface MapData {
   nearby: NearbyUser[];
@@ -45,6 +74,10 @@ export interface MapData {
   clubMeetups: ClubMeetup[];
   /** Sharing is on and the server has no position for us yet. */
   awaitingFix: boolean;
+  /** Where the map's Retry for a missing zone boundary stands. */
+  zoneRetry: ZoneRetryState;
+  /** Ask the server to fetch the missing city/district boundary now. */
+  retryZoneBoundary: () => Promise<void>;
   /** Re-read the friend and connection sets — after a Hi is accepted, say. */
   fetchFriends: () => Promise<void>;
   reactToStory: (storyId: number, reaction: ReactionType) => Promise<void>;
@@ -249,6 +282,32 @@ export function useMapData(
     }
   }
 
+  // The zone endpoint answers with either {zone_active, zone_radius, ...} or
+  // {active, ...} and may omit the radius — normalize so the owner's circle
+  // renders regardless of which shape arrives.
+  const fetchSelfZone = useCallback(() => {
+    api.get<Record<string, any>>('/api/users/zone/')
+      .then((r) => setSelfZone(normalizeSelfZone(r.data ?? {})))
+      .catch((e: any) => console.log(
+        '[Zone] self zone fetch error:', e?.response?.status ?? e?.code ?? e?.message,
+      ));
+  }, []);
+
+  // Whether discovery is on the fallback circle because the city or district
+  // boundary has not loaded. The server fetches it in the background off our
+  // location report; while it is missing, each tick re-reads the zone so the
+  // map notice goes away the moment it lands.
+  const boundaryMissingRef = useRef(false);
+  useEffect(() => { boundaryMissingRef.current = selfZone?.boundary_missing === true; });
+
+  const [zoneRetry, setZoneRetry] = useState<ZoneRetryState>('idle');
+  const retryZoneBoundary = useCallback(async () => {
+    setZoneRetry('retrying');
+    const result = await requestZoneBoundary<Record<string, any>>();
+    if ('zone' in result) setSelfZone(normalizeSelfZone(result.zone ?? {}));
+    setZoneRetry(result.status === 'landed' ? 'idle' : result.status === 'missing' ? 'failed' : result.status);
+  }, []);
+
   // Self data is refetched on every focus: a fetch that failed right after
   // login would otherwise never retry (leaving the owner's zone invisible),
   // and changes made in Zone Setup must show up when returning to the map.
@@ -271,39 +330,9 @@ export function useMapData(
         '[Map] /users/profile/ error:', e?.response?.status ?? e?.code ?? e?.message,
       ));
 
-    // The zone endpoint answers with either {zone_active, zone_radius, ...} or
-    // {active, ...} and may omit the radius — normalize so the owner's circle
-    // renders regardless of which shape arrives.
-    api.get<Record<string, any>>('/api/users/zone/')
-      .then((r) => {
-        const d = r.data ?? {};
-        const normalized: SelfZone = {
-          zone_active: Boolean(d.zone_active ?? d.active ?? false),
-          zone_radius: Number(d.zone_radius) > 0 ? Number(d.zone_radius) : 500,
-          // `effective_zone_mode`, not the raw one: a region evicted from the
-          // cache leaves the stored mode saying 'region' with nothing to draw.
-          zone_mode: (d.effective_zone_mode ?? d.zone_mode) === 'region' ? 'region' : 'radius',
-          zone_region_id: d.zone_region ?? null,
-          // The music zone's own radius, never the map zone's. The server used
-          // to resolve a "separate or inherited" question into `music_radius_m`
-          // for this; there is no question left to resolve.
-          music_zone_radius:
-            Number(d.music_zone_radius) > 0 ? Number(d.music_zone_radius) : 200,
-          // `!== false`, not `Boolean(...)`: on is the server's default and an
-          // older build's response has no such key. Reading a missing field as
-          // off would take the ring off the map for everyone who has not
-          // touched the switch.
-          music_zone_active: d.music_zone_active !== false,
-          has_track: Boolean(d.zone_audio_url),
-        };
-        setSelfZone(normalized);
-      })
-      .catch((e: any) => console.log(
-        '[Zone] self zone fetch error:', e?.response?.status ?? e?.code ?? e?.message,
-      ));
-
+    fetchSelfZone();
     fetchFriends();
-  }, [fetchFriends]);
+  }, [fetchFriends, fetchSelfZone]);
 
   useFocusEffect(useCallback(() => { loadSelf(); }, [loadSelf]));
 
@@ -314,6 +343,7 @@ export function useMapData(
     // Without our own id the nearby list stays hidden (we couldn't filter
     // ourselves out of it), so keep retrying the identity fetch until it lands.
     if (currentUserIdRef.current === null) loadSelf();
+    else if (boundaryMissingRef.current) fetchSelfZone();
 
     await Promise.allSettled([
       // Honours the Location sharing setting; sends nothing when paused, and
@@ -326,7 +356,7 @@ export function useMapData(
       // the private query instead.
       fetchMapData(),
     ]);
-  }, [fetchMapData, loadSelf, coordsRef, speedRef, accuracyRef, fixTimestampRef]);
+  }, [fetchMapData, loadSelf, fetchSelfZone, coordsRef, speedRef, accuracyRef, fixTimestampRef]);
 
   // Mirrors AppState into render-visible state, so the polling effect below
   // can simply depend on it instead of an interval being started/stopped
@@ -379,6 +409,8 @@ export function useMapData(
     stories: visibleStories,
     clubMeetups,
     awaitingFix,
+    zoneRetry,
+    retryZoneBoundary,
     fetchFriends,
     reactToStory,
     createStory,

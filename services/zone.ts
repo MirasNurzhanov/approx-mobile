@@ -16,6 +16,11 @@ export interface SelfZone {
   zone_radius?: number;
   zone_mode?: 'radius' | 'region';
   zone_region_detail?: { name: string } | null;
+  /** A city or district zone whose boundary has not loaded, so discovery is
+   *  using the `zone_radius` circle instead. */
+  zone_boundary_missing?: boolean;
+  /** The place that zone covers, or should — '' when not known. */
+  zone_place_name?: string;
 }
 
 /** The server's own fallback when nobody has chosen a radius. */
@@ -48,6 +53,26 @@ export function describeZoneReach(zone: SelfZone | null): string {
     return `in ${zone.zone_region_detail.name}`;
   }
   return `within ${describeZone(zone)}`;
+}
+
+export type BoundaryRetryResult<T> =
+  | { status: 'landed' | 'missing'; zone: T }
+  | { status: 'too_soon' | 'failed' };
+
+/**
+ * Ask the server to fetch the missing city or district boundary now.
+ *
+ * Unlike re-reading the zone, this makes the server go to the map service. It
+ * is limited server-side to one attempt every few seconds, which comes back
+ * as `too_soon`.
+ */
+export async function retryZoneBoundary<T extends SelfZone = SelfZone>(): Promise<BoundaryRetryResult<T>> {
+  try {
+    const { data } = await api.post<T>('/api/users/zone/boundary/');
+    return { status: data.zone_boundary_missing ? 'missing' : 'landed', zone: data };
+  } catch (e: any) {
+    return { status: e?.response?.status === 429 ? 'too_soon' : 'failed' };
+  }
 }
 
 export async function fetchSelfZone(): Promise<SelfZone> {

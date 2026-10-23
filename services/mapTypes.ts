@@ -75,6 +75,11 @@ export interface SelfZone {
   /** Whether there is a track at all. Nothing carries from an empty zone, so a
    *  ring around one would mark the reach of silence. */
   has_track: boolean;
+  /** A city or district zone whose boundary has not loaded, so discovery is
+   *  using the `zone_radius` circle instead. The map says so. */
+  boundary_missing: boolean;
+  /** The place that zone covers, or should — '' when not known. */
+  place_name: string;
 }
 
 export interface ClubMeetup {

@@ -22,6 +22,7 @@ import MapView, { Circle, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { atSharingPrecision, reportLocation } from '@/services/location';
+import { retryZoneBoundary } from '@/services/zone';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { Card } from '@/components/ui/Card';
 import { mapStyleFor } from '@/constants/mapStyle';
@@ -87,6 +88,10 @@ interface ZoneState {
   zone_follows_location?: boolean;
   /** Server-set, read-only: the zone wanted to move and had nowhere to go. */
   zone_follow_stale?: boolean;
+  /** Server-set, read-only: a city or district zone whose boundary has not
+   *  loaded, so discovery is on the `zone_radius` circle for now. */
+  zone_boundary_missing?: boolean;
+  zone_place_name?: string;
   zone_active?: boolean;
 }
 
@@ -846,6 +851,9 @@ export default function ZoneAreaScreen() {
    *  put, so nothing changes under an existing user. */
   const [followsLocation, setFollowsLocation] = useState(false);
   const [followStale, setFollowStale] = useState(false);
+  const [boundaryMissing, setBoundaryMissing] = useState(false);
+  const [placeName, setPlaceName] = useState('');
+  const [boundaryRetry, setBoundaryRetry] = useState<'idle' | 'retrying' | 'missing' | 'too_soon' | 'failed'>('idle');
   const [fetchedOutline, setFetchedOutline] = useState<Region | null>(null);
 
   const [coords, setCoords] = useState<Fix | null>(null);
@@ -890,7 +898,18 @@ export default function ZoneAreaScreen() {
     if (z.zone_region_detail) setRegion(z.zone_region_detail);
     setFollowsLocation(!!z.zone_follows_location);
     setFollowStale(!!z.zone_follow_stale);
+    setBoundaryMissing(z.zone_boundary_missing === true);
+    setPlaceName(z.zone_place_name ?? '');
   }, []);
+
+  /** Make the server fetch the missing boundary now, rather than re-reading
+   *  the zone it does not have yet. */
+  async function retryBoundary() {
+    setBoundaryRetry('retrying');
+    const result = await retryZoneBoundary<ZoneState>();
+    if ('zone' in result) adoptZone(result.zone);
+    setBoundaryRetry(result.status === 'landed' ? 'idle' : result.status);
+  }
 
   const refreshZone = useCallback(async () => {
     try {
@@ -1297,7 +1316,33 @@ export default function ZoneAreaScreen() {
         />
       )}
 
-      {regionMissing && (
+      {/* Two different reasons for the same circle, and they need different
+          words: the server could not load the place this zone already covers,
+          or the user has not picked one. */}
+      {regionMissing && boundaryMissing && (
+        <View style={styles.notice}>
+          <Ionicons name="information-circle-outline" size={16} color={colors.t2} />
+          <Text style={styles.noticeText}>
+            {boundaryRetry === 'failed' || boundaryRetry === 'missing'
+              ? `Still couldn’t load ${placeName || 'your city'}’s area. `
+              : `Approx couldn’t load ${placeName || 'your city'}’s area yet. `}
+            For now your zone is a {formatRadius(radiusM)} circle around you.
+          </Text>
+          {boundaryRetry === 'retrying' ? (
+            <ActivityIndicator color={colors.t3} size="small" />
+          ) : (
+            <Pressable
+              onPress={() => { retryBoundary().catch(() => {}); }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading your zone's area"
+            >
+              <Text style={[styles.noticeText, { flex: 0, color: colors.orange, fontWeight: '700' }]}>Retry</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+      {regionMissing && !boundaryMissing && (
         <View style={styles.notice}>
           <Ionicons name="information-circle-outline" size={16} color={colors.t2} />
           <Text style={styles.noticeText}>

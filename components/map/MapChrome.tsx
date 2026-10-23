@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/icons';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import type { ZoneRetryState } from '@/hooks/useMapData';
 // `PermissionState` explicitly, not the DOM global of the same name — that one
 // is 'granted' | 'denied' | 'prompt', so leaving it unimported makes the
 // `=== 'blocked'` checks below silently type-error instead of resolving here.
@@ -260,19 +261,38 @@ export function MapPermissionGate({ permState, styles, onAllow, onList }: {
 }
 
 /** The strip under the top bar, where the map explains itself. */
+/** What the zone-boundary notice needs: the circle discovery fell back to,
+ *  the place it should have covered, and where Retry stands. */
+export interface ZoneFallbackNotice {
+  radius: number;
+  placeName: string;
+  retry: ZoneRetryState;
+}
+
+function zoneFallbackSub(notice: ZoneFallbackNotice): string {
+  const place = notice.placeName ? `${notice.placeName}’s area` : 'your city’s area';
+  if (notice.retry === 'failed') return `Still couldn’t load ${place}. Try again in a little while.`;
+  if (notice.retry === 'too_soon') return `Couldn’t load ${place} yet. Give it a few seconds.`;
+  return `Couldn’t load ${place}, so you’re seeing less than your zone covers.`;
+}
+
 export function MapNotices({
-  styles, colors, topInset, overlayTop, noticeTop,
-  pending, ghostNotice, offsetNotice, onOpenPrivacy,
+  styles, colors, topInset, overlayTop, noticeTop, zoneNoticeTop,
+  pending, ghostNotice, offsetNotice, zoneFallback, onOpenPrivacy, onRetryZone,
 }: {
   styles: MapStyles;
   colors: ColorPalette;
   topInset: number;
   overlayTop: number;
   noticeTop: number;
+  zoneNoticeTop: number;
   pending: boolean;
   ghostNotice: boolean;
   offsetNotice: boolean;
+  /** Null unless discovery is on the fallback circle. */
+  zoneFallback: ZoneFallbackNotice | null;
   onOpenPrivacy: () => void;
+  onRetryZone: () => void;
 }) {
   return (
     <>
@@ -334,6 +354,38 @@ export function MapNotices({
           accessibilityRole="alert"
         >
           <Text style={styles.offsetNoticeText}>{MAINLAND_CHINA_NOTICE}</Text>
+        </View>
+      ) : null}
+
+      {/* A city or district zone whose boundary has not loaded, so discovery
+          is answering from the circle. Said out loud: a quiet map here reads
+          as nobody being around, when the truth is that we are looking at a
+          fraction of the area the person chose. Retry fetches the boundary;
+          the notice goes once it lands. */}
+      {zoneFallback ? (
+        <View
+          style={[styles.pausedNotice, { top: zoneNoticeTop }]}
+          accessible
+          accessibilityRole="alert"
+        >
+          <View style={styles.pausedNoticeText}>
+            <Text style={styles.pausedNoticeTitle}>
+              Showing {zoneFallback.radius} m around you
+            </Text>
+            <Text style={styles.pausedNoticeSub}>{zoneFallbackSub(zoneFallback)}</Text>
+          </View>
+          {zoneFallback.retry === 'retrying' ? (
+            <ActivityIndicator size="small" color={colors.t2} />
+          ) : (
+            <Pressable
+              onPress={onRetryZone}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading your zone's area"
+            >
+              <Text style={[styles.pausedNoticeTitle, { color: colors.orange }]}>Retry</Text>
+            </Pressable>
+          )}
         </View>
       ) : null}
     </>

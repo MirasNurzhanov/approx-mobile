@@ -72,10 +72,12 @@ export async function acknowledgeLocationDisclosure(): Promise<void> {
  */
 export async function resetLocationDisclosure(): Promise<void> {
   acknowledged = null;
-  announce();
   try {
     await AsyncStorage.removeItem(STORAGE_KEY);
   } catch {}
+  // After the removal, not before: listeners re-read the store, and reading
+  // it first would hand the next account the previous one's acknowledgement.
+  announce();
 }
 
 /** `null` while the answer is still being read, so the caller can render
@@ -88,7 +90,14 @@ export function useLocationDisclosure(): {
 
   useEffect(() => {
     let active = true;
-    const sync = () => { if (active) setValue(acknowledged); };
+    const sync = () => {
+      if (!active) return;
+      setValue(acknowledged);
+      // A sign-out resets the flag to unknown while this hook stays mounted.
+      // Read it again, or the sheet waits on a `null` that nothing resolves
+      // and the next account never sees it — and so never sends a position.
+      if (acknowledged === null) hasAcknowledgedLocationDisclosure().then(sync).catch(() => {});
+    };
     listeners.add(sync);
     hasAcknowledgedLocationDisclosure().then(sync).catch(() => {});
     return () => {

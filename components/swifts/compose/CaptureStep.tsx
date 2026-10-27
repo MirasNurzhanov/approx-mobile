@@ -52,6 +52,7 @@ import {
   type SwiftDraft,
   type SwiftRotation,
 } from '@/services/swiftDraft';
+import { SWIFT_MUSIC_ENABLED } from '@/services/swiftComposer';
 
 /**
  * Record a vertical Swift, or pick one from the library.
@@ -520,14 +521,17 @@ export function CaptureStep({
             <IconRotate size={20} color="#FFFFFF" />
           </RailButton>
 
-          <RailButton
-            label={draft.track ? 'Track' : 'Music'}
-            active={false}
-            badge={draft.track ? '♪' : null}
-            onPress={onPickMusic}
-          >
-            <IconMusic size={20} color="#FFFFFF" />
-          </RailButton>
+          {/* Music is switched off for now — see SWIFT_MUSIC_ENABLED. */}
+          {SWIFT_MUSIC_ENABLED && (
+            <RailButton
+              label={draft.track ? 'Track' : 'Music'}
+              active={false}
+              badge={draft.track ? '♪' : null}
+              onPress={onPickMusic}
+            >
+              <IconMusic size={20} color="#FFFFFF" />
+            </RailButton>
+          )}
 
           <RailButton
             label={draft.micEnabled ? 'Mic on' : 'Mic off'}

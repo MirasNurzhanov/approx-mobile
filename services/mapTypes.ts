@@ -42,6 +42,8 @@ export interface NearbyUser {
   zone_track_title?: string;
   zone_track_artist?: string;
   zone_track_artwork?: string;
+  /** The song on Apple Music, for "Listen on Apple Music". */
+  zone_track_apple_url?: string;
   /** The slice of the track its owner set to repeat. Absent means the whole
    *  thing. Honoured here, not just on the owner's screen — the trim is part
    *  of what the zone plays. */

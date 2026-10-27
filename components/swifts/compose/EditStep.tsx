@@ -45,6 +45,7 @@ import {
   type SwiftDraft,
   type SwiftRotation,
 } from '@/services/swiftDraft';
+import { SWIFT_MUSIC_ENABLED } from '@/services/swiftComposer';
 
 /**
  * The editor.
@@ -425,9 +426,10 @@ export function EditStep({
               </Text>
             )}
 
-            <View style={styles.divider} />
+            {SWIFT_MUSIC_ENABLED && <View style={styles.divider} />}
 
-            {draft.track ? (
+            {/* Music is switched off for now — see SWIFT_MUSIC_ENABLED. */}
+            {!SWIFT_MUSIC_ENABLED ? null : draft.track ? (
               <>
                 <View style={styles.trackRow}>
                   <IconMusic size={18} color={colors.teal} />

@@ -24,7 +24,7 @@ import {
   type SwiftDraft,
   type SwiftTrackChoice,
 } from '@/services/swiftDraft';
-import { sendSwiftTo } from '@/services/swiftComposer';
+import { sendSwiftTo, SWIFT_MUSIC_ENABLED } from '@/services/swiftComposer';
 import {
   UploadCancelled,
   discardTempFile,
@@ -390,7 +390,7 @@ export default function SwiftComposerScreen() {
   const sheets = (
     <>
       <MusicPickerSheet
-        visible={pickingMusic}
+        visible={SWIFT_MUSIC_ENABLED && pickingMusic}
         selected={draft.track}
         startMs={draft.musicStartMs}
         // Zero before a take exists — the picker then offers the whole track

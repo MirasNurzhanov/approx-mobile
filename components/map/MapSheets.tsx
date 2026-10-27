@@ -491,6 +491,7 @@ function UserSheetZone({ user, zoneUrl }: { user: NearbyUser; zoneUrl: string })
         // hash.
         title={user.zone_track_title || trackTitle(zoneUrl)}
         artwork={user.zone_track_artwork}
+        appleMusicUrl={user.zone_track_apple_url}
         startMs={user.zone_track_start_ms ?? 0}
         endMs={user.zone_track_end_ms ?? null}
         subtitle={

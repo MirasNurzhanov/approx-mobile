@@ -14,6 +14,15 @@ import type { Swift } from './swifts';
 
 // ── Music ────────────────────────────────────────────────────────────────────
 
+/**
+ * Whether a Swift can carry a music track. Off: Swifts use the sound they were
+ * recorded with until Approx holds a music licence it can show App Review
+ * (guideline 5.2.3). The server refuses a track too while its own
+ * `SWIFT_MUSIC_ENABLED` is off, so turning music back on is this line and that
+ * setting. Everything below stays so it can come back without a rewrite.
+ */
+export const SWIFT_MUSIC_ENABLED = false;
+
 /** A catalogue track, as `swifts.serializers.SwiftTrackSerializer` sends it. */
 export interface SwiftTrack {
   id: number;

@@ -82,18 +82,32 @@ describe('buildForm — the edit parameters', () => {
     expect(buildForm(base()).get('stickers')).toBe('[]');
   });
 
+  const withTrack = () => base({
+    track: {
+      id: 7, title: 'x', artist: 'y', artworkUrl: '', audioUrl: 'https://a/1.mp3',
+      durationMs: 180_000,
+    },
+    musicVolume: 40,
+    musicStartMs: 30_000,
+  });
+
   it('sends the track and its mix only when one is attached', () => {
-    const form = buildForm(base({
-      track: {
-        id: 7, title: 'x', artist: 'y', artworkUrl: '', audioUrl: 'https://a/1.mp3',
-        durationMs: 180_000,
-      },
-      musicVolume: 40,
-      musicStartMs: 30_000,
-    }));
+    // With Swift music switched back on — the path is kept for when it is.
+    let buildWithMusic: typeof buildForm = buildForm;
+    jest.isolateModules(() => {
+      jest.doMock('../swiftComposer', () => ({ SWIFT_MUSIC_ENABLED: true }));
+      buildWithMusic = require('../swiftUpload').buildForm;
+    });
+    const form = buildWithMusic(withTrack());
     expect(form.get('track')).toBe('7');
     expect(form.get('music_volume')).toBe('40');
     expect(form.get('music_start_ms')).toBe('30000');
+  });
+
+  it('sends no track while Swift music is switched off', () => {
+    const form = buildForm(withTrack());
+    expect(form.get('track')).toBeNull();
+    expect(form.get('music_start_ms')).toBeNull();
   });
 
   it('omits the music fields when there is no track', () => {

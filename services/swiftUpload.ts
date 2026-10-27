@@ -3,6 +3,7 @@ import { File } from 'expo-file-system';
 
 import { BASE_URL } from './api';
 import type { SwiftReviewState } from './swifts';
+import { SWIFT_MUSIC_ENABLED } from './swiftComposer';
 import { keptDurationMs, MAX_UPLOAD_BYTES, type SwiftDraft } from './swiftDraft';
 
 /**
@@ -187,7 +188,7 @@ export function buildForm(draft: SwiftDraft): FormData {
     })),
   ));
 
-  if (draft.track) {
+  if (SWIFT_MUSIC_ENABLED && draft.track) {
     form.append('track', String(draft.track.id));
     form.append('music_volume', String(Math.round(draft.musicVolume)));
     form.append('music_start_ms', String(Math.round(draft.musicStartMs)));

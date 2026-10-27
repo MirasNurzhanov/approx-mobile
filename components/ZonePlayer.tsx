@@ -1,5 +1,7 @@
+import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -48,6 +50,9 @@ interface ZonePlayerProps {
   blockedReason?: string | null;
   /** Read-only line under the controls: who can hear this, and how wide it is. */
   footnote?: string | null;
+  /** The song on Apple Music, for an Apple Music preview. Shown as "Listen on
+   *  Apple Music": a preview played in Approx links back to where it came from. */
+  appleMusicUrl?: string | null;
   /** Label for assistive tech, e.g. "Miras's zone track". */
   accessibilityName?: string;
   style?: ViewStyle;
@@ -130,6 +135,13 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontSize: 11.5,
     color: colors.t3,
   },
+  appleLink: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 },
+  appleLinkText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.t1,
+  },
 
   pressed: { opacity: 0.7 },
 });
@@ -151,6 +163,7 @@ function ZonePlayerSession({
   onPosition,
   blockedReason,
   footnote,
+  appleMusicUrl,
   accessibilityName,
   style,
 }: ZonePlayerProps) {
@@ -263,6 +276,20 @@ function ZonePlayerSession({
           <Text style={styles.footnote} numberOfLines={1}>{footnote}</Text>
         ) : null}
       </View>
+
+      {appleMusicUrl ? (
+        <Pressable
+          onPress={() => { Linking.openURL(appleMusicUrl).catch(() => {}); }}
+          hitSlop={8}
+          style={({ pressed }) => [styles.appleLink, pressed && styles.pressed]}
+          accessibilityRole="link"
+          accessibilityLabel={`Listen to ${title} on Apple Music`}
+        >
+          <Ionicons name="logo-apple" size={13} color={colors.t2} />
+          <Text style={styles.appleLinkText}>Listen on Apple Music</Text>
+          <Text style={styles.footnote}>· Preview courtesy of Apple Music</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

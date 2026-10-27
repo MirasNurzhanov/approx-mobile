@@ -1,4 +1,3 @@
-import * as DocumentPicker from 'expo-document-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -21,7 +20,7 @@ import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { ZonePlayer } from '@/components/ZonePlayer';
-import { IconClose, IconInfo, IconLock, IconMusic, IconSound, IconUpload } from '@/components/ui/icons';
+import { IconClose, IconInfo, IconLock, IconMusic, IconSound } from '@/components/ui/icons';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -58,8 +57,9 @@ import { messageFor, RADIUS_MAX_M, RADIUS_MIN_M } from '@/services/zoneArea';
 // map, and the track and the radius wait untouched underneath for it to come
 // back on.
 //
-// Two things can fill the one audio slot — an Apple Music track or an upload —
-// and the last one picked wins. A zone plays one thing.
+// What fills the slot is an Apple Music song, played as its 30-second preview
+// and linked back to Apple Music. Uploading your own file was removed: Approx
+// cannot show App Review the rights to whatever somebody uploads (5.2.3).
 //
 // Everything saves as you touch it — there is no separate Save step to leave
 // a choice half-committed.
@@ -95,6 +95,8 @@ interface ZoneState {
   zone_apple_artist?: string;
   zone_apple_artwork?: string;
   zone_apple_preview_url?: string;
+  /** The song on Apple Music, for "Listen on Apple Music". */
+  zone_apple_url?: string;
 
   /** The slice that repeats. A null end means the whole track, which is what
    *  everyone gets until they open the trim editor. Set on /zone-trim, which
@@ -107,14 +109,6 @@ interface ZoneState {
    *  then. A new track starts at 'ok'. */
   zone_audio_moderation?: 'ok' | 'quarantined' | 'removed';
 }
-
-/** Decorative level meter on the upload tile. Fixed shape: it stands for
- *  "audio goes here", it is not a reading of anything. */
-// Bar heights carry an id because several repeat, so the height alone cannot
-// identify a bar. Built once at module scope — the waveform is decorative and
-// fixed, so these ids are stable for the life of the app.
-const WAVE = [7, 13, 22, 15, 28, 20, 34, 24, 16, 27, 11, 20, 31, 18, 9, 15, 24, 13, 7, 17]
-  .map((h, i) => ({ id: `wave-${i}`, h }));
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 // One component per band of the screen. The screen owns the zone state and the
@@ -139,13 +133,13 @@ function NowPlayingSection({ zone, audioUrl, title, musicRadius, silent, trimmed
 
       {audioUrl ? (
         <ZonePlayer
-          // Remounts when the track changes, so switching between an
-          // upload and an Apple track can never leave the previous one
-          // loaded.
+          // Remounts when the track changes, so switching songs can never
+          // leave the previous one loaded.
           key={audioUrl}
           url={audioUrl}
           title={title ?? 'Zone audio'}
           artwork={zone.zone_apple_artwork}
+          appleMusicUrl={zone.zone_apple_url}
           // The player still works with the music zone off — this is your own
           // track on your own screen, and the switch is about other people. The
           // subtitle is the only thing that changes, because "loops for anyone
@@ -164,9 +158,8 @@ function NowPlayingSection({ zone, audioUrl, title, musicRadius, silent, trimmed
       ) : (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>
-            Nothing is playing in your zone yet. Pick a song from the
-            catalogue or upload your own track below — anyone who walks into
-            your music zone can then choose to play it.
+            Nothing is playing in your zone yet. Pick a song below — friends
+            who walk into your music zone will hear it.
           </Text>
         </View>
       )}
@@ -390,110 +383,10 @@ function AppleMusicSection({ zone, isApple, appleTitle, onBrowse, onRemove }: {
           <Ionicons name="chevron-forward" size={18} color={colors.t3} />
         </Pressable>
       )}
-    </View>
-  );
-}
-
-function UploadSection({ isUpload, uploading, uploadPct, title, onPick, onRemove }: {
-  isUpload: boolean;
-  uploading: boolean;
-  uploadPct: number | null;
-  title: string | null;
-  onPick: () => void;
-  onRemove: () => void;
-}) {
-  const { colors } = useTheme();
-  const styles = makeStyles(colors);
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>YOUR TRACK</Text>
-
-      {isUpload && !uploading ? (
-        <View style={styles.fileCard}>
-          <View style={styles.fileIcon}>
-            <Ionicons name="musical-notes" size={20} color={colors.teal} />
-          </View>
-          <View style={styles.fileText}>
-            <Text style={styles.fileName} numberOfLines={1}>{title}</Text>
-            <Text style={styles.fileHint}>Your upload · loops in your zone</Text>
-          </View>
-          <Pressable
-            onPress={onPick}
-            hitSlop={8}
-            style={({ pressed }) => [styles.fileAction, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Replace your zone track"
-          >
-            <Text style={styles.fileActionText}>Replace</Text>
-          </Pressable>
-          <Pressable
-            onPress={onRemove}
-            hitSlop={8}
-            style={({ pressed }) => [styles.fileRemove, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Remove your zone track"
-          >
-            <IconClose size={16} color={colors.t3} />
-          </Pressable>
-        </View>
-      ) : (
-        <Pressable
-          onPress={onPick}
-          disabled={uploading}
-          style={({ pressed }) => [styles.uploadTile, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Upload a track for your zone"
-          accessibilityHint="Opens your files. MP3, M4A or WAV."
-        >
-          <View style={styles.uploadRing}>
-            {uploading ? (
-              <ActivityIndicator color={colors.teal} />
-            ) : (
-              <IconUpload size={26} color={colors.teal} />
-            )}
-          </View>
-
-          <Text style={styles.uploadTitle}>
-            {uploading ? 'Uploading your track…' : 'Upload a track'}
-          </Text>
-          <Text style={styles.uploadHint}>
-            {uploading
-              ? 'Keep this screen open until it finishes'
-              : 'MP3, M4A or WAV — it loops while people are inside your zone'}
-          </Text>
-
-          {/* Decorative while idle; while uploading the same bars fill left
-              to right, so the tile becomes its own progress meter. */}
-          <View style={styles.wave}>
-            {WAVE.map(({ id, h }, i) => {
-              const reached = uploading && (i / WAVE.length) * 100 <= (uploadPct ?? 0);
-              return (
-                <View
-                  key={id}
-                  style={[
-                    styles.waveBar,
-                    { height: h },
-                    uploading && (reached ? styles.waveBarOn : styles.waveBarOff),
-                  ]}
-                />
-              );
-            })}
-          </View>
-
-          {uploading ? (
-            <Text style={styles.uploadPct}>{uploadPct}%</Text>
-          ) : (
-            <View style={styles.uploadCta}>
-              <Text style={styles.uploadCtaText}>Choose a file</Text>
-            </View>
-          )}
-        </Pressable>
-      )}
 
       <Text style={styles.footnote}>
-        A zone plays one thing at a time, so whichever of the two you pick
-        last — a song or your own file — replaces the other. Changes save
-        as you make them.
+        Songs and previews are provided by Apple Music. Friends hear the
+        30-second preview, and can open the full song in Apple Music.
       </Text>
     </View>
   );
@@ -508,12 +401,9 @@ export default function ZoneScreen() {
   const layout = useLayoutSize();
 
   const [zone, setZone] = useState<ZoneState>({ zone_active: true, zone_radius: 500 });
-  /** Name of the file this session uploaded — nicer than the URL it became. */
-  const [uploadName, setUploadName] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploadPct, setUploadPct] = useState<number | null>(null);
 
   const { settings } = usePrivacySettings();
   const audience: Audience = settings?.visibility_zone_audio ?? 'friends';
@@ -553,7 +443,7 @@ export default function ZoneScreen() {
   const appleTitle = zone.zone_apple_title || null;
   const isApple = Boolean(zone.zone_apple_preview_url);
   const title = audioUrl
-    ? (appleTitle ?? uploadName ?? trackTitle(audioUrl))
+    ? (appleTitle ?? trackTitle(audioUrl))
     : null;
 
   /** Absent means on — see `music_zone_active` on ZoneState. */
@@ -611,70 +501,10 @@ export default function ZoneScreen() {
     patchZone({ music_zone_alerts: on }, { music_zone_alerts: on });
   }
 
-  async function pickAudio() {
-    let result: DocumentPicker.DocumentPickerResult;
-    try {
-      result = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true });
-    } catch { return; }
-    if (result.canceled) return;
-
-    const asset = result.assets[0];
-    const form = new FormData();
-    form.append('zone_audio', {
-      uri: asset.uri,
-      type: asset.mimeType ?? 'audio/mpeg',
-      name: asset.name,
-    } as any);
-
-    setUploadPct(0);
-    try {
-      const r = await api.patch<ZoneState>('/api/users/zone/', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        // A track is megabytes over a phone connection — a spinner that sits
-        // there for twenty seconds is indistinguishable from a hang.
-        onUploadProgress: (e) => {
-          if (!e.total) return;
-          setUploadPct(Math.min(99, Math.round((e.loaded / e.total) * 100)));
-        },
-      });
-      setZone(r.data);
-      setUploadName(asset.name.replace(/\.[a-z0-9]{2,4}$/i, ''));
-    } catch (e: any) {
-      // `zone_audio` carries the refusal for a file the server will not take —
-      // wrong type, too long. A 413 from the proxy in front of it arrives as
-      // HTML with no JSON at all, which is exactly what `messageFor` declines
-      // to read out loud, so that lands on the fallback below.
-      Alert.alert('Upload failed', messageFor(e, {
-        prefer: ['zone_audio'],
-        fallback: 'Could not upload that file.',
-      }));
-    }
-    // Reached on both paths: the `catch` alerts and stops there.
-    setUploadPct(null);
-  }
-
-  function removeAudio() {
-    Alert.alert(
-      'Remove your track?',
-      'Your zone goes quiet until you upload another one or pick a song.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => {
-            setUploadName(null);
-            patchZone({ zone_audio: null });
-          },
-        },
-      ],
-    );
-  }
-
   function removeAppleTrack() {
     Alert.alert(
       'Remove this track?',
-      'Your zone goes quiet until you pick another song or upload a file.',
+      'Your zone goes quiet until you pick another song.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -704,12 +534,6 @@ export default function ZoneScreen() {
       </View>
     );
   }
-
-  const uploading = uploadPct !== null;
-  // Two things can fill the one slot now, so "an upload" needs the Apple test
-  // too — without it a chosen song would be drawn as a file the user never
-  // uploaded.
-  const isUpload = Boolean(zone.zone_audio) && !isApple;
 
   return (
     <View style={styles.root}>
@@ -785,14 +609,6 @@ export default function ZoneScreen() {
           onRemove={removeAppleTrack}
         />
 
-        <UploadSection
-          isUpload={isUpload}
-          uploading={uploading}
-          uploadPct={uploadPct}
-          title={title}
-          onPick={pickAudio}
-          onRemove={removeAudio}
-        />
       </ScrollView>
     </View>
   );
@@ -987,79 +803,15 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.t3,
   },
 
-  // ── Upload tile ──
-  uploadTile: {
-    alignItems: 'center',
-    paddingVertical: 26,
-    paddingHorizontal: 20,
-    gap: 10,
-    backgroundColor: colors.surface,
-    borderRadius: radius.l,
-    borderWidth: 1,
-    borderColor: colors.tealLine,
-    borderStyle: 'dashed',
-  },
-  uploadRing: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.tealTint,
-    borderWidth: 1,
-    borderColor: colors.tealLine,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
+  // ── Song tile ──
   uploadTitle: {
     fontFamily: fonts.display,
     fontWeight: '600',
     fontSize: 16,
     color: colors.t1,
   },
-  uploadHint: {
-    fontFamily: fonts.body,
-    fontSize: 12,
-    lineHeight: 17,
-    color: colors.t3,
-    textAlign: 'center',
-  },
-  wave: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    height: 36,
-    marginTop: 4,
-  },
-  waveBar: {
-    width: 3,
-    borderRadius: 2,
-    backgroundColor: colors.tealLine,
-  },
-  waveBarOn:  { backgroundColor: colors.teal },
-  waveBarOff: { backgroundColor: colors.surface2 },
-  uploadPct: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.teal,
-  },
-  uploadCta: {
-    marginTop: 4,
-    paddingVertical: 9,
-    paddingHorizontal: 20,
-    borderRadius: radius.m,
-    backgroundColor: colors.tealTint,
-    borderWidth: 1,
-    borderColor: colors.tealLine,
-  },
-  uploadCtaText: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.teal,
-  },
 
-  // ── Current upload ──
+  // ── Chosen song ──
   fileCard: {
     flexDirection: 'row',
     alignItems: 'center',

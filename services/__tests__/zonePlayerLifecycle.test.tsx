@@ -8,6 +8,9 @@ jest.mock('expo-audio', () => ({
   createAudioPlayer: (...args: unknown[]) => mockCreate(...args),
 }));
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
+// The card tells the auto-player when it starts and stops; that module's own
+// rules are tested in zoneMusicAuto.test.ts.
+jest.mock('../zoneMusicAuto', () => ({ setManualZonePlayback: jest.fn() }));
 jest.mock('../../context/ThemeContext', () => ({
   useTheme: () => ({ colors: jest.requireActual('../../constants/theme').lightColors }),
 }));

@@ -20,6 +20,7 @@ import { clearGoogleSession } from './socialAuth';
 import { resetArchive } from './stories';
 import { resetTerms } from './terms';
 import { resetRegionCache } from './zoneArea';
+import { resetZoneMusic } from './zoneMusicAuto';
 
 // Signing out, properly.
 //
@@ -180,6 +181,9 @@ export async function performSignOut(): Promise<void> {
   // else's acknowledgement is the one case where they would be published
   // without ever having read it.
   await resetLocationDisclosure().catch(() => {});
+  // A friend's zone track playing on its own belongs to the account that
+  // walked into that zone, and so does the memory of which zones have played.
+  await resetZoneMusic().catch(() => {});
   await resetArchive().catch(() => {});
   // Pinned places, in memory and on disk. A pin off a Swift is a coordinate one
   // account was shown after asking for it — see services/pinnedPlaces — and it

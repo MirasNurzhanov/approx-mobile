@@ -36,6 +36,7 @@ import { GoogleMark } from '@/components/SocialAuthButtons';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { refreshPrivacy } from '@/services/privacy';
 import { describeZone, type SelfZone } from '@/services/zone';
+import { setZoneMusicAutoplay, useZoneMusicAutoplay } from '@/services/zoneMusicAuto';
 import { ApproxNav } from '@/components/ApproxNav';
 import { ZoneTutorialOverlay } from '@/components/tutorial/ZoneTutorialOverlay';
 import { Card } from '@/components/ui/Card';
@@ -161,6 +162,7 @@ function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+  const autoplay = useZoneMusicAutoplay();
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>ZONE & LOCATION</Text>
@@ -205,9 +207,27 @@ function ZoneSection({ zoneActive, zoneShape, zoneSaving, onToggleZone }: {
         <SettingsRow
           icon={IconMusic}
           label="Zone music"
-          last
           onPress={() => router.push('/zone')}
           right={<IconChevron size={16} color={colors.t3} />}
+        />
+        {/* Whether a friend's track plays by itself when you walk into their
+            music zone — with the app closed too. Separate from the zone music
+            alerts on Zone Music, which say it is there without playing it.
+            Device-wide and on by default; see services/zoneMusicAuto. */}
+        <SettingsRow
+          icon={IconMusic}
+          label="Play friends' zone music"
+          last
+          right={
+            autoplay === null ? (
+              <ActivityIndicator color={colors.t3} size="small" />
+            ) : (
+              <PrefSwitch
+                value={autoplay}
+                onValueChange={(on) => { setZoneMusicAutoplay(on).catch(() => {}); }}
+              />
+            )
+          }
         />
       </Card>
     </View>

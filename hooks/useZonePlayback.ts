@@ -4,6 +4,8 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatu
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
+import { setManualZonePlayback } from '@/services/zoneMusicAuto';
+
 /**
  * The sound behind a zone track, and nothing else.
  *
@@ -87,6 +89,7 @@ export function useZonePlayback({
     // on a card whose audio has been unloaded.
     onPositionRef.current?.(null);
     if (!sound) return;
+    setManualZonePlayback(false);
     try {
       sound.pause();
       sound.remove();
@@ -118,6 +121,7 @@ export function useZonePlayback({
     const sound = soundRef.current;
     if (!sound) return;
     setState('paused');
+    setManualZonePlayback(false);
     try {
       sound.pause();
     } catch {}
@@ -188,6 +192,8 @@ export function useZonePlayback({
   // cache), so every `useCallback` here is the only caching there is.
   const load = useCallback(async (startAt = 0) => {
     setState('loading');
+    // Somebody pressed play, so zone music that started on its own gives way.
+    setManualZonePlayback(true);
 
     try {
       await setAudioModeAsync({
@@ -235,6 +241,7 @@ export function useZonePlayback({
       if (focusedRef.current) sound.play();
       else pause();
     } catch {
+      setManualZonePlayback(false);
       if (!goneRef.current) setState('error');
     }
   }, [url, onStatus, pause]);
@@ -250,6 +257,7 @@ export function useZonePlayback({
       pause();
     } else {
       setState('playing');
+      setManualZonePlayback(true);
       sound.play();
     }
   }
@@ -266,6 +274,7 @@ export function useZonePlayback({
     const from = rangeRef.current.startMs;
     setPosition(from);
     setState('playing');
+    setManualZonePlayback(true);
     await sound.seekTo(from / 1000).catch(() => {});
     if (goneRef.current || soundRef.current !== sound) return;
     sound.play();

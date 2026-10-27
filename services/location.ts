@@ -1,6 +1,7 @@
 import { api } from './api';
 import { hasAcknowledgedLocationDisclosure } from './locationDisclosure';
 import { getCachedGhostMode } from './privacy';
+import { handleZoneMusic } from './zoneMusicAuto';
 
 // The one place location leaves this device.
 //
@@ -89,6 +90,12 @@ export async function reportLocation(
   if (accuracy !== undefined) {
     body.accuracy = typeof accuracy === 'number' && Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
   }
-  await api.patch('/api/proximity/location/', body);
+  const response = await api.patch('/api/proximity/location/', body);
+  // The answer names the friend's zone track playing where we now stand, if
+  // any. Played or stopped from here so the map's tick and the background task
+  // both honour it. Never allowed to fail the report.
+  try {
+    await handleZoneMusic(response?.data?.zone_music);
+  } catch {}
   return true;
 }

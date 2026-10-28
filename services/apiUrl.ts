@@ -10,7 +10,7 @@
  * A release build also refuses plain http and local or private-network hosts outright, so a
  * development URL that leaks into one fails on launch instead of shipping.
  */
-export const PRODUCTION_API_URL = 'https://project-x-production-3261.up.railway.app';
+export const PRODUCTION_API_URL = 'https://api.getapprox.com';
 
 // HTTP(S), ASCII DNS name or IPv4 host, optional port and path; no userinfo, query or fragment.
 // Deliberately narrower than a URL parser, for the reason given in services/routing.ts.

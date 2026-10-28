@@ -14,7 +14,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://project-x-production-3261.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://api.getapprox.com"
       }
     }
   },

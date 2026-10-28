@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
+import * as Notifications from 'expo-notifications';
 import { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 
 import { getCachedGhostMode } from './privacy';
 
@@ -21,8 +23,16 @@ import { getCachedGhostMode } from './privacy';
 //     COOLDOWN_MS, which matches the server's zone music alert.
 //
 // It stops when the slice ends, when you leave the zone, when the switch goes
-// off, and on sign-out. While it plays, the lock screen shows what it is and
-// whose zone it came from — the sound is never anonymous.
+// off, and on sign-out. While it plays, the lock screen says what it is and
+// whose zone it came from — the sound is never anonymous. How depends on
+// whether the app was open when it started, because of two iOS rules: the
+// lock-screen player only appears for audio that takes the session over, and
+// an app in the background may not take it over.
+//
+//   app open     take the session over (`doNotMix`): the lock-screen player
+//                shows, and the listener's own music pauses for the slice.
+//   app closed   mix (`duckOthers`), and post a notification naming the track —
+//                unless the server's own zone alert went out with this report.
 //
 // Background playback is iOS's "playback" audio mode, which ignores the silent
 // switch. That is the price of playing while the app is closed, and the reason
@@ -37,6 +47,8 @@ export interface ZoneMusicHere {
   artwork: string;
   start_ms: number;
   end_ms: number | null;
+  /** This report also pushed "there is music where you are" to us. */
+  alerted?: boolean;
 }
 
 const ENABLED_KEY = 'aura:zoneMusic:autoplay';
@@ -149,13 +161,16 @@ export async function handleZoneMusic(here: ZoneMusicHere | null | undefined): P
 }
 
 async function play(here: ZoneMusicHere): Promise<void> {
+  // See the note at the top: open takes the session over for the lock-screen
+  // player; closed has to mix, and says so with a notification instead.
+  const foreground = AppState.currentState === 'active';
   try {
     await setAudioModeAsync({
       playsInSilentMode: true,
       // The point of this module: it keeps playing with the app closed, and
       // starts from the background location task.
       shouldPlayInBackground: true,
-      interruptionMode: 'duckOthers',
+      interruptionMode: foreground ? 'doNotMix' : 'duckOthers',
     });
     const player = createAudioPlayer({ uri: here.url }, { updateInterval: 250 });
     player.loop = false;
@@ -170,15 +185,36 @@ async function play(here: ZoneMusicHere): Promise<void> {
     if (here.start_ms) await player.seekTo(here.start_ms / 1000).catch(() => {});
     if (current?.player !== player) return;
     player.play();
-    player.setActiveForLockScreen(true, {
-      title: here.title || `@${here.username}'s zone`,
-      artist: here.artist ? `${here.artist} · @${here.username}'s zone` : 'Approx zone music',
-      artworkUrl: here.artwork || undefined,
-    });
+    if (foreground) {
+      player.setActiveForLockScreen(true, {
+        title: here.title || `@${here.username}'s zone`,
+        artist: here.artist ? `${here.artist} · @${here.username}'s zone` : 'Approx zone music',
+        artworkUrl: here.artwork || undefined,
+      });
+    } else if (!here.alerted) {
+      await announce(here);
+    }
   } catch (e: any) {
     console.log('[ZoneMusic] could not play:', e?.message);
     stopZoneMusic();
   }
+}
+
+/** The lock-screen notice for a track that started with the app closed. */
+async function announce(here: ZoneMusicHere): Promise<void> {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `🎵 ${here.title || 'Zone music'}`,
+        body: here.artist
+          ? `${here.artist} — playing in @${here.username}'s zone`
+          : `Playing in @${here.username}'s zone`,
+        // The same deep link as the server's zone alert: the owner's profile.
+        data: { type: 'profile', user_id: here.owner_id, username: here.username },
+      },
+      trigger: null,
+    });
+  } catch {}
 }
 
 /** Stop whatever zone music is playing on its own. Safe to call any time. */

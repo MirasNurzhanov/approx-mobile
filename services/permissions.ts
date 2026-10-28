@@ -101,10 +101,10 @@ export const PERMISSION_COPY: Record<PermissionKey, {
   notifications: {
     title: 'Notifications',
     primer:
-      'Get told when someone sends you a Hi, accepts your request, or messages you. Without this, you’ll only find out by opening the app.',
-    purpose: 'Alerts for Hi requests, new friends, and messages.',
+      'Get told when someone sends you a Hi, accepts your request, messages you, or posts in your clubs. Without this, you’ll only find out by opening the app.',
+    purpose: 'Alerts for Hi requests, new friends, messages and club chat.',
     denied:
-      'You won’t be told about new Hi requests, friends, or messages.',
+      'You won’t be told about new Hi requests, friends, messages or club chat.',
   },
 };
 

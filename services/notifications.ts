@@ -2,8 +2,11 @@ import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { api } from './api';
 import { registerDevice } from './device';
+import { check } from './permissions';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -158,4 +161,34 @@ async function registerForPushNotificationsImpl(): Promise<string | null> {
     console.warn('[Push] registration unavailable');
     return null;
   }
+}
+
+// ─── Asking, once ─────────────────────────────────────────────────────────────
+// Registration above never asks — it only picks up a permission that already
+// exists. Nothing else in the normal flow asked either, so a new install never
+// received a single push: no Hi, no friend request, no club chat. The map asks
+// once instead, behind the explainer (see app/(tabs)/map.tsx).
+
+const ASKED_KEY = 'aura:notifications:asked';
+
+/**
+ * Whether the map should offer notifications now: never offered on this
+ * install, iOS has never been asked, and the location question has already been
+ * answered — the two share one explainer sheet and must not arrive together.
+ */
+export async function shouldOfferNotifications(): Promise<boolean> {
+  try {
+    if ((await AsyncStorage.getItem(ASKED_KEY)) === '1') return false;
+  } catch {
+    return false;
+  }
+  if ((await check('notifications')).state !== 'undetermined') return false;
+  return (await check('location')).state !== 'undetermined';
+}
+
+/** Recorded before the explainer opens, so a crash mid-ask does not re-ask. */
+export async function markNotificationsOffered(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(ASKED_KEY, '1');
+  } catch {}
 }

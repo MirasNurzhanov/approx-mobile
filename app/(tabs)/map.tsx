@@ -16,6 +16,12 @@ import { useTheme } from '@/context/ThemeContext';
 import { useNavAlignedRight, useNavClearance } from '@/hooks/useNavMetrics';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
+import { useLocationDisclosure } from '@/services/locationDisclosure';
+import {
+  markNotificationsOffered,
+  registerForPushNotifications,
+  shouldOfferNotifications,
+} from '@/services/notifications';
 import { openAppSettings } from '@/services/permissions';
 import { useMapData } from '@/hooks/useMapData';
 import { useMapLocation } from '@/hooks/useMapLocation';
@@ -101,6 +107,22 @@ export default function MapScreen() {
     locateState, handleLocatePress, stopFollowing, zoomToCluster,
     zoomDelta, mapH, onMapLayout, onRegionChangeComplete,
   } = useMapLocation(ensurePermission);
+
+  // Notifications, asked once per install and only after the "being on the
+  // map" sheet: without this a new install never registers for push at all.
+  // See services/notifications.ts for the conditions. `permState` re-runs this
+  // once the location question has been answered, which it waits for.
+  const { acknowledged: locationDisclosed } = useLocationDisclosure();
+  useEffect(() => {
+    if (locationDisclosed !== true) return;
+    let cancelled = false;
+    (async () => {
+      if (!(await shouldOfferNotifications()) || cancelled) return;
+      await markNotificationsOffered();
+      if (await ensurePermission('notifications')) await registerForPushNotifications();
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [locationDisclosed, permState, ensurePermission]);
 
   // Everyone else, and the poll that keeps them true — see hooks/useMapData.
   // It reads `coordsRef`, so it is called after the hook that owns it.

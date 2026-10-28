@@ -196,11 +196,11 @@ function NowPlayingSection({ zone, audioUrl, title, musicRadius, silent, trimmed
       <View style={styles.controlRow}>
         <IconLock size={18} color={colors.t2} />
         <View style={styles.controlText}>
-          <Text style={styles.controlLabel}>Audible to connections & friends</Text>
+          <Text style={styles.controlLabel}>Audible to friends only</Text>
           <Text style={styles.controlHint}>
             {audience === 'nobody'
               ? 'Zone audio is hidden from everyone in Privacy & safety.'
-              : 'Strangers never see or hear this zone.'}
+              : 'Connections and strangers never hear this zone.'}
           </Text>
         </View>
       </View>

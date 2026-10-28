@@ -512,7 +512,7 @@ function UserSheetZone({ user, zoneUrl }: { user: NearbyUser; zoneUrl: string })
       <View style={styles.zoneNote}>
         <IconLock size={12} color={colors.t3} />
         <Text style={styles.zoneNoteText}>
-          Audible to their friends only. It stays silent until you press play.
+          Audible to their friends only. Plays once when you walk into it, or press play.
         </Text>
         <Pressable
           onPress={() => present({

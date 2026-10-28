@@ -919,7 +919,7 @@ export function PersonMarker({ user, layout, isFriend, isConnected, color, onPre
       // Dropped when this marker shares its spot: the fan separates
       // rings, and a name chip is wider than the ring it hangs under.
       caption={layout?.crowded ? undefined : user.username}
-      // Friends and connections both have zone access. The tag
+      // Only friends have zone access. The tag
       // marks a track you can play, so it follows the track rather
       // than the map-zone switch.
       captionTag={!layout?.crowded && user.zone_audio_url ? 'zone' : undefined}

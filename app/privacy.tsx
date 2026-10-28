@@ -80,7 +80,7 @@ const AUDIENCE_FIELDS: {
   { key: 'visibility_stats',       label: 'Stats',          hint: 'Your connection and friend counts' },
   // No "Everyone": a music zone is never for strangers, whatever this says —
   // "Friends" here always reaches connections too. See app/zone.tsx.
-  { key: 'visibility_zone_audio',  label: 'Zone audio',     hint: 'Your connections and friends only — strangers never see or hear it', options: ['friends', 'nobody'] },
+  { key: 'visibility_zone_audio',  label: 'Zone audio',     hint: 'Your friends only — connections and strangers never hear it', options: ['friends', 'nobody'] },
   { key: 'visibility_connections', label: 'Connections',    hint: 'Who can see who you’re connected to' },
   { key: 'visibility_links',       label: 'Links',          hint: 'Instagram, Spotify and other links on your profile' },
 ];

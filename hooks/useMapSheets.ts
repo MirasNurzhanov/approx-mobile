@@ -17,7 +17,7 @@
 //    so an open sheet follows each poll without anything copying into it.
 
 import { useState } from 'react';
-import { useSharedValue, withSpring } from 'react-native-reanimated';
+import { Easing, useSharedValue, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import type { ClubMeetup, NearbyUser } from '@/services/mapTypes';
@@ -29,9 +29,15 @@ import type { Story } from '@/services/stories';
  *  broadcasting a track makes the tallest card the sheet holds, and a travel
  *  distance shorter than the card leaves a sliver of it on screen. */
 export const SHEET_H = 560;
-/** Shared with the drag handles on the sheets themselves, so a flick and a
- *  programmatic dismiss settle identically. */
+/** The spring a dragged sheet snaps back with — see `useSheetDrag`. */
 export const SPRING_CFG = { damping: 22, stiffness: 220, mass: 0.9 };
+
+/** Opening and closing are timed rather than sprung. A spring reports itself
+ *  done only once it has fully settled, long after it looks finished, and the
+ *  sheet's selection — and with it the backdrop that swallows taps on the map —
+ *  was cleared on that report, so a tap outside the card felt ignored. */
+const OPEN = { duration: 260, easing: Easing.out(Easing.cubic) };
+const CLOSE = { duration: 200, easing: Easing.in(Easing.cubic) };
 
 export function useMapSheets(
   nearby: NearbyUser[],
@@ -86,11 +92,11 @@ export function useMapSheets(
     setSelectedMeetup(null);
     setOpenPin(null);
     setOpenUser(user);
-    sheetY.set(withSpring(0, SPRING_CFG));
+    sheetY.set(withTiming(0, OPEN));
   }
 
   function closeSheet() {
-    sheetY.set(withSpring(SHEET_H, SPRING_CFG, (done) => {
+    sheetY.set(withTiming(SHEET_H, CLOSE, (done) => {
       if (done) scheduleOnRN(setOpenUser, null);
     }));
   }
@@ -100,11 +106,11 @@ export function useMapSheets(
     setOpenUser(null);
     setOpenPin(null);
     setSelectedMeetup(meetup);
-    sheetY.set(withSpring(0, SPRING_CFG));
+    sheetY.set(withTiming(0, OPEN));
   }
 
   function closeMeetupSheet() {
-    sheetY.set(withSpring(SHEET_H, SPRING_CFG, (done) => {
+    sheetY.set(withTiming(SHEET_H, CLOSE, (done) => {
       if (done) scheduleOnRN(setSelectedMeetup, null);
     }));
   }
@@ -114,11 +120,11 @@ export function useMapSheets(
     setOpenUser(null);
     setSelectedMeetup(null);
     setOpenPin(place);
-    sheetY.set(withSpring(0, SPRING_CFG));
+    sheetY.set(withTiming(0, OPEN));
   }
 
   function closePinSheet() {
-    sheetY.set(withSpring(SHEET_H, SPRING_CFG, (done) => {
+    sheetY.set(withTiming(SHEET_H, CLOSE, (done) => {
       if (done) scheduleOnRN(setOpenPin, null);
     }));
   }

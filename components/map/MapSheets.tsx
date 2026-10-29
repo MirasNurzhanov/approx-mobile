@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
+    Extrapolation,
+    interpolate,
     useAnimatedStyle,
     type SharedValue,
 } from 'react-native-reanimated';
@@ -69,6 +71,31 @@ const REL_LABEL: Record<Relationship, string> = {
 };
 
 // ─── Meetup Sheet ─────────────────────────────────────────────────────────────
+/**
+ * The dim layer behind a map card, faded with the card's own position.
+ *
+ * It used to sit at full strength until the card's selection was cleared, which
+ * happens only once the close animation has finished, so a tap outside the card
+ * left the map black for a beat after the card had visibly gone.
+ */
+function SheetBackdrop({ sheetY, onPress }: { sheetY: SharedValue<number>; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = makeStyles(colors);
+  const fade = useAnimatedStyle(() => ({
+    opacity: interpolate(sheetY.get(), [0, SHEET_H], [1, 0], Extrapolation.CLAMP),
+  }));
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, fade]}>
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      />
+    </Animated.View>
+  );
+}
+
 function MeetupSheet({
   meetup,
   pinned,
@@ -100,7 +127,7 @@ function MeetupSheet({
 
   return (
     <>
-      <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
+      <SheetBackdrop sheetY={sheetY} onPress={onDismiss} />
       <Animated.View style={[styles.sheet, { paddingBottom: navPad }, animStyle]}>
         {/* The whole grab area, not just the 36x4 bar: a 4pt-tall drag target
             is unusable, so the detector wraps a padded row and the bar inside
@@ -217,7 +244,7 @@ function PinnedSheet({ place, sheetY, onDismiss, onUnpin }: {
 
   return (
     <>
-      <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
+      <SheetBackdrop sheetY={sheetY} onPress={onDismiss} />
       <Animated.View style={[styles.sheet, { paddingBottom: navPad }, animStyle]}>
         <GestureDetector gesture={drag}>
           <View style={styles.sheetGrab}>
@@ -664,7 +691,7 @@ function UserSheet({
 
   return (
     <>
-      <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onDismiss} />
+      <SheetBackdrop sheetY={sheetY} onPress={onDismiss} />
       <Animated.View style={[styles.sheet, { paddingBottom: navPad }, animStyle]}>
         <GestureDetector gesture={drag}>
           <View style={styles.sheetGrab}>

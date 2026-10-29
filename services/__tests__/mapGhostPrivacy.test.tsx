@@ -41,6 +41,12 @@ jest.mock('react-native-reanimated', () => ({
     complete?.(true);
     return value;
   },
+  // The sheets open and close on a timing curve, not a spring.
+  withTiming: (value: number, _config: unknown, complete?: (done: boolean) => void) => {
+    complete?.(true);
+    return value;
+  },
+  Easing: { out: (f: unknown) => f, in: (f: unknown) => f, cubic: (t: number) => t },
 }));
 jest.mock('react-native-worklets', () => ({
   scheduleOnRN: (callback: (value: null) => void, value: null) => callback(value),

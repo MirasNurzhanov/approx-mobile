@@ -309,9 +309,10 @@ export default function MapScreen() {
   // Whether the map's own controls are reachable at all. A sheet or a
   // full-screen viewer covers them with a backdrop, so anything left drawn
   // underneath is visible-but-dead rather than merely hidden.
-  const chromeVisible =
-    mapVisible && !selectedUser && !selectedMeetup && !selectedPin
-    && !storyViewer && !composerOpen && !selectedVenue;
+  const coveredByCard = Boolean(
+    selectedUser || selectedMeetup || selectedPin || storyViewer || composerOpen || selectedVenue,
+  );
+  const chromeVisible = mapVisible && !coveredByCard;
 
   // The strip directly under the top bar, where the map's notices sit.
   const overlayTop = topInset + 52 + (awaitingFix ? 46 : 0);
@@ -397,15 +398,16 @@ export default function MapScreen() {
         <View style={styles.composeEdge} />
       </GestureDetector>
 
-      {/* Top bar */}
-      <TopBar
+      {/* Top bar. Not while a card is open: it was drawn above the card's dim
+          backdrop, the one bright thing left on a screen that had stepped back. */}
+      {!coveredByCard && <TopBar
         nearby={visibleNearby.length}
         pinCount={pinnedPlaces.length}
         onPinned={() => router.push('/pinned')}
         onZoneMusic={() => router.push('/zone')}
         onSearch={() => router.push('/search')}
         onList={() => router.push('/nearby')}
-      />
+      />}
 
       <MapNotices
         styles={styles}

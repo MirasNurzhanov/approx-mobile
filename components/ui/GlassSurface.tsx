@@ -164,6 +164,7 @@ export function GlassBackdrop({
   if (!GLASS) {
     return (
       <View
+        pointerEvents="none"
         style={[
           StyleSheet.absoluteFill,
           { backgroundColor: overMedia ? withAlpha(base, wash) : base },
@@ -173,12 +174,15 @@ export function GlassBackdrop({
   }
   return (
     <>
+      {/* Decoration only: neither layer may take a touch meant for the control
+          it sits behind. */}
       <BlurView
+        pointerEvents="none"
         intensity={intensity}
         tint={overMedia ? 'dark' : themeMode === 'dark' ? 'dark' : 'light'}
         style={StyleSheet.absoluteFill}
       />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(base, wash) }]} />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(base, wash) }]} />
     </>
   );
 }

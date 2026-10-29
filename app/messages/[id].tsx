@@ -10,7 +10,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -24,7 +23,7 @@ import type { DirectMessage as Message } from '@/services/directMessages';
 import { decodeStoryReply } from '@/services/storyReply';
 import { announce } from '@/hooks/useReduceMotion';
 import { useContentActions } from '@/components/ContentActions';
-import { GlassIconButton, GlassSurface } from '@/components/ui/GlassSurface';
+import { ChatComposer } from '@/components/chat/ChatComposer';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
 import { IconMore } from '@/components/ui/icons';
@@ -195,64 +194,18 @@ function MessagesInput({ text, canSend, bottom, onChangeText, onSend, onCamera, 
   onCamera: () => void;
   onAttach: () => void;
 }) {
-  const { colors } = useTheme();
-  const styles = makeStyles(colors);
   return (
-    <GlassSurface
-      style={[styles.inputBar, { paddingBottom: bottom + 8 }]}
-      // Heavier than a floating control: this sits over scrolling messages, and
-      // a light wash would let text slide visibly under the composer.
-      opacity={0.86}
-    >
-      <GlassIconButton
-        style={styles.attachBtn}
-        onPress={onCamera}
-        hitSlop={4}
-        tone="surface2"
-        accessibilityRole="button"
-        accessibilityLabel="Take a photo"
-      >
-        <Ionicons name="camera-outline" size={20} color={colors.t3} />
-      </GlassIconButton>
-
-      <GlassIconButton
-        style={styles.attachBtn}
-        onPress={onAttach}
-        hitSlop={4}
-        tone="surface2"
-        accessibilityRole="button"
-        accessibilityLabel="Choose a photo"
-      >
-        <Ionicons name="image-outline" size={20} color={colors.t3} />
-      </GlassIconButton>
-
-      <TextInput
-        style={styles.input}
-        value={text}
-        onChangeText={onChangeText}
-        placeholder="Message…"
-        placeholderTextColor={colors.t3}
-        multiline
-        maxLength={2000}
-      />
-
-      {/* Glass only while it is the *inactive* state. Once there is something
-          to send this is the one filled control on the bar, and a filled
-          control that is also translucent stops reading as the primary action
-          — so the active style paints over the backdrop deliberately. */}
-      <GlassIconButton
-        style={[styles.sendBtn, canSend && styles.sendBtnActive]}
-        onPress={onSend}
-        disabled={!canSend}
-        hitSlop={8}
-        tone="surface2"
-        accessibilityRole="button"
-        accessibilityLabel="Send message"
-        accessibilityState={{ disabled: !canSend }}
-      >
-        <Ionicons name="send" size={16} color={canSend ? colors.bg : colors.t3} />
-      </GlassIconButton>
-    </GlassSurface>
+    <ChatComposer
+      text={text}
+      canSend={canSend}
+      bottom={bottom}
+      onChangeText={onChangeText}
+      onSend={onSend}
+      actions={[
+        { icon: 'camera-outline', label: 'Take a photo', onPress: onCamera },
+        { icon: 'image-outline', label: 'Choose a photo', onPress: onAttach },
+      ]}
+    />
   );
 }
 
@@ -419,6 +372,9 @@ export default function MessagesScreen() {
             </Pressable>
           ) : null}
           contentContainerStyle={styles.listContent}
+          // A tap on a message (retry, a photo) must not be spent closing the
+          // keyboard first.
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           removeClippedSubviews
           maxToRenderPerBatch={10}
@@ -579,55 +535,5 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     fontSize: 13,
     fontStyle: 'italic',
     color: colors.t2,
-  },
-
-  // Input bar
-  // No `backgroundColor` on the three below: the fill is drawn behind their
-  // content by `GlassBackdrop`, and a background here would sit on top of the
-  // blur and hide it. See components/ui/GlassSurface.
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  attachBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  input: {
-    flex: 1,
-    minHeight: 38,
-    maxHeight: 120,
-    backgroundColor: colors.surface2,
-    borderRadius: radius.l,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingTop: Platform.OS === 'ios' ? 10 : 8,
-    paddingBottom: Platform.OS === 'ios' ? 10 : 8,
-    fontFamily: fonts.body,
-    color: colors.t1,
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  sendBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  sendBtnActive: {
-    backgroundColor: colors.teal,
-    borderColor: colors.teal,
   },
 });

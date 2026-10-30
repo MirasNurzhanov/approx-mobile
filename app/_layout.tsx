@@ -40,7 +40,7 @@ import { refreshPrivacy } from '@/services/privacy';
 import { refreshAcceptance, useTerms } from '@/services/terms';
 import { endStaleCheckIn } from '@/services/checkIn';
 import { startNotificationRouting } from '@/services/notificationRouting';
-import '@/services/backgroundLocation';
+import { reportLocationNow } from '@/services/backgroundLocation';
 
 function AppStatusBar() {
   const { themeMode } = useTheme();
@@ -95,6 +95,17 @@ function AppShell() {
       }
     });
 
+    return () => sub.remove();
+  }, [isAuthenticated]);
+
+  // One last location report on the way out, so a phone locked straight after
+  // opening still learns about a friend's music zone it is standing in — see
+  // services/backgroundLocation.reportLocationNow.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') reportLocationNow().catch(() => {});
+    });
     return () => sub.remove();
   }, [isAuthenticated]);
 

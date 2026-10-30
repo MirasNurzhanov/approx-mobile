@@ -138,6 +138,33 @@ export async function syncBackgroundLocation(): Promise<void> {
   await startBackgroundLocationUpdates();
 }
 
+/** How old a fix may be and still stand for where the phone is now. */
+const RECENT_FIX_MS = 60_000;
+
+/**
+ * One location report, right now — for the moment the app leaves the screen.
+ *
+ * The background task only reports once iOS wakes it, which is after the phone
+ * has moved about 50 m. A phone locked straight after opening the app, before
+ * the map's first report, would otherwise never learn it is standing in a
+ * friend's music zone. Going through `reportLocation` keeps both of its gates
+ * (Ghost Mode, the disclosure) and hands the answer to zone music as usual.
+ */
+export async function reportLocationNow(): Promise<boolean> {
+  if (isExpoGo) return false;
+  const { status } = await Location.getForegroundPermissionsAsync();
+  if (status !== 'granted') return false;
+  let fix = await Location.getLastKnownPositionAsync({ maxAge: RECENT_FIX_MS }).catch(() => null);
+  if (!fix) fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+  if (!fix) return false;
+  return reportLocation(
+    { latitude: fix.coords.latitude, longitude: fix.coords.longitude },
+    fix.coords.speed,
+    fix.coords.accuracy,
+    fix.timestamp,
+  );
+}
+
 export async function stopBackgroundLocationUpdates(): Promise<void> {
   const registered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
   if (registered) {

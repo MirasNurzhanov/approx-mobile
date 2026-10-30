@@ -14,6 +14,7 @@ import { AppState } from 'react-native';
 
 import {
   COOLDOWN_MS,
+  TAKEOVER_GRACE_MS,
   handleZoneMusic,
   isZoneMusicAutoplayEnabled,
   resetZoneMusic,
@@ -109,24 +110,47 @@ it('plays the owner\'s slice once, in the background, with the lock screen sayin
   expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
 });
 
-it('started with the app closed, it mixes and says what is playing in a notification', async () => {
-  appIs('background');
-  await handleZoneMusic(AMINA);
-  expect(setAudioModeAsync).toHaveBeenCalledWith(expect.objectContaining({ interruptionMode: 'duckOthers' }));
-  expect(mockPlayers[0].play).toHaveBeenCalled();
-  expect(mockPlayers[0].setActiveForLockScreen).not.toHaveBeenCalled();
-  expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
-    content: expect.objectContaining({
-      title: '🎵 Blinding Lights', body: 'The Weeknd — playing in @amina\'s zone',
-    }),
-  }));
-});
+describe('started with the app closed', () => {
+  beforeEach(() => {
+    appIs('background');
+    jest.useFakeTimers();
+  });
+  afterEach(() => jest.useRealTimers());
 
-it('does not repeat the server\'s zone alert when that went out with the same report', async () => {
-  appIs('background');
-  await handleZoneMusic({ ...AMINA, alerted: true });
-  expect(mockPlayers[0].play).toHaveBeenCalled();
-  expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  /** Start the track, optionally let it begin playing, then wait out the grace. */
+  async function startClosed(here: ZoneMusicHere, begins: boolean) {
+    const done = handleZoneMusic(here);
+    await jest.advanceTimersByTimeAsync(0);
+    if (begins) mockPlayers[0].emit({ isLoaded: true, playing: true, currentTime: 5 });
+    await jest.advanceTimersByTimeAsync(TAKEOVER_GRACE_MS);
+    await done;
+  }
+
+  it('shows the lock-screen player when iOS lets it take the audio over', async () => {
+    await startClosed(AMINA, true);
+    expect(setAudioModeAsync).toHaveBeenCalledWith(expect.objectContaining({ interruptionMode: 'doNotMix' }));
+    expect(setAudioModeAsync).not.toHaveBeenCalledWith(expect.objectContaining({ interruptionMode: 'duckOthers' }));
+    expect(mockPlayers[0].setActiveForLockScreen).toHaveBeenCalled();
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it('falls back to mixing, and names the track in a notification, when iOS refuses', async () => {
+    await startClosed(AMINA, false);
+    expect(setAudioModeAsync).toHaveBeenLastCalledWith(expect.objectContaining({ interruptionMode: 'duckOthers' }));
+    expect(mockPlayers[0].clearLockScreenControls).toHaveBeenCalled();
+    expect(mockPlayers[0].play).toHaveBeenCalledTimes(2);
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.objectContaining({
+        title: '🎵 Blinding Lights', body: 'The Weeknd — playing in @amina\'s zone',
+      }),
+    }));
+  });
+
+  it('does not repeat the server\'s zone alert when that went out with the same report', async () => {
+    await startClosed({ ...AMINA, alerted: true }, false);
+    expect(mockPlayers[0].play).toHaveBeenCalled();
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
 });
 
 it('does not start the same zone again inside the cooldown, and does after it', async () => {

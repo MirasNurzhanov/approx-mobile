@@ -4,6 +4,8 @@ import * as Notifications from 'expo-notifications';
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 
+import { isOtherAudioPlaying } from '@/modules/approx-audio-session';
+
 import { getCachedGhostMode } from './privacy';
 
 
@@ -24,14 +26,21 @@ import { getCachedGhostMode } from './privacy';
 //
 // It stops when the slice ends, when you leave the zone, when the switch goes
 // off, and on sign-out. While it plays, the lock screen says what it is and
-// whose zone it came from — the sound is never anonymous. iOS shows its
-// lock-screen player (with pause) only for audio that takes the session over
-// (`doNotMix`), so that is always tried first; the listener's own music pauses
-// for the slice. From the background iOS may refuse the takeover — typically
-// while another app is playing — so a track started with the app closed is
-// given TAKEOVER_GRACE_MS to begin, and otherwise falls back to mixing
-// (`duckOthers`) with a notification naming the track, unless the server's own
-// zone alert went out with this report.
+// whose zone it came from — the sound is never anonymous.
+//
+// The listener's own music wins. If another app is already playing (Apple
+// Music, Spotify, a podcast) the track does not start; a notification says
+// what is playing in the zone instead, and tapping it opens the owner. And if
+// the listener starts their own music while the track plays, it stops.
+//
+// Otherwise how it shows depends on whether the app was open, because iOS
+// shows its lock-screen player only for audio that takes the session over, and
+// does not let an app in the background take it over:
+//
+//   app open     take the session over (`doNotMix`): the lock-screen player.
+//   app closed   mix (`mixWithOthers`), and post a notification naming the
+//                track — unless the server's own zone alert went out with this
+//                report.
 //
 // Background playback is iOS's "playback" audio mode, which ignores the silent
 // switch. That is the price of playing while the app is closed, and the reason
@@ -153,77 +162,71 @@ export async function handleZoneMusic(here: ZoneMusicHere | null | undefined): P
     const now = Date.now();
     if (await playedRecently(here.owner_id, now)) return;
     await markPlayed(here.owner_id, now);
+    if (isOtherAudioPlaying()) {
+      // Their own music wins: say what is playing here rather than over it.
+      if (!here.alerted) await announce(here, 'offered');
+      return;
+    }
     await play(here);
   } finally {
     deciding = false;
   }
 }
 
-/** How long a track started with the app closed gets to begin under the
- *  takeover before it falls back to mixing. */
-export const TAKEOVER_GRACE_MS = 1500;
-
-function setMode(interruptionMode: 'doNotMix' | 'duckOthers') {
-  return setAudioModeAsync({
-    playsInSilentMode: true,
-    // The point of this module: it keeps playing with the app closed, and
-    // starts from the background location task.
-    shouldPlayInBackground: true,
-    interruptionMode,
-  });
-}
-
 async function play(here: ZoneMusicHere): Promise<void> {
-  // See the note at the top: take the session over for the lock-screen player
-  // and, if iOS refuses that from the background, mix and say so instead.
+  // See the note at the top: open takes the session over for the lock-screen
+  // player; closed has to mix, and says so with a notification instead.
   const foreground = AppState.currentState === 'active';
   try {
-    await setMode('doNotMix');
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      // The point of this module: it keeps playing with the app closed, and
+      // starts from the background location task.
+      shouldPlayInBackground: true,
+      interruptionMode: foreground ? 'doNotMix' : 'mixWithOthers',
+    });
     const player = createAudioPlayer({ uri: here.url }, { updateInterval: 250 });
     player.loop = false;
     const endMs = here.end_ms;
-    let started = false;
     const sub = player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
       if (!status.isLoaded) return;
-      if (status.playing || status.isBuffering) started = true;
       const past = endMs != null && status.currentTime * 1000 >= endMs;
-      // Once, then done: the end of the owner's slice, or of the file.
-      if (past || status.didJustFinish) stopZoneMusic();
+      // Once, then done: the end of the owner's slice, or of the file — or
+      // the listener putting their own music on, which always wins.
+      if (past || status.didJustFinish || isOtherAudioPlaying()) stopZoneMusic();
     });
     current = { player, ownerId: here.owner_id, remove: () => sub.remove() };
     if (here.start_ms) await player.seekTo(here.start_ms / 1000).catch(() => {});
     if (current?.player !== player) return;
     player.play();
-    player.setActiveForLockScreen(true, {
-      title: here.title || `@${here.username}'s zone`,
-      artist: here.artist ? `${here.artist} · @${here.username}'s zone` : 'Approx zone music',
-      artworkUrl: here.artwork || undefined,
-    });
-    if (foreground) return;
-
-    await new Promise((resolve) => setTimeout(resolve, TAKEOVER_GRACE_MS));
-    if (current?.player !== player || started) return;
-    // iOS kept the session from us: play mixed, and name the track in a
-    // notification since the lock-screen player will not appear.
-    player.clearLockScreenControls();
-    await setMode('duckOthers');
-    player.play();
-    if (!here.alerted) await announce(here);
+    if (foreground) {
+      player.setActiveForLockScreen(true, {
+        title: here.title || `@${here.username}'s zone`,
+        artist: here.artist ? `${here.artist} · @${here.username}'s zone` : 'Approx zone music',
+        artworkUrl: here.artwork || undefined,
+      });
+    } else if (!here.alerted) {
+      await announce(here, 'playing');
+    }
   } catch (e: any) {
     console.log('[ZoneMusic] could not play:', e?.message);
     stopZoneMusic();
   }
 }
 
-/** The lock-screen notice for a track that started with the app closed. */
-async function announce(here: ZoneMusicHere): Promise<void> {
+/**
+ * The lock-screen notice for a zone track: one that started with the app
+ * closed, or one that did not start because the listener's own music was on.
+ */
+async function announce(here: ZoneMusicHere, state: 'playing' | 'offered'): Promise<void> {
+  const where = state === 'playing'
+    ? `playing in @${here.username}'s zone`
+    : `playing in @${here.username}'s zone — tap to listen`;
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
         title: `🎵 ${here.title || 'Zone music'}`,
-        body: here.artist
-          ? `${here.artist} — playing in @${here.username}'s zone`
-          : `Playing in @${here.username}'s zone`,
+        body: here.artist ? `${here.artist} — ${where}` : where.charAt(0).toUpperCase() + where.slice(1),
         // The same deep link as the server's zone alert: the owner's profile.
         data: { type: 'profile', user_id: here.owner_id, username: here.username },
       },

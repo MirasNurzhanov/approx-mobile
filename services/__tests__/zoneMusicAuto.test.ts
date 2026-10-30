@@ -14,7 +14,6 @@ import { AppState } from 'react-native';
 
 import {
   COOLDOWN_MS,
-  TAKEOVER_GRACE_MS,
   handleZoneMusic,
   isZoneMusicAutoplayEnabled,
   resetZoneMusic,
@@ -57,6 +56,8 @@ jest.mock('expo-audio', () => ({
 let mockGhost = false;
 jest.mock('../privacy', () => ({ getCachedGhostMode: jest.fn(async () => mockGhost) }));
 jest.mock('expo-notifications', () => ({ scheduleNotificationAsync: jest.fn(async () => 'id') }));
+let mockOtherAudio = false;
+jest.mock('../../modules/approx-audio-session', () => ({ isOtherAudioPlaying: () => mockOtherAudio }));
 
 /** Whether the app is in front when the track starts — it decides the mode. */
 function appIs(state: 'active' | 'background') {
@@ -75,6 +76,7 @@ beforeEach(async () => {
   await setZoneMusicAutoplay(true);
   setManualZonePlayback(false);
   mockGhost = false;
+  mockOtherAudio = false;
   mockPlayers.length = 0;
   jest.mocked(createAudioPlayer).mockClear();
   jest.mocked(setAudioModeAsync).mockClear();
@@ -111,34 +113,13 @@ it('plays the owner\'s slice once, in the background, with the lock screen sayin
 });
 
 describe('started with the app closed', () => {
-  beforeEach(() => {
-    appIs('background');
-    jest.useFakeTimers();
-  });
-  afterEach(() => jest.useRealTimers());
+  beforeEach(() => appIs('background'));
 
-  /** Start the track, optionally let it begin playing, then wait out the grace. */
-  async function startClosed(here: ZoneMusicHere, begins: boolean) {
-    const done = handleZoneMusic(here);
-    await jest.advanceTimersByTimeAsync(0);
-    if (begins) mockPlayers[0].emit({ isLoaded: true, playing: true, currentTime: 5 });
-    await jest.advanceTimersByTimeAsync(TAKEOVER_GRACE_MS);
-    await done;
-  }
-
-  it('shows the lock-screen player when iOS lets it take the audio over', async () => {
-    await startClosed(AMINA, true);
-    expect(setAudioModeAsync).toHaveBeenCalledWith(expect.objectContaining({ interruptionMode: 'doNotMix' }));
-    expect(setAudioModeAsync).not.toHaveBeenCalledWith(expect.objectContaining({ interruptionMode: 'duckOthers' }));
-    expect(mockPlayers[0].setActiveForLockScreen).toHaveBeenCalled();
-    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
-  });
-
-  it('falls back to mixing, and names the track in a notification, when iOS refuses', async () => {
-    await startClosed(AMINA, false);
-    expect(setAudioModeAsync).toHaveBeenLastCalledWith(expect.objectContaining({ interruptionMode: 'duckOthers' }));
-    expect(mockPlayers[0].clearLockScreenControls).toHaveBeenCalled();
-    expect(mockPlayers[0].play).toHaveBeenCalledTimes(2);
+  it('mixes, and names the track in a notification', async () => {
+    await handleZoneMusic(AMINA);
+    expect(setAudioModeAsync).toHaveBeenCalledWith(expect.objectContaining({ interruptionMode: 'mixWithOthers' }));
+    expect(mockPlayers[0].play).toHaveBeenCalled();
+    expect(mockPlayers[0].setActiveForLockScreen).not.toHaveBeenCalled();
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
       content: expect.objectContaining({
         title: '🎵 Blinding Lights', body: 'The Weeknd — playing in @amina\'s zone',
@@ -147,9 +128,31 @@ describe('started with the app closed', () => {
   });
 
   it('does not repeat the server\'s zone alert when that went out with the same report', async () => {
-    await startClosed({ ...AMINA, alerted: true }, false);
+    await handleZoneMusic({ ...AMINA, alerted: true });
     expect(mockPlayers[0].play).toHaveBeenCalled();
     expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe('the listener\'s own music wins', () => {
+  it('does not start over Apple Music or Spotify, and offers the track instead', async () => {
+    mockOtherAudio = true;
+    await handleZoneMusic(AMINA);
+    expect(createAudioPlayer).not.toHaveBeenCalled();
+    expect(setAudioModeAsync).not.toHaveBeenCalled();
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.objectContaining({ body: 'The Weeknd — playing in @amina\'s zone — tap to listen' }),
+    }));
+    // Still that zone's one play: walking about inside it does not re-offer.
+    await handleZoneMusic(AMINA);
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops when the listener starts their own music mid-track', async () => {
+    await handleZoneMusic(AMINA);
+    mockOtherAudio = true;
+    mockPlayers[0].emit({ isLoaded: true, playing: false, currentTime: 8, didJustFinish: false });
+    expect(mockPlayers[0].remove).toHaveBeenCalled();
   });
 });
 

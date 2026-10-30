@@ -1,0 +1,7 @@
+{
+  "name": "approx-audio-session",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tells whether another app is playing audio, so zone music does not talk over it.",
+  "main": "index.ts"
+}

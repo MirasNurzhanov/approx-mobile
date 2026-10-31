@@ -290,3 +290,20 @@ it('a pan cancels a locate still waiting for its first fix', async () => {
   expect(nativeMap.animateToRegion).not.toHaveBeenCalled();
   expect(nativeMap.setCamera).not.toHaveBeenCalled();
 });
+
+it('re-reads a still phone\'s fix before it is too old to report, and only while the map is in front', async () => {
+  // The watcher only fires on movement. Without a re-read, a fix that aged past
+  // the report window while the disclosure sheet was open was never sent.
+  await render();
+  expect(read).toHaveBeenCalledTimes(1);
+  read.mockImplementation(() => Promise.resolve(fix(Date.now())));
+  await act(async () => { jest.advanceTimersByTime(45_000); });
+  expect(read).toHaveBeenCalledTimes(1);
+  await act(async () => { jest.advanceTimersByTime(30_000); });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(latest.fixTimestampRef.current).toBe(T0 + 75_000);
+  await appState('background');
+  const reads = read.mock.calls.length;
+  await act(async () => { jest.advanceTimersByTime(300_000); });
+  expect(read).toHaveBeenCalledTimes(reads);
+});

@@ -65,6 +65,17 @@ const RECENTER_MS = 450;
  */
 const STALE_FIX_MS = 30_000;
 
+/**
+ * How old the fix may get before the map re-reads it on its own. A report
+ * only carries a fix measured in the last two minutes (services/location.ts,
+ * and the server checks the same), and a still phone's watcher goes quiet —
+ * so without this somebody sitting still stopped reporting, and a new account
+ * whose only fix aged out while the disclosure sheet was open never sent a
+ * position at all, leaving its zone with nothing to resolve.
+ */
+const KEEP_FRESH_MS = 60_000;
+const KEEP_FRESH_CHECK_MS = 15_000;
+
 /** How still the camera must be before the marker layout reacts to a new zoom. */
 const ZOOM_SETTLE_MS = 220;
 
@@ -473,6 +484,16 @@ export function useMapLocation(
       return null;
     }
   }, [acceptFix, syncFixClock]);
+
+  // See KEEP_FRESH_MS. Foreground only: `screenActive` drops on blur and
+  // background, which is when the background task takes over.
+  useEffect(() => {
+    if (!screenActive || !locationGranted) return;
+    const id = setInterval(() => {
+      if (Date.now() - fixAtRef.current > KEEP_FRESH_MS) void refreshFix();
+    }, KEEP_FRESH_CHECK_MS);
+    return () => clearInterval(id);
+  }, [screenActive, locationGranted, refreshFix]);
 
   const startFollowing = useCallback((target: Coordinates) => {
     centerOnSelf(getSmoothedPosition() ?? target, true);

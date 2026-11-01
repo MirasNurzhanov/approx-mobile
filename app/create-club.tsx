@@ -13,6 +13,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
+
+import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 
@@ -193,7 +196,7 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
   const styles = makeStyles(colors);
   const [searchFocused, setSearchFocused] = useState(false);
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onDismiss}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
       {/* One container for the backdrop and the sheet, so a screen reader stays
           inside the modal and can still reach the backdrop's close. */}
       <View style={{ flex: 1 }} accessibilityViewIsModal>
@@ -203,7 +206,7 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
           accessibilityRole="button"
           accessibilityLabel="Close"
         />
-        <View style={styles.modalSheet}>
+        <Animated.View entering={SHEET_RISE} style={styles.modalSheet}>
           <View style={styles.modalHandle} />
           <Text style={styles.modalTitle}>Pick an Interest</Text>
 
@@ -263,7 +266,7 @@ function InterestPickerModal({ visible, loading, interests, query, selectedId, o
               }
             />
           )}
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );

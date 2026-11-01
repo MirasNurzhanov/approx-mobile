@@ -9,6 +9,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
+
+import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
@@ -54,7 +57,7 @@ interface Props {
 
 export function PinNoteEditor({ visible, placeId, ...props }: Props) {
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={props.onClose}>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={props.onClose}>
       <PinNoteForm key={JSON.stringify([placeId, visible, props.note ?? ''])} {...props} />
     </Modal>
   );
@@ -88,7 +91,7 @@ function PinNoteForm({ placeTitle, note, onClose, onSave }: Omit<Props, 'visible
       >
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
 
-        <View style={[styles.sheet, { paddingBottom: bottom + 20 }]}>
+        <Animated.View entering={SHEET_RISE} style={[styles.sheet, { paddingBottom: bottom + 20 }]}>
           <View style={styles.header}>
             <View style={styles.headerText}>
               <Text style={styles.title} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
@@ -154,7 +157,7 @@ function PinNoteForm({ placeTitle, note, onClose, onSave }: Omit<Props, 'visible
               />
             </View>
           </View>
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
   );
 }

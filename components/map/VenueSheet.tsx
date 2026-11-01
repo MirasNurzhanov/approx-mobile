@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
+
+import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,10 +67,10 @@ export function VenueSheet({ venue, onClose }: { venue: Venue | null; onClose: (
   }
 
   return (
-    <Modal visible={venue !== null} transparent animationType="slide" onRequestClose={onClose} onDismiss={afterDismiss}>
+    <Modal visible={venue !== null} transparent animationType="fade" onRequestClose={onClose} onDismiss={afterDismiss}>
       <View style={styles.overlay} accessibilityViewIsModal>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close venue" />
-        <View style={[styles.sheet, { backgroundColor: colors.bg, paddingBottom: bottom + 24 }]}>
+        <Animated.View entering={SHEET_RISE} style={[styles.sheet, { backgroundColor: colors.bg, paddingBottom: bottom + 24 }]}>
           <View style={styles.header}>
             <Text style={[styles.eyebrow, { color: colors.purple }]}>{choosing ? 'CHOOSE YOUR CLUB' : 'PLACES TO MEET'}</Text>
             <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close venue card">
@@ -122,7 +125,7 @@ export function VenueSheet({ venue, onClose }: { venue: Venue | null; onClose: (
               <Text style={[styles.note, { color: colors.t3 }]}>A meetup proposal is not a reservation.</Text>
             </>}
           </ScrollView>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );

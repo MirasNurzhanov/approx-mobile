@@ -18,6 +18,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
+
+import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { Image } from 'expo-image';
 import type { Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -728,7 +731,7 @@ function MeetupProposalModal({
     <Modal
       visible={modalView !== null}
       transparent
-      animationType="slide"
+      animationType="fade"
       onRequestClose={modalView === 'map' ? onBackToForm : onDismiss}
     >
       {modalView === 'proposal' ? (
@@ -743,7 +746,7 @@ function MeetupProposalModal({
             accessibilityLabel="Close"
           />
           <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
-            <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
+            <Animated.View entering={SHEET_RISE} style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Propose a Meetup</Text>
@@ -830,7 +833,7 @@ function MeetupProposalModal({
                   }
                 </Pressable>
               </ScrollView>
-            </View>
+            </Animated.View>
           </KeyboardAvoidingView>
         </View>
       ) : (

@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -153,7 +154,7 @@ export function ReportSheet({
   return (
     <Modal
       visible
-      animationType="slide"
+      animationType="fade"
       transparent
       onRequestClose={handleClose}
     >
@@ -164,7 +165,7 @@ export function ReportSheet({
           accessibilityRole="button"
           accessibilityLabel="Close"
         />
-        <Animated.View style={[styles.sheet, { paddingBottom: bottom + 20 }, sheetStyle]}>
+        <Animated.View entering={SHEET_RISE} style={[styles.sheet, { paddingBottom: bottom + 20 }, sheetStyle]}>
           {/* The gesture is on this padded row, not on the 4pt bar inside it —
               a 4pt drag target is smaller than the finger reaching for it. */}
           <GestureDetector gesture={drag}>

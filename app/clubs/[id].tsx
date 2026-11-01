@@ -14,6 +14,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
+
+import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -203,7 +206,7 @@ function InviteModal({ visible, query, results, searching, searchFailed, invitin
     <Modal
       visible={visible}
       transparent
-      animationType="slide"
+      animationType="fade"
       onRequestClose={onDismiss}
     >
       {/* One container for the backdrop and the sheet, so a screen reader stays
@@ -224,7 +227,7 @@ function InviteModal({ visible, query, results, searching, searchFailed, invitin
           accessibilityRole="button"
           accessibilityLabel="Close"
         />
-        <View style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
+        <Animated.View entering={SHEET_RISE} style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
           <View style={styles.modalHandle} />
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Invite Member</Text>
@@ -286,7 +289,7 @@ function InviteModal({ visible, query, results, searching, searchFailed, invitin
           ) : query.trim().length > 0 ? (
             <Text style={styles.inviteEmpty}>No users found.</Text>
           ) : null}
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
   );

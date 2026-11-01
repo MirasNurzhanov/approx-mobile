@@ -128,6 +128,10 @@ jest.mock('react-native-reanimated', () => {
     withTiming: (v: unknown) => v,
     withSpring: (v: unknown) => v,
     withSequence: (...v: unknown[]) => v[0],
+    // ReportSheet rises with `SHEET_RISE` (components/ui/sheetMotion), which is
+    // built when that module loads.
+    SlideInDown: { duration: () => ({ easing: () => ({}) }) },
+    Easing: { out: () => () => 0, cubic: () => 0 },
   };
 });
 jest.mock('../../hooks/useDoubleTap', () => ({ useDoubleTap: () => jest.fn() }));

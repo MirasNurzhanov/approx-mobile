@@ -14,6 +14,7 @@ import {
     TextInput,
     View,
 } from 'react-native';
+import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { Image } from 'expo-image';
 import Animated, {
     useAnimatedStyle,
@@ -132,10 +133,11 @@ export function CreateStoryModal({ visible, locationless, onClose, onPost }: Cre
   }
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} accessibilityViewIsModal>
         <Pressable style={styles.createModalBackdrop} onPress={onClose} />
         <Animated.View
+          entering={SHEET_RISE}
           style={[styles.createModalSheet, { paddingBottom: bottom + 20 }, storyAnimStyle]}
         >
           <GestureDetector gesture={drag}>

@@ -1056,6 +1056,14 @@ export const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     color: colors.purple,
   },
   meetupDetailBlock: { gap: 10, marginBottom: 20 },
+  // "3/9 here": arrivals against everyone in. See MeetupSheet.
+  meetupHereRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16,
+    paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14,
+    backgroundColor: colors.tealTint, borderWidth: 1, borderColor: colors.tealLine,
+  },
+  meetupHereCount: { fontFamily: fonts.display, fontSize: 24, fontWeight: '700', color: colors.teal },
+  meetupHereLabel: { flex: 1, fontFamily: fonts.body, fontSize: 13, lineHeight: 18, color: colors.t2 },
   meetupDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   meetupDetailText: {
     flex: 1,

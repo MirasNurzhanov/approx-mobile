@@ -6,6 +6,7 @@
 // cycle. Nothing here is behaviour — these are the payloads /nearby/ and
 // /users/zone/ answer with, described once.
 
+import type { MeetupResponseSummary } from '@/services/meetupResponses';
 import type { Presence, MotionClass } from '@/services/presence';
 import type { Story } from '@/services/stories';
 import type { ZoneMode } from '@/services/zoneArea';
@@ -100,6 +101,8 @@ export interface ClubMeetup {
   event_datetime: string;
   status: string;
   expires_at: string;
+  /** Arrivals against everyone in — the card's "3/9". See services/meetupResponses. */
+  responses?: MeetupResponseSummary;
 }
 
 export interface MapNearbyResponse {

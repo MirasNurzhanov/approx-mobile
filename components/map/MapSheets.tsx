@@ -3,7 +3,9 @@
 
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
+import * as Location from 'expo-location';
 import {
+    Alert,
     FlatList,
     Pressable,
     StyleSheet,
@@ -40,6 +42,9 @@ import { useTheme } from '@/context/ThemeContext';
 import { useNavContentPadding } from '@/hooks/useNavMetrics';
 import { api } from '@/services/api';
 import { runBusy } from '@/services/busy';
+import {
+  arriveAtMeetup, NO_RESPONSES, undoArrival, type MeetupResponseSummary,
+} from '@/services/meetupResponses';
 import { DirectionsSheet } from '@/components/DirectionsSheet';
 import { motionLabel } from '@/services/presence';
 import { PresenceDot } from '@/components/PresenceDot';
@@ -96,16 +101,17 @@ function SheetBackdrop({ sheetY, onPress }: { sheetY: SharedValue<number>; onPre
   );
 }
 
+/** How long before the start "I'm here" opens. The server holds the same rule. */
+const CHECK_IN_OPENS_MS = 60 * 60 * 1000;
+
 function MeetupSheet({
   meetup,
-  pinned,
-  onToggleGoing,
+  viewerIsProposer,
   sheetY,
   onDismiss,
 }: {
   meetup: ClubMeetup;
-  pinned: boolean;
-  onToggleGoing: (meetup: ClubMeetup) => Promise<void>;
+  viewerIsProposer: boolean;
   sheetY: SharedValue<number>;
   onDismiss: () => void;
 }) {
@@ -116,13 +122,48 @@ function MeetupSheet({
   // `onDismiss` is the screen's own `closeMeetupSheet`, so a dragged dismiss
   // and a backdrop tap run the same teardown — see `useSheetDrag`.
   const drag = useSheetDrag({ sheetY, height: SHEET_H, onDismiss, spring: SPRING_CFG });
-  const [saving, setSaving] = useState(false);
+  const [arriving, setArriving] = useState(false);
   const [directionsOpen, setDirectionsOpen] = useState(false);
 
-  function toggleGoing() {
-    if (saving) return;
-    setSaving(true);
-    void runBusy(() => onToggleGoing(meetup), () => setSaving(false));
+  // ── I'm here ─────────────────────────────────────────────────────────────
+  // An approved meetup is on: whoever goes, goes. What is worth knowing is
+  // who has turned up, so members check in on arrival and the card counts
+  // arrivals against everyone who said "I'm in" in the club chat. The server
+  // checks the phone is at the place — see clubs.views.ClubEventArrivalView.
+  //
+  // A tap's answer is kept only until the next map poll brings this meetup
+  // back, so the count never sits on a stale local copy.
+  const [tapped, setTapped] = useState<{ source?: MeetupResponseSummary; value: MeetupResponseSummary } | null>(null);
+  const counts = tapped && tapped.source === meetup.responses
+    ? tapped.value
+    : (meetup.responses ?? NO_RESPONSES);
+  const here = counts.here_count ?? 0;
+  const checkInOpen = Date.now() >= new Date(meetup.event_datetime).getTime() - CHECK_IN_OPENS_MS;
+
+  function save(request: () => Promise<MeetupResponseSummary>) {
+    setArriving(true);
+    void runBusy(async () => {
+      try {
+        setTapped({ source: meetup.responses, value: await request() });
+      } catch (e: any) {
+        Alert.alert("Couldn't check you in", e?.response?.data?.detail ?? 'Try again in a moment.');
+      }
+    }, () => setArriving(false));
+  }
+
+  function checkIn() {
+    if (arriving) return;
+    if (counts.my_arrived) {
+      Alert.alert('Take back your check-in?', 'You will no longer count as here.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Take back', style: 'destructive', onPress: () => save(() => undoArrival(meetup.id)) },
+      ]);
+      return;
+    }
+    save(async () => {
+      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      return arriveAtMeetup(meetup.id, { latitude: fix.coords.latitude, longitude: fix.coords.longitude });
+    });
   }
 
   return (
@@ -178,26 +219,40 @@ function MeetupSheet({
           ) : null}
         </View>
 
-        {/* Going first, directions second: the decision comes before the
-            journey, and it is the one of the two that leaves something behind
-            on the map. */}
+        {/* Who has turned up, out of everyone in */}
+        <View style={styles.meetupHereRow} accessibilityRole="text"
+          accessibilityLabel={`${here} of ${counts.in_count} here`}>
+          <Text style={styles.meetupHereCount}>{here}/{counts.in_count}</Text>
+          <Text style={styles.meetupHereLabel}>
+            {counts.in_count === 0
+              ? 'Nobody has said they are in yet.'
+              : here === 0 ? 'here so far. Check in when you arrive.' : 'here so far'}
+          </Text>
+        </View>
+
+        {/* Arriving first, directions second: you check in once you are there. */}
         <View style={styles.sheetActionRow}>
-          <View style={styles.sheetActionCell}>
-            <Button
-              label={pinned ? 'Going' : "I'm going"}
-              variant={pinned ? 'secondary' : 'primary'}
-              size="md"
-              fullWidth
-              loading={saving}
-              icon={pinned ? IconCheck : IconBookmark}
-              onPress={toggleGoing}
-              accessibilityLabel={
-                pinned
-                  ? 'Going. Tap to remove this meetup from your map.'
-                  : 'I am going. Pins this meetup to your map.'
-              }
-            />
-          </View>
+          {!viewerIsProposer && (
+            <View style={styles.sheetActionCell}>
+              <Button
+                label={counts.my_arrived ? "You're here" : checkInOpen ? "I'm here" : 'Opens 1h before'}
+                variant={counts.my_arrived ? 'secondary' : 'primary'}
+                size="md"
+                fullWidth
+                loading={arriving}
+                disabled={!checkInOpen && !counts.my_arrived}
+                icon={counts.my_arrived ? IconCheck : IconPin}
+                onPress={checkIn}
+                accessibilityLabel={
+                  counts.my_arrived
+                    ? "You're checked in. Tap to take it back."
+                    : checkInOpen
+                      ? "I'm here. Checks you in at the meetup."
+                      : 'Check-in opens an hour before the meetup.'
+                }
+              />
+            </View>
+          )}
           <View style={styles.sheetActionCell}>
             <Button
               label="Directions"
@@ -750,8 +805,8 @@ function UserSheet({
 /** The two panels and the full-screen viewer that can cover the map. */
 export function MapSheets({
   sheetUser, selectedUser, sheetMeetup, selectedMeetup, sheetPin, selectedPin, sheetY,
-  storyViewer, currentUserId, friendIds, goingToMeetup,
-  onCloseSheet, onCloseMeetupSheet, onClosePinSheet, onToggleGoing, onUnpin,
+  storyViewer, currentUserId, friendIds,
+  onCloseSheet, onCloseMeetupSheet, onClosePinSheet, onUnpin,
   onFriendChange, onCloseStories, onReact,
 }: {
   sheetUser: NearbyUser | null;
@@ -764,14 +819,9 @@ export function MapSheets({
   storyViewer: { stories: Story[] } | null;
   currentUserId: number | null;
   friendIds: Set<number>;
-  /** Whether the meetup in the open card is one the viewer said they are
-   *  going to. Passed in rather than read here so the sheet and the marker
-   *  answer it from the same list. */
-  goingToMeetup: boolean;
   onCloseSheet: () => void;
   onCloseMeetupSheet: () => void;
   onClosePinSheet: () => void;
-  onToggleGoing: (meetup: ClubMeetup) => Promise<void>;
   onUnpin: (place: PinnedPlace) => void;
   onFriendChange: () => void;
   onCloseStories: () => void;
@@ -811,8 +861,7 @@ export function MapSheets({
         >
           <MeetupSheet
             meetup={sheetMeetup}
-            pinned={goingToMeetup}
-            onToggleGoing={onToggleGoing}
+            viewerIsProposer={sheetMeetup.created_by.id === currentUserId}
             sheetY={sheetY}
             onDismiss={onCloseMeetupSheet}
           />

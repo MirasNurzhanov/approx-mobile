@@ -71,7 +71,7 @@ export function MeetupResponseBar({ summary, canAnswer, busy, onAnswer, onShowAl
           style={({ pressed }) => [styles.summary, pressed && styles.busy]}
           onPress={onShowAll}
           accessibilityRole="button"
-          accessibilityLabel={`${summary.in_count} in, ${summary.out_count} nope. Shows everyone who answered.`}
+          accessibilityLabel={`${summary.in_count} in${(summary.here_count ?? 0) > 0 ? `, ${summary.here_count} here` : ''}, ${summary.out_count} nope. Shows everyone who answered.`}
         >
           <View style={styles.faces}>
             {summary.preview.map((person, i) => (
@@ -82,6 +82,7 @@ export function MeetupResponseBar({ summary, canAnswer, busy, onAnswer, onShowAl
           </View>
           <Text style={styles.counts}>
             <Text style={styles.countIn}>{summary.in_count} in</Text>
+            {(summary.here_count ?? 0) > 0 ? ` · ${summary.here_count} here` : ''}
             {summary.out_count > 0 ? ` · ${summary.out_count} nope` : ''}
           </Text>
           <Ionicons name="chevron-forward" size={16} color={colors.t3} />

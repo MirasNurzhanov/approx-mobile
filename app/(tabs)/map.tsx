@@ -2,7 +2,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Pressable,
     Text,
     View,
@@ -33,17 +32,11 @@ import { useStoryComposer } from '@/hooks/useStoryComposer';
 import { useStoryTutorial } from '@/hooks/useStoryTutorial';
 import { useVisiblePeople } from '@/hooks/useVisiblePeople';
 import {
-    MAX_PINS,
-    pinIdFor,
-    pinMeetup,
     unpinPlace,
     usePinnedPlaces,
     type PinnedPlace,
 } from '@/services/pinnedPlaces';
 import { useGhostMode } from '@/services/privacy';
-import type {
-    ClubMeetup,
-} from '@/services/mapTypes';
 
 import { LOCATE_SIZE, LOCATE_INSET } from '@/components/map/mapConstants';
 import { makeStyles } from '@/components/map/mapStyles';
@@ -208,43 +201,6 @@ export default function MapScreen() {
   const slots = useMarkerSlots(
     visibleNearby, displayCoords, overlays.musicZones, overlays.zoneAreas, zoomDelta, mapH,
   );
-
-  /** Whether the meetup whose card is open is one the viewer is going to.
-   *  Read off the same list the markers use, so the card and the pin on the
-   *  map can never disagree about it. */
-  const goingToMeetup = !!sheetMeetup
-    && pinnedPlaces.some((p) => p.kind === 'meetup' && p.source_id === sheetMeetup.id);
-
-  /** "I'm going", and its undo.
-   *
-   *  Lives on the screen rather than inside the sheet so the meetup card and
-   *  anything else that grows the same button later share one implementation
-   *  of what going means — a pin, and nothing sent anywhere. */
-  async function toggleGoing(meetup: ClubMeetup) {
-    const pinned = pinnedPlaces.some(
-      (p) => p.kind === 'meetup' && p.source_id === meetup.id,
-    );
-    if (pinned) {
-      await unpinPlace(pinIdFor('meetup', meetup.id));
-      return;
-    }
-    const result = await pinMeetup({
-      meetupId: meetup.id,
-      latitude: meetup.latitude,
-      longitude: meetup.longitude,
-      title: meetup.title,
-      clubName: meetup.club_name,
-      locationName: meetup.location_name,
-      eventDatetime: meetup.event_datetime,
-      expiresAt: meetup.expires_at,
-    });
-    if (!result.ok && result.reason === 'limit') {
-      Alert.alert(
-        'Your map is full',
-        `You can keep ${MAX_PINS} pinned places. Remove one to add this meetup.`,
-      );
-    }
-  }
 
   /** Dismiss first, then remove. The card is read back out of the pin list, so
    *  removing it while it is still on screen would blank the panel mid-slide —
@@ -449,11 +405,9 @@ export default function MapScreen() {
         storyViewer={storyViewer}
         currentUserId={currentUserId}
         friendIds={friendIds}
-        goingToMeetup={goingToMeetup}
         onCloseSheet={closeSheet}
         onCloseMeetupSheet={closeMeetupSheet}
         onClosePinSheet={closePinSheet}
-        onToggleGoing={toggleGoing}
         onUnpin={handleUnpin}
         onFriendChange={handleHiSent}
         onCloseStories={closeStoryViewer}

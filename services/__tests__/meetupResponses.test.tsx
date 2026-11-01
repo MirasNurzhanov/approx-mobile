@@ -52,6 +52,12 @@ it('shows the faces and counts, which open everyone who answered', () => {
   expect(onShowAll).toHaveBeenCalledTimes(1);
 });
 
+it('says how many are already there once people check in', () => {
+  render({ ...answered, here_count: 1 });
+  expect(JSON.stringify(tree.toJSON())).toContain(' · 1 here');
+  expect(byLabel('2 in, 1 here, 1 nope. Shows everyone who answered.')).toBeDefined();
+});
+
 it('offers the proposer no buttons, and an unanswered card no summary', () => {
   render(answered, false);
   expect(tree.root.findAllByProps({ accessibilityLabel: "I'm in" })).toHaveLength(0);
@@ -63,6 +69,7 @@ it('offers the proposer no buttons, and an unanswered card no summary', () => {
 
 it('keeps your own answer when the count changes over the socket', () => {
   const incoming = { in_count: 3, out_count: 1, preview: answered.preview };
-  expect(mergeBroadcast(answered, incoming)).toEqual({ ...incoming, my_answer: 'in' });
+  expect(mergeBroadcast({ ...answered, my_arrived: true }, incoming))
+    .toEqual({ ...incoming, my_answer: 'in', my_arrived: true });
   expect(mergeBroadcast(undefined, incoming).my_answer).toBeNull();
 });

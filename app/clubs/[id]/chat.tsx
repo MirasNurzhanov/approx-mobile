@@ -21,6 +21,7 @@ import {
 import Animated from 'react-native-reanimated';
 
 import { SHEET_RISE } from '@/components/ui/sheetMotion';
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
 import { Image } from 'expo-image';
 import type { Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -727,6 +728,9 @@ function MeetupProposalModal({
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+  // The keyboard covers the home indicator, so its inset is dead space above
+  // the keyboard while it is up.
+  const keyboardUp = useKeyboardVisible();
   return (
     <Modal
       visible={modalView !== null}
@@ -746,7 +750,7 @@ function MeetupProposalModal({
             accessibilityLabel="Close"
           />
           <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalKav}>
-            <Animated.View entering={SHEET_RISE} style={[styles.modalSheet, { paddingBottom: bottom + 20 }]}>
+            <Animated.View entering={SHEET_RISE} style={[styles.modalSheet, { paddingBottom: keyboardUp ? 12 : bottom + 20 }]}>
               <View style={styles.modalHandle} />
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Propose a Meetup</Text>

@@ -15,6 +15,7 @@ import {
     View,
 } from 'react-native';
 import { SHEET_RISE } from '@/components/ui/sheetMotion';
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
 import { Image } from 'expo-image';
 import Animated, {
     useAnimatedStyle,
@@ -53,6 +54,9 @@ export function CreateStoryModal({ visible, locationless, onClose, onPost }: Cre
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const { bottom } = useSafeAreaInsets();
+  // The keyboard covers the home indicator, so its inset is dead space above
+  // the keyboard while it is up.
+  const keyboardUp = useKeyboardVisible();
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
@@ -138,7 +142,7 @@ export function CreateStoryModal({ visible, locationless, onClose, onPost }: Cre
         <Pressable style={styles.createModalBackdrop} onPress={onClose} />
         <Animated.View
           entering={SHEET_RISE}
-          style={[styles.createModalSheet, { paddingBottom: bottom + 20 }, storyAnimStyle]}
+          style={[styles.createModalSheet, { paddingBottom: keyboardUp ? 12 : bottom + 20 }, storyAnimStyle]}
         >
           <GestureDetector gesture={drag}>
             <View style={styles.sheetGrab}>

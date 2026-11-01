@@ -12,6 +12,7 @@ import {
 import Animated from 'react-native-reanimated';
 
 import { SHEET_RISE } from '@/components/ui/sheetMotion';
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
@@ -66,6 +67,9 @@ export function PinNoteEditor({ visible, placeId, ...props }: Props) {
 function PinNoteForm({ placeTitle, note, onClose, onSave }: Omit<Props, 'visible' | 'placeId'>) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+  // The keyboard covers the home indicator, so its inset is dead space above
+  // the keyboard while it is up.
+  const keyboardUp = useKeyboardVisible();
   const { bottom } = useSafeAreaInsets();
   const [draft, setDraft] = useState(note ?? '');
 
@@ -91,7 +95,7 @@ function PinNoteForm({ placeTitle, note, onClose, onSave }: Omit<Props, 'visible
       >
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
 
-        <Animated.View entering={SHEET_RISE} style={[styles.sheet, { paddingBottom: bottom + 20 }]}>
+        <Animated.View entering={SHEET_RISE} style={[styles.sheet, { paddingBottom: keyboardUp ? 12 : bottom + 20 }]}>
           <View style={styles.header}>
             <View style={styles.headerText}>
               <Text style={styles.title} maxFontSizeMultiplier={MAX_SCALE_FIXED}>

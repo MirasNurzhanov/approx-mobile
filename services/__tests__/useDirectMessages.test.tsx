@@ -173,3 +173,18 @@ it('does not clear a draft before its sender is known', async () => {
   act(() => { expect(state.sendText('draft')).toBe(false); });
   expect(mockPost).not.toHaveBeenCalled(); expect(state.messages).toEqual([]);
 });
+
+it('a Swift sent live is fetched with its card instead of being dropped as empty', async () => {
+  await mount();
+  const card = { id: 7, caption: 'Sunset', thumbnail_url: 'https://x/p.jpg', author: { id: 2, username: 'amina' } };
+  mockGet.mockClear().mockResolvedValueOnce(page([
+    { ...raw(5), content: '', swift: card },
+    { ...raw(6), content: '', swift: null, swift_unavailable: true },
+  ]));
+  await act(async () => {
+    mockSocket.onMessage(JSON.stringify({ ...raw(5), content: '', swift_id: 7 }));
+  });
+  expect(mockGet).toHaveBeenCalledTimes(1);
+  expect(state.messages.find(m => m.id === '5')?.swift).toEqual(card);
+  expect(state.messages.find(m => m.id === '6')?.swiftUnavailable).toBe(true);
+});

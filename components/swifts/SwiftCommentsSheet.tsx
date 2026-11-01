@@ -21,7 +21,7 @@ import { IconClose, IconMore, IconTrash } from '@/components/ui/icons';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
-import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import {
   deleteSwiftComment,
   fetchSwiftComments,
@@ -51,16 +51,16 @@ import {
  *
  * ## Keyboard
  *
- * `KeyboardAvoidingView` with `padding` on iOS and `height` on Android, which
- * is the split that actually works: Android resizes the window itself when
- * `adjustResize` is set, so `padding` there double-counts and leaves a gap the
- * size of the keyboard.
+ * `KeyboardAvoidingView` with `height` on Android: Android resizes the window
+ * itself when `adjustResize` is set, so `padding` there double-counts and
+ * leaves a gap the size of the keyboard.
  *
- * On iOS the sheet is a `pageSheet`, which starts some 50pt below the top of
- * the screen. `KeyboardAvoidingView` measures itself against the sheet, not the
- * screen, so it fell short by exactly that gap and left the composer half under
- * the keyboard. The sheet's real top is measured and passed in as
- * `keyboardVerticalOffset`, which is what that prop is for.
+ * Except on iOS, where the sheet is a `pageSheet` starting some 50pt below the
+ * top of the screen. `KeyboardAvoidingView` measures itself against the sheet,
+ * not the screen, so it fell short by that gap and left the composer half
+ * under the keyboard; measuring the sheet instead caught it mid-slide and hid
+ * the composer entirely. The sheet's bottom edge is the screen's, though, so
+ * lifting by the keyboard's own height is exact — `useKeyboardHeight`.
  */
 
 interface Props {
@@ -115,16 +115,7 @@ function CommentsBody({
   const [sending, setSending] = useState(false);
   const { present, sheets } = useContentActions();
   const inputRef = useRef<TextInput | null>(null);
-  const keyboardUp = useKeyboardVisible();
-
-  // Where the sheet starts on screen — see the Keyboard note above.
-  const frameRef = useRef<View | null>(null);
-  const [sheetTop, setSheetTop] = useState(0);
-  const measureSheet = useCallback(() => {
-    frameRef.current?.measureInWindow((_x, y) => {
-      if (Number.isFinite(y)) setSheetTop(Math.max(0, y));
-    });
-  }, []);
+  const keyboardHeight = useKeyboardHeight();
 
   // Deliberately does not set 'loading' itself: the state already starts there,
   // so doing it here would be a synchronous setState on the mount path for a
@@ -230,13 +221,12 @@ function CommentsBody({
   }
 
   return (
-    <View ref={frameRef} style={styles.root} onLayout={measureSheet} collapsable={false}>
+    <View style={[styles.root, Platform.OS === 'ios' && { paddingBottom: keyboardHeight }]}>
       <KeyboardAvoidingView
         style={styles.root}
-        // See the component note: `padding` double-counts on Android, which
-        // resizes the window itself.
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? sheetTop : 0}
+        // See the component note: iOS lifts the wrapper above instead.
+        behavior="height"
+        enabled={Platform.OS === 'android'}
         accessibilityViewIsModal
       >
         {sheets}
@@ -308,7 +298,7 @@ function CommentsBody({
         )}
 
         {allowComments && (
-          <View style={[styles.composer, { paddingBottom: keyboardUp ? 10 : insets.bottom + 10 }]}>
+          <View style={[styles.composer, { paddingBottom: keyboardHeight > 0 ? 10 : insets.bottom + 10 }]}>
             <TextInput
               ref={inputRef}
               style={styles.input}

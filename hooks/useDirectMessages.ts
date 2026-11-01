@@ -85,6 +85,12 @@ export function useDirectMessages(otherId: string, currentUserId: number | null,
         return;
       }
       if (!raw.id) return;
+      // A shared Swift arrives live as a bare id: whether this reader may see
+      // its card is the server's to say, so fetch the page that carries it.
+      if (raw.swift_id && !raw.swift) {
+        void refresh();
+        return;
+      }
       const incoming = normaliseMessage(raw);
       if (!incoming.text && !incoming.image) return;
       setMessages(rows => mergeMessages(rows, [incoming]));

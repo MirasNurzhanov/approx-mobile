@@ -24,6 +24,7 @@ import { decodeStoryReply } from '@/services/storyReply';
 import { announce } from '@/hooks/useReduceMotion';
 import { useContentActions } from '@/components/ContentActions';
 import { ChatComposer } from '@/components/chat/ChatComposer';
+import { SharedSwiftCard } from '@/components/chat/SharedSwiftCard';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
 import { IconMore } from '@/components/ui/icons';
@@ -125,11 +126,25 @@ function MessagesHeader({
   );
 }
 
-/** One bubble: a story reply, a photo, or plain text. */
+/** One bubble: a shared Swift, a story reply, a photo, or plain text. */
 function MessageBubble({ item, isMine, onRetry }: { item: Message; isMine: boolean; onRetry: () => void }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
   const storyReply = decodeStoryReply(item.text);
+  // A shared Swift is the card itself, not text in a coloured bubble.
+  if (item.swift || item.swiftUnavailable) {
+    return (
+      <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
+        <View style={[styles.swiftMessage, isMine ? styles.swiftMessageMine : styles.swiftMessageTheirs]}>
+          <SharedSwiftCard swift={item.swift} />
+          {item.text ? (
+            <Text style={styles.swiftNote}>{item.text}</Text>
+          ) : null}
+          <Text style={[styles.bubbleTime, styles.bubbleTimeTheirs]}>{fmtTime(item.created_at)}</Text>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
       <View
@@ -498,6 +513,18 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     width: 210,
     height: 210,
     borderRadius: radius.m,
+  },
+
+  // Shared-Swift messages
+  swiftMessage: { gap: 4 },
+  swiftMessageMine: { alignItems: 'flex-end' },
+  swiftMessageTheirs: { alignItems: 'flex-start' },
+  swiftNote: {
+    fontFamily: fonts.body,
+    color: colors.t1,
+    fontSize: 15,
+    lineHeight: 21,
+    maxWidth: 240,
   },
 
   // Story-reply bubbles

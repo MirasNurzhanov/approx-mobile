@@ -18,6 +18,7 @@ import { Alert, AppState } from 'react-native';
 import type MapView from 'react-native-maps';
 import type { Region } from 'react-native-maps';
 
+import { MODAL_SETTLE_MS } from '@/components/PermissionPrimer';
 import { announce, useReduceMotion } from '@/hooks/useReduceMotion';
 import { startBackgroundLocationUpdates } from '@/services/backgroundLocation';
 import { atSharingPrecision, type Coordinates } from '@/services/location';
@@ -133,6 +134,9 @@ export interface MapLocation {
 export function useMapLocation(
   /** The primed permission request — see components/PermissionPrimer. */
   ensurePermission: (key: 'location') => Promise<boolean>,
+  /** False while another first-run sheet (the location disclosure) is up:
+   *  the primer must not open on top of it. See `MODAL_SETTLE_MS`. */
+  canPrompt = true,
 ): MapLocation {
   const reduceMotion = useReduceMotion();
   const focused = useIsFocused();
@@ -262,19 +266,22 @@ export function useMapLocation(
   // Prime the foreground request once, while the map is visible. Background
   // permission is still requested only by the existing explicit sharing control.
   useEffect(() => {
-    if (!screenActive || permissionPrompted.current) return;
-    permissionPrompted.current = true;
+    if (!screenActive || !canPrompt || permissionPrompted.current) return;
     let cancelled = false;
-    void ensurePermission('location').then(async granted => {
-      if (cancelled) return;
-      if (granted) setPermState('granted');
-      else {
-        const info = await checkPermission('location');
-        if (!cancelled) setPermState(info.state);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [screenActive, ensurePermission]);
+    // After the disclosure has finished closing, not while it fades.
+    const timer = setTimeout(() => {
+      permissionPrompted.current = true;
+      void ensurePermission('location').then(async granted => {
+        if (cancelled) return;
+        if (granted) setPermState('granted');
+        else {
+          const info = await checkPermission('location');
+          if (!cancelled) setPermState(info.state);
+        }
+      }).catch(() => {});
+    }, MODAL_SETTLE_MS);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [screenActive, canPrompt, ensurePermission]);
 
   // Tabs stay mounted. Stop the foreground watcher and drawing timer on blur,
   // background or revocation; the separately consented background task keeps

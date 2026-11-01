@@ -126,6 +126,18 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   pressed: { opacity: 0.7 },
 });
 
+/**
+ * How long to wait after one full-screen sheet closes before opening the next.
+ *
+ * Every first-run sheet is a `Modal`, and on iOS a modal presented while
+ * another is still fading out can land as an invisible window over the whole
+ * app: the screen underneath looks normal and takes no touches at all. A new
+ * account met exactly that — the location disclosure's "Got it" opened the
+ * notification primer mid-fade and the map froze under it. Longer than the
+ * fade, so the next sheet always starts from a settled screen.
+ */
+export const MODAL_SETTLE_MS = 600;
+
 export function usePermissionPrimer() {
   const { colors } = useTheme();
   const styles = makeStyles(colors);

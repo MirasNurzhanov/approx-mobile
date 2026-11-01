@@ -6,10 +6,12 @@ import * as Location from 'expo-location';
 import { useMapLocation, type MapLocation } from '../../hooks/useMapLocation';
 import { resetPositionSmoothing, setSmoothingActive, setSmoothingReduceMotion } from '../positionSmoothing';
 import type { PermissionState } from '../permissions';
+import { MODAL_SETTLE_MS } from '../../components/PermissionPrimer';
 
 let mockFocused = true;
 let mockPermission: PermissionState = 'granted';
 let mockReducedMotion = false;
+let mockCanPrompt = true;
 const mockEnsure = jest.fn();
 jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
 jest.mock('../../hooks/useReduceMotion', () => ({
@@ -52,7 +54,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 function Harness() {
-  latest = useMapLocation(mockEnsure);
+  latest = useMapLocation(mockEnsure, mockCanPrompt);
   const { mapRef } = latest;
   useEffect(() => { mapRef.current = nativeMap as never; }, [mapRef]);
   renders += 1;
@@ -81,6 +83,7 @@ beforeEach(() => {
   mockFocused = true;
   mockPermission = 'granted';
   mockReducedMotion = false;
+  mockCanPrompt = true;
   mockEnsure.mockReset().mockResolvedValue(true);
   AppState.currentState = 'active';
   jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
@@ -306,4 +309,20 @@ it('re-reads a still phone\'s fix before it is too old to report, and only while
   const reads = read.mock.calls.length;
   await act(async () => { jest.advanceTimersByTime(300_000); });
   expect(read).toHaveBeenCalledTimes(reads);
+});
+
+it('asks for location only after the disclosure is confirmed and has finished closing', async () => {
+  // Two first-run sheets opening over each other on iOS left a new account's
+  // map frozen under an invisible one.
+  mockCanPrompt = false;
+  await render();
+  await act(async () => { jest.advanceTimersByTime(5_000); });
+  expect(mockEnsure).not.toHaveBeenCalled();
+
+  mockCanPrompt = true;
+  await rerender();
+  await act(async () => { jest.advanceTimersByTime(MODAL_SETTLE_MS - 1); });
+  expect(mockEnsure).not.toHaveBeenCalled();
+  await act(async () => { jest.advanceTimersByTime(1); });
+  expect(mockEnsure).toHaveBeenCalledTimes(1);
 });

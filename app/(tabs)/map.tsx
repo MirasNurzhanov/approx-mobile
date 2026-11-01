@@ -14,7 +14,7 @@ import { StoryTutorialOverlay } from '@/components/tutorial/StoryTutorialOverlay
 import { useTheme } from '@/context/ThemeContext';
 import { useNavAlignedRight, useNavClearance } from '@/hooks/useNavMetrics';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
-import { usePermissionPrimer } from '@/components/PermissionPrimer';
+import { MODAL_SETTLE_MS, usePermissionPrimer } from '@/components/PermissionPrimer';
 import { useLocationDisclosure } from '@/services/locationDisclosure';
 import {
   markNotificationsOffered,
@@ -90,6 +90,9 @@ export default function MapScreen() {
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
+  // Signed-in root shows "who sees you on the map" first; every question the
+  // map asks waits for it — see `MODAL_SETTLE_MS`.
+  const { acknowledged: locationDisclosed } = useLocationDisclosure();
 
   // The device's own position, the permission behind it, and the camera that
   // follows it — see hooks/useMapLocation. Called before every hook that reads
@@ -99,22 +102,25 @@ export default function MapScreen() {
     permState, setPermState,
     locateState, handleLocatePress, stopFollowing, zoomToCluster,
     zoomDelta, mapH, onMapLayout, onRegionChangeComplete,
-  } = useMapLocation(ensurePermission);
+  } = useMapLocation(ensurePermission, locationDisclosed === true);
 
   // Notifications, asked once per install and only after the "being on the
   // map" sheet: without this a new install never registers for push at all.
   // See services/notifications.ts for the conditions. `permState` re-runs this
   // once the location question has been answered, which it waits for.
-  const { acknowledged: locationDisclosed } = useLocationDisclosure();
   useEffect(() => {
-    if (locationDisclosed !== true) return;
+    // After the location question too: its primer is a sheet of its own, and
+    // two opening back to back is the overlap `MODAL_SETTLE_MS` exists for.
+    if (locationDisclosed !== true || permState === null) return;
     let cancelled = false;
-    (async () => {
-      if (!(await shouldOfferNotifications()) || cancelled) return;
-      await markNotificationsOffered();
-      if (await ensurePermission('notifications')) await registerForPushNotifications();
-    })().catch(() => {});
-    return () => { cancelled = true; };
+    const timer = setTimeout(() => {
+      (async () => {
+        if (!(await shouldOfferNotifications()) || cancelled) return;
+        await markNotificationsOffered();
+        if (await ensurePermission('notifications')) await registerForPushNotifications();
+      })().catch(() => {});
+    }, MODAL_SETTLE_MS);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [locationDisclosed, permState, ensurePermission]);
 
   // Everyone else, and the poll that keeps them true — see hooks/useMapData.

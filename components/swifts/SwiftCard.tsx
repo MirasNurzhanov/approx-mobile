@@ -35,7 +35,7 @@ import { useMusicBed } from '@/hooks/useMusicBed';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { fonts, type as typography } from '@/constants/theme';
 import { playedMs } from '@/services/swiftDraft';
-import type { Swift } from '@/services/swifts';
+import { fetchSwift, type Swift } from '@/services/swifts';
 
 /**
  * One Swift, full-bleed.
@@ -135,8 +135,30 @@ function SwiftCardImpl({
   /** Bumped by Retry, which is what re-runs the source and clears the error. */
   const [attempt, setAttempt] = useState(0);
 
+  /** A newer address for the video than the row's. Video links are signed
+   *  and expire, and a feed row can be older than its link — the viewer got
+   *  there late, or came back to it. */
+  const [freshUrl, setFreshUrl] = useState<string | null>(null);
+  /** Whether the one silent re-fetch on a failed load has been spent. */
+  const refetched = useRef(false);
+  /** Fetching that newer link. The player idles meanwhile, without the error. */
+  const [recovering, setRecovering] = useState(false);
+
   // The conditional source. `null` keeps the player idle — see the note above.
-  const source = preload && !failed ? swift.video_url : null;
+  const source = preload && !failed && !recovering ? (freshUrl ?? swift.video_url) : null;
+
+  /** Ask for the Swift again, for a link that has not expired, and play that. */
+  const reload = useCallback(() => {
+    setFailed(false);
+    setRecovering(true);
+    fetchSwift(swift.id)
+      .then((fresh) => {
+        if (fresh.video_url) setFreshUrl(fresh.video_url);
+        setAttempt((n) => n + 1);
+      })
+      .catch(() => setFailed(true))
+      .finally(() => setRecovering(false));
+  }, [swift.id]);
 
   // R2 serves the raw upload; nothing trims it server-side any more (see
   // services/swifts.ts). `loop` is off and the trim is looped by hand below,
@@ -203,7 +225,15 @@ function SwiftCardImpl({
   // effect re-runs on every status change to re-decide something it was already
   // told once.
   useEventListener(player, 'statusChange', ({ status, error }) => {
-    if (status === 'error' || error) setFailed(true);
+    if (status !== 'error' && !error) return;
+    // Most likely an expired link: fetch a fresh one once, quietly, before
+    // telling the viewer anything.
+    if (!refetched.current) {
+      refetched.current = true;
+      reload();
+      return;
+    }
+    setFailed(true);
   });
 
   // The buffering state, separately and as a *value* rather than an event —
@@ -212,7 +242,7 @@ function SwiftCardImpl({
   // frame; this is for the case the poster cannot express, which is a video
   // that is taking long enough that the still looks like a stuck feed.
   const { status } = useEvent(player, 'statusChange', { status: player.status });
-  const buffering = isActive && !failed && source !== null && status === 'loading';
+  const buffering = isActive && !failed && (recovering || (source !== null && status === 'loading'));
 
   const { currentTime } = useEvent(player, 'timeUpdate', {
     currentTime: player.currentTime,
@@ -345,8 +375,7 @@ function SwiftCardImpl({
     : swift.audio_title || 'Original audio';
 
   function retry() {
-    setFailed(false);
-    setAttempt((n) => n + 1);
+    reload();
   }
 
   // ── Rail handlers ───────────────────────────────────────────────────────────

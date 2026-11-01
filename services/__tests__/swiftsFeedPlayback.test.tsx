@@ -24,6 +24,7 @@ const mockApi = {
   recordSwiftView: jest.fn(),
   setSwiftLiked: jest.fn(),
   setSwiftReposted: jest.fn(),
+  fetchSwift: jest.fn(),
 };
 
 jest.mock('../swifts', () => ({
@@ -34,6 +35,7 @@ jest.mock('../swifts', () => ({
   recordSwiftView: (...a: unknown[]) => mockApi.recordSwiftView(...a),
   setSwiftLiked: (...a: unknown[]) => mockApi.setSwiftLiked(...a),
   setSwiftReposted: (...a: unknown[]) => mockApi.setSwiftReposted(...a),
+  fetchSwift: (...a: unknown[]) => mockApi.fetchSwift(...a),
   fetchSwiftComments: jest.fn(() => Promise.resolve({ count: 0, results: [] })),
   postSwiftComment: jest.fn(),
   deleteSwiftComment: jest.fn(),
@@ -553,5 +555,41 @@ describe('a Swift posted after the feed loaded shows up', () => {
 
     expect(mockApi.fetchSwiftFeed).toHaveBeenCalledTimes(2);
     expect(cards(tree)[0].props.swift.id).toBe(99);
+  });
+});
+
+describe('an expired video link', () => {
+  /** The newest `statusChange` listener registered on this player. */
+  function statusListener(player: unknown) {
+    const { useEventListener } = jest.requireMock('expo') as { useEventListener: jest.Mock };
+    return useEventListener.mock.calls
+      .filter(([p, name]) => p === player && name === 'statusChange')
+      .map(([, , cb]) => cb)
+      .pop();
+  }
+
+  const errorShown = (tree: ReactTestRenderer) =>
+    tree.root.findAll((n) => n.props?.children === 'This Swift wouldn’t play').length > 0;
+
+  it('is replaced by a fresh one without showing an error', async () => {
+    const tree = await renderFeed();
+    mockApi.fetchSwift.mockResolvedValue(makeSwift(1, { video_url: 'https://fresh.example/1.mov' }));
+
+    await act(async () => { statusListener(mockPlayers[0])?.({ status: 'error', error: { message: '403' } }); });
+
+    expect(mockApi.fetchSwift).toHaveBeenCalledWith(1);
+    expect(mockPlayers[0].source).toBe('https://fresh.example/1.mov');
+    expect(errorShown(tree)).toBe(false);
+  });
+
+  it('shows the error if the fresh one fails too', async () => {
+    const tree = await renderFeed();
+    mockApi.fetchSwift.mockResolvedValue(makeSwift(1, { video_url: 'https://fresh.example/1.mov' }));
+
+    await act(async () => { statusListener(mockPlayers[0])?.({ status: 'error' }); });
+    await act(async () => { statusListener(mockPlayers[0])?.({ status: 'error' }); });
+
+    expect(mockApi.fetchSwift).toHaveBeenCalledTimes(1);
+    expect(errorShown(tree)).toBe(true);
   });
 });

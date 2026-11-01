@@ -19,14 +19,17 @@ import Animated from 'react-native-reanimated';
 import { SHEET_RISE } from '@/components/ui/sheetMotion';
 import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '@/services/api';
+import { runBusy } from '@/services/busy';
 import { clubsApi, type Club, type ClubMember, type ClubRole } from '@/services/clubs';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
+import { RenameClubSheet } from '@/components/clubs/RenameClubSheet';
 import { fonts, radius } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
@@ -95,24 +98,43 @@ const _clubCache = new Map<number, { club: Club; members: ClubMember[] }>();
 // ─── Sections ─────────────────────────────────────────────────────────────────
 
 /** Emblem, name, what it is about, and the way into its chat. */
-function ClubHero({ club, memberCount, myRole, isMember, onOpenChat }: {
+function ClubHero({ club, memberCount, myRole, isMember, onOpenChat, onEditEmblem, emblemBusy }: {
   club: Club;
   memberCount: number;
   myRole: ClubRole | null | undefined;
   isMember: boolean;
   onOpenChat: () => void;
+  /** Owners only: the emblem changes the way a profile photo does. */
+  onEditEmblem?: () => void;
+  emblemBusy?: boolean;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+  const emblem = club.emblem ? (
+    <Image source={{ uri: club.emblem }} style={styles.emblem} />
+  ) : (
+    <View style={styles.emblemFallback}>
+      <Text style={styles.emblemInitial}>{club.name?.charAt(0)?.toUpperCase() ?? '?'}</Text>
+    </View>
+  );
   return (
     <View style={styles.hero}>
-      {club.emblem ? (
-        <Image source={{ uri: club.emblem }} style={styles.emblem} />
-      ) : (
-        <View style={styles.emblemFallback}>
-          <Text style={styles.emblemInitial}>{club.name?.charAt(0)?.toUpperCase() ?? '?'}</Text>
-        </View>
-      )}
+      {onEditEmblem ? (
+        <Pressable
+          onPress={onEditEmblem}
+          disabled={emblemBusy}
+          style={({ pressed }) => [styles.emblemWrap, pressed && { opacity: 0.75 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Change the club icon"
+        >
+          {emblem}
+          <View style={styles.emblemBadge}>
+            {emblemBusy
+              ? <ActivityIndicator size="small" color={colors.bg} />
+              : <Ionicons name="camera" size={15} color={colors.bg} />}
+          </View>
+        </Pressable>
+      ) : emblem}
 
       <Text style={styles.clubName}>{club.name ?? ''}</Text>
 
@@ -574,13 +596,58 @@ function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: strin
     );
   }
 
-  // ── Club manage (creator header button) ───────────────────────────────────
+  // ── Club manage (owners' header button) ───────────────────────────────────
+  // Everything an owner changes about the club itself lives here, deleting
+  // included — it used to be a red button at the foot of the page, one stray
+  // tap from the end of the club.
   function openClubManage() {
     if (!club) return;
-    Alert.alert(club.name, undefined, [
-      { text: 'Delete Club', style: 'destructive', onPress: handleDeleteClub },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    const options: any[] = [
+      { text: 'Change icon', onPress: changeEmblem },
+      { text: 'Rename club', onPress: () => setRenaming(true) },
+    ];
+    if (isCreator) options.push({ text: 'Delete club', style: 'destructive', onPress: handleDeleteClub });
+    else options.push({ text: 'Leave club', style: 'destructive', onPress: handleLeave });
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(club.name, undefined, options);
+  }
+
+  // ── Rename / icon ─────────────────────────────────────────────────────────
+  const [renaming, setRenaming] = useState(false);
+  const [savingName, setSavingName] = useState(false);
+  const [emblemBusy, setEmblemBusy] = useState(false);
+
+  async function saveName(name: string) {
+    setSavingName(true);
+    await runBusy(async () => {
+      const { data } = await clubsApi.update(clubId, { name });
+      setClub((prev) => (prev ? { ...prev, name: data.name } : prev));
+      setRenaming(false);
+    }, () => setSavingName(false)).catch((e: any) => {
+      const body = e?.response?.data;
+      Alert.alert('Not renamed', body?.name?.[0] ?? body?.detail ?? 'Could not rename the club.');
+    });
+  }
+
+  async function changeEmblem() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const { uri, mimeType } = result.assets[0];
+    const filename = uri.split('/').pop() ?? 'emblem.jpg';
+    const form = new FormData();
+    form.append('emblem', { uri, name: filename, type: mimeType ?? 'image/jpeg' } as any);
+    setEmblemBusy(true);
+    await runBusy(async () => {
+      const { data } = await clubsApi.update(clubId, form);
+      setClub((prev) => (prev ? { ...prev, emblem: data.emblem } : prev));
+    }, () => setEmblemBusy(false)).catch((e: any) => {
+      Alert.alert('Icon not changed', e?.response?.data?.detail ?? e?.response?.data?.[0] ?? 'Could not upload the icon.');
+    });
   }
 
   // ── Member management ─────────────────────────────────────────────────────
@@ -667,7 +734,7 @@ function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: strin
         <View style={styles.headerActions}>
           {actioning ? (
             <ActivityIndicator color={colors.teal} size="small" />
-          ) : isCreator ? (
+          ) : canManage ? (
             <Button label="Manage" variant="ghost" size="sm" onPress={openClubManage} />
           ) : isMember ? (
             <Button label="Leave" variant="ghost" size="sm" onPress={handleLeave} />
@@ -687,6 +754,8 @@ function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: strin
           memberCount={members.length || club.member_count}
           myRole={myRole}
           isMember={isMember}
+          onEditEmblem={canManage ? changeEmblem : undefined}
+          emblemBusy={emblemBusy}
           onOpenChat={() =>
             router.push({
               pathname: '/clubs/[id]/chat',
@@ -709,15 +778,16 @@ function ClubDetail({ clubId, fromCreate }: { clubId: number; fromCreate?: strin
           onMemberMenu={openMemberMenu}
         />
 
-        {/* Creator: Delete Club danger section */}
-        {isCreator && (
-          <View style={styles.dangerZone}>
-            <Button label="Delete Club" variant="danger" size="md" fullWidth onPress={handleDeleteClub} />
-          </View>
-        )}
       </ScrollView>
 
       <InviteModal {...invite.modalProps} bottom={bottom} />
+      <RenameClubSheet
+        visible={renaming}
+        current={club.name ?? ''}
+        saving={savingName}
+        onCancel={() => setRenaming(false)}
+        onSave={(name) => { void saveName(name); }}
+      />
     </View>
   );
 }
@@ -754,6 +824,12 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   chatBtnText: { fontFamily: fonts.body, fontSize: 15, fontWeight: '700', color: colors.bg },
 
   emblem: { width: 88, height: 88, borderRadius: 44, marginBottom: 14 },
+  emblemWrap: { alignItems: 'center' },
+  emblemBadge: {
+    position: 'absolute', right: 0, bottom: 12, width: 30, height: 30, borderRadius: 15,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.teal, borderWidth: 2, borderColor: colors.bg,
+  },
   emblemFallback: {
     width: 88,
     height: 88,
@@ -856,7 +932,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   memberName: { fontFamily: fonts.body, fontSize: 15, fontWeight: '600', color: colors.t1 },
   memberRole: { fontFamily: fonts.body, fontSize: 12, color: colors.t3, marginTop: 2 },
 
-  dangerZone: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40 },
 
   emptyText: { fontFamily: fonts.body, fontSize: 14, color: colors.t3, textAlign: 'center', paddingVertical: 24 },
   errorText: { fontFamily: fonts.body, fontSize: 15, color: colors.t3, marginBottom: 16 },

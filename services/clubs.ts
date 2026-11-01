@@ -138,6 +138,11 @@ export const clubsApi = {
   kick:         (clubId: number, userId: number) => api.delete(`/api/clubs/${clubId}/kick/${userId}/`),
   promoteOwner: (clubId: number, userId: number) => api.patch(`/api/clubs/${clubId}/promote-owner/${userId}/`),
   deleteClub:   (clubId: number)                 => api.delete(`/api/clubs/${clubId}/`),
+  /** Rename, or change the emblem (FormData with `emblem`). Owners only. */
+  update:       (clubId: number, data: FormData | { name: string }) => api.patch<Club>(
+    `/api/clubs/${clubId}/`, data,
+    data instanceof FormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : undefined,
+  ),
   invite:       (clubId: number, userId: number) => api.post(`/api/clubs/${clubId}/invite/${userId}/`),
 
   /** Where the server thinks this user is, from stored boundaries only. Cheap

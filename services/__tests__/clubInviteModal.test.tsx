@@ -60,7 +60,7 @@ const pressableWithText = (label: string, within?: ReactTestInstance): ReactTest
   return node ?? undefined;
 };
 /** A result row's Invite button, inside the sheet — not the section header's. */
-const rowInviteButton = () => pressableWithText('Invite', tree.root.findByType(Modal));
+const rowInviteButton = () => pressableWithText('Invite', tree.root.findAllByType(Modal).find((m) => m.props.visible)!);
 const searchField = () => tree.root.findAllByType(TextInput).find((n) => n.props.placeholder === 'Search by username…')!;
 
 async function renderClub() {
@@ -95,7 +95,7 @@ afterEach(() => {
 it('lifts the sheet above the keyboard', async () => {
   await renderClub();
   await openInvite();
-  const modal = tree.root.findByType(Modal);
+  const modal = tree.root.findAllByType(Modal).find((m) => m.props.visible)!;
   expect(modal.props.visible).toBe(true);
   const avoider = modal.findByType(KeyboardAvoidingView);
   expect(avoider.props.behavior).toBeDefined();

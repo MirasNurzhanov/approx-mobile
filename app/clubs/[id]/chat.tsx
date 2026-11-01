@@ -40,7 +40,7 @@ import {
 import { PlacePicker } from '@/components/map/PlacePicker';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import {
-  MAX_PINS, pinIdFor, pinMeetup, unpinPlace, useIsPinned,
+  pinIdFor, pinMeetup, unpinPlace, useIsPinned,
 } from '@/services/pinnedPlaces';
 import { useContentActions } from '@/components/ContentActions';
 import { MeetupResponseBar, MeetupResponsesSheet } from '@/components/clubs/MeetupResponses';
@@ -331,40 +331,12 @@ function ProposalCard({
   // Members answer "I'm in" or "Nope", and the club sees who — see
   // components/clubs/MeetupResponses. "I'm in" on an approved meetup with a
   // place also pins it to your own map (services/pinnedPlaces), and taking it
-  // back unpins it. The proposer is not asked; they keep the plain pin.
+  // back unpins it. The proposer is not asked.
   const going = useIsPinned('meetup', proposal.id);
-  const [saving, setSaving] = useState(false);
   const canAttend =
     proposal.status === 'approved'
     && typeof proposal.latitude === 'number'
     && typeof proposal.longitude === 'number';
-
-  function toggleGoing() {
-    if (saving || !canAttend) return;
-    setSaving(true);
-    void runBusy(async () => {
-      if (going) {
-        await unpinPlace(pinIdFor('meetup', proposal.id));
-        return;
-      }
-      const result = await pinMeetup({
-        meetupId: proposal.id,
-        latitude: proposal.latitude as number,
-        longitude: proposal.longitude as number,
-        title: proposal.title,
-        clubName,
-        locationName: proposal.location_name,
-        eventDatetime: proposal.event_datetime,
-        expiresAt: proposal.expires_at,
-      });
-      if (!result.ok && result.reason === 'limit') {
-        Alert.alert(
-          'Your map is full',
-          `You can keep ${MAX_PINS} pinned places. Remove one to add this meetup.`,
-        );
-      }
-    }, () => setSaving(false));
-  }
 
   const [answering, setAnswering] = useState(false);
   const canAnswer = !viewerIsProposer
@@ -462,40 +434,6 @@ function ProposalCard({
         />
       )}
 
-      {/* The proposer's own pin — approved meetups with somewhere to be */}
-      {viewerIsProposer && canAttend && (
-        <View style={cardStyles.actions}>
-          <Pressable
-            style={[cardStyles.goingBtn, going && cardStyles.goingBtnOn, saving && cardStyles.actionBtnDisabled]}
-            onPress={toggleGoing}
-            disabled={saving}
-            accessibilityRole="button"
-            accessibilityState={{ selected: going, busy: saving }}
-            accessibilityLabel={
-              going
-                ? 'Going. Tap to remove this meetup from your map.'
-                : 'I am going. Pins this meetup to your map.'
-            }
-            accessibilityHint="Saved to your own map only — the club is not told."
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={colors.teal} />
-            ) : (
-              <>
-                <Ionicons
-                  name={going ? 'bookmark' : 'bookmark-outline'}
-                  size={14}
-                  color={going ? colors.teal : colors.t2}
-                />
-                <Text style={[cardStyles.goingBtnText, going && cardStyles.goingBtnTextOn]}>
-                  {going ? 'Going · pinned to your map' : "I'm going"}
-                </Text>
-              </>
-            )}
-          </Pressable>
-        </View>
-      )}
-
       {/* Owner actions — pending only */}
       {viewerIsOwner && proposal.status === 'pending' && (
         <View style={cardStyles.actions}>
@@ -554,21 +492,6 @@ const makeCardStyles = (colors: ColorPalette) => StyleSheet.create({
   desc: { fontFamily: fonts.body, fontSize: 13, color: colors.t2, lineHeight: 19, marginTop: 4 },
   proposer: { fontFamily: fonts.body, fontSize: 11, color: colors.t3, marginTop: 6 },
 
-  goingBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: radius.m,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface2,
-  },
-  goingBtnOn: { borderColor: colors.tealLine, backgroundColor: colors.tealTint },
-  goingBtnText: { fontFamily: fonts.body, fontSize: 13, fontWeight: '600', color: colors.t2 },
-  goingBtnTextOn: { color: colors.teal },
   actions: {
     flexDirection: 'row',
     gap: 10,

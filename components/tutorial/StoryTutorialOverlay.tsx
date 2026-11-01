@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -40,7 +40,12 @@ function scrimPath(width: number, height: number, cx: number, cy: number, r: num
   return `${outer} ${hole}`;
 }
 
-export function StoryTutorialOverlay({ onDismiss }: { onDismiss: () => void }) {
+export function StoryTutorialOverlay({ onDismiss, onPostStory }: {
+  onDismiss: () => void;
+  /** The spotlight itself is the gesture's shortcut: tapping it opens the
+   *  composer, so the first story is one tap away rather than a lesson. */
+  onPostStory: () => void;
+}) {
   const { width, height } = useWindowDimensions();
   const { top } = useSafeAreaInsets();
   // Lifts the panel clear of whichever nav is drawn. "Got it" used to sit at
@@ -91,7 +96,7 @@ export function StoryTutorialOverlay({ onDismiss }: { onDismiss: () => void }) {
       style={[StyleSheet.absoluteFill, styles.root]}
       accessible
       accessibilityViewIsModal
-      accessibilityLabel="Press and hold anywhere on the map for 2 seconds to post a story"
+      accessibilityLabel="Tap the circle to post a story. Later, press and hold anywhere on the map for 2 seconds."
     >
       {/* The scrim, with a circular hole punched over the centre of the map
           so the surface being taught is visible through it. */}
@@ -103,6 +108,16 @@ export function StoryTutorialOverlay({ onDismiss }: { onDismiss: () => void }) {
         />
       </Svg>
 
+      <Pressable
+        onPress={onPostStory}
+        style={{
+          position: 'absolute', left: cx - holeR, top: cy - holeR,
+          width: holeR * 2, height: holeR * 2, borderRadius: holeR,
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Post a story"
+      />
+
       <Animated.Text
         style={[styles.finger, fingerStyle, { top: cy - holeR - 56, left: cx - 22 }]}
         importantForAccessibility="no"
@@ -112,7 +127,8 @@ export function StoryTutorialOverlay({ onDismiss }: { onDismiss: () => void }) {
 
       <View style={[styles.panel, { paddingBottom: navPad }]}>
         <Text style={styles.text}>
-          Press and hold anywhere on the map for 2 seconds to post a story
+          Tap the circle to post a story. Later, press and hold anywhere on the
+          map for 2 seconds.
         </Text>
         <Button label="Got it" onPress={onDismiss} size="lg" fullWidth />
       </View>

@@ -109,6 +109,9 @@ export default function MapScreen() {
   // map" sheet: without this a new install never registers for push at all.
   // See services/notifications.ts for the conditions. `permState` re-runs this
   // once the location question has been answered, which it waits for.
+  /** Location and notifications have both been asked (or were long ago), so
+   *  the story tutorial may follow: the questions come first. */
+  const [firstRunAsked, setFirstRunAsked] = useState(false);
   useEffect(() => {
     // After the location question too: its primer is a sheet of its own, and
     // two opening back to back is the overlap `MODAL_SETTLE_MS` exists for.
@@ -119,7 +122,7 @@ export default function MapScreen() {
         if (!(await shouldOfferNotifications()) || cancelled) return;
         await markNotificationsOffered();
         if (await ensurePermission('notifications')) await registerForPushNotifications();
-      })().catch(() => {});
+      })().catch(() => {}).finally(() => setFirstRunAsked(true));
     }, MODAL_SETTLE_MS);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [locationDisclosed, permState, ensurePermission]);
@@ -462,8 +465,11 @@ export default function MapScreen() {
         />
       )}
 
-      {mapVisible && showStoryTutorial && locationDisclosed === true && (
-        <StoryTutorialOverlay onDismiss={dismissStoryTutorial} />
+      {mapVisible && showStoryTutorial && firstRunAsked && (
+        <StoryTutorialOverlay
+          onDismiss={dismissStoryTutorial}
+          onPostStory={() => { dismissStoryTutorial(); openComposerHere(); }}
+        />
       )}
 
       {/* What being on the map means, before anything is sent or asked. Here

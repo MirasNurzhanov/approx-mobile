@@ -15,6 +15,7 @@ import {
     View,
 } from 'react-native';
 import { SHEET_RISE } from '@/components/ui/sheetMotion';
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
 import { Image } from 'expo-image';
 import Animated, {
@@ -57,6 +58,12 @@ export function CreateStoryModal({ visible, locationless, onClose, onPost }: Cre
   // The keyboard covers the home indicator, so its inset is dead space above
   // the keyboard while it is up.
   const keyboardUp = useKeyboardVisible();
+  // On iOS the sheet is lifted by the keyboard's own height rather than by
+  // KeyboardAvoidingView: the caption autofocuses, so the keyboard arrives
+  // while the sheet is still rising, and KAV measured it mid-slide and left it
+  // under the keyboard. This modal fills the screen, so the keyboard's height
+  // is exactly the lift — the fix SwiftCommentsSheet uses.
+  const keyboardHeight = useKeyboardHeight();
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
@@ -138,7 +145,12 @@ export function CreateStoryModal({ visible, locationless, onClose, onPost }: Cre
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1, justifyContent: 'flex-end' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} accessibilityViewIsModal>
+      <KeyboardAvoidingView
+        style={{ flex: 1, justifyContent: 'flex-end', paddingBottom: Platform.OS === 'ios' ? keyboardHeight : 0 }}
+        behavior="height"
+        enabled={Platform.OS === 'android'}
+        accessibilityViewIsModal
+      >
         <Pressable style={styles.createModalBackdrop} onPress={onClose} />
         <Animated.View
           entering={SHEET_RISE}

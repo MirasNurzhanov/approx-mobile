@@ -3,7 +3,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { Text, View } from 'react-native';
 import CreatorSwiftsScreen from '../../../app/swifts/user/[id]';
 import { api } from '../../../services/api';
-import { SwiftProfileSection, SwiftProfileSectionView, SwiftProfileTile } from '../SwiftProfileSection';
+import { SwiftCreatorActions, SwiftProfileSection, SwiftProfileSectionView, SwiftProfileTile } from '../SwiftProfileSection';
 import { useCreatorSwifts } from '../useCreatorSwifts';
 import { hiddenProfileMessage, profileDetailsHidden } from '../profilePrivacy';
 import { creatorSwiftLabel, fetchCreatorSwifts } from '../../../services/swiftCreator';
@@ -75,19 +75,27 @@ it('never requests or renders a creator grid without profile permission', async 
   expect(renderer!.toJSON()).toBeNull();
 });
 
-it('shows owner review and audience labels without claiming unapproved uploads are published', async () => {
-  fetchMock.mockResolvedValue({ count: 3, results: [
+it('shows owner review and audience labels without claiming unapproved uploads are published', () => {
+  const tiles = [
     video(1, { review_state: 'reviewing' }), video(2, { review_state: 'needs_review' }),
     video(3, { visibility: 'private' }),
-  ] });
-  await act(async () => { renderer = create(<SwiftProfileSection creatorId={22} canView isOwner ghostMode />); });
+  ];
+  act(() => { renderer = create(<View>{tiles.map((t) => <SwiftProfileTile key={t.id} swift={t} />)}</View>); });
   const output = JSON.stringify(renderer!.toJSON());
   expect(output).toContain('Being reviewed');
   expect(output).toContain('Awaiting review');
   expect(output).toContain('Only me');
-  expect(output).toContain('Your Swifts are hidden from others while Ghost Mode is on.');
-  act(() => renderer!.root.findByProps({ accessibilityLabel: 'Swift analytics' }).props.onPress());
-  expect(mockPush).toHaveBeenCalledWith('/swifts/analytics');
+});
+
+it('puts one My Swifts door on the owner profile instead of the gallery', async () => {
+  fetchMock.mockResolvedValue({ count: 2, results: [video(1), video(2)] });
+  await act(async () => { renderer = create(<SwiftProfileSection creatorId={22} canView isOwner ghostMode />); });
+  const output = JSON.stringify(renderer!.toJSON());
+  expect(output).toContain('2 Swifts');
+  expect(output).toContain('Hidden from others while Ghost Mode is on.');
+  expect(renderer!.root.findAllByProps({ testID: 'creator-swift-1' })).toHaveLength(0);
+  act(() => renderer!.root.findByProps({ testID: 'my-swifts-entry' }).props.onPress());
+  expect(mockPush).toHaveBeenCalledWith({ pathname: '/swifts/user/[id]', params: { id: 22 } });
 });
 
 it('links a visible tile to its Swift detail without passing cached content or coordinates', () => {
@@ -96,20 +104,22 @@ it('links a visible tile to its Swift detail without passing cached content or c
   expect(mockPush).toHaveBeenCalledWith({ pathname: '/swifts/[id]', params: { id: 1 } });
 });
 
-it('renders the owner empty state and upload entry', async () => {
-  fetchMock.mockResolvedValue({ count: 0, results: [] });
-  await act(async () => { renderer = create(<SwiftProfileSection creatorId={22} canView isOwner />); });
-  expect(JSON.stringify(renderer!.toJSON())).toContain('Your first Swift starts here');
+it('offers analytics, upload and the saved shortlist from the owner actions', () => {
+  act(() => { renderer = create(<SwiftCreatorActions />); });
+  act(() => renderer!.root.findByProps({ accessibilityLabel: 'Swift analytics' }).props.onPress());
+  expect(mockPush).toHaveBeenCalledWith('/swifts/analytics');
   act(() => renderer!.root.findByProps({ accessibilityLabel: 'Upload a Swift' }).props.onPress());
   expect(mockPush).toHaveBeenCalledWith('/swifts/compose');
+  act(() => renderer!.root.findByProps({ testID: 'swift-saved-link' }).props.onPress());
+  expect(mockPush).toHaveBeenCalledWith('/swifts/saved');
 });
 
 it('shows one author on a profile and keeps the saved shortlist off it', async () => {
-  // Saving from the feed used to land other people's videos on your own
-  // profile, because the shortlist was a tab inside this gallery. It is a link
-  // to its own screen now, and the gallery is only ever the creator's uploads.
+  // Saving from the feed used to land other people's videos on a profile,
+  // because the shortlist was a tab inside this gallery. It is a link to its
+  // own screen now, and the gallery is only ever the creator's uploads.
   fetchMock.mockResolvedValue({ count: 2, results: [video(1), video(2)] });
-  await act(async () => { renderer = create(<SwiftProfileSection creatorId={22} canView isOwner />); });
+  await act(async () => { renderer = create(<SwiftProfileSection creatorId={22} canView />); });
 
   const rendered = JSON.stringify(renderer!.toJSON());
   expect(rendered).not.toContain('Nothing saved yet');
@@ -120,9 +130,6 @@ it('shows one author on a profile and keeps the saved shortlist off it', async (
   expect(jest.mocked(api.get)).not.toHaveBeenCalledWith('/api/swifts/saved/', expect.anything());
   expect(renderer!.root.findByProps({ testID: 'creator-swift-1' })).toBeDefined();
   expect(renderer!.root.findByProps({ testID: 'creator-swift-2' })).toBeDefined();
-
-  act(() => renderer!.root.findByProps({ testID: 'swift-saved-link' }).props.onPress());
-  expect(mockPush).toHaveBeenCalledWith('/swifts/saved');
 });
 
 it("offers no saved shortlist on somebody else's profile", async () => {
@@ -138,11 +145,11 @@ it('shares one request between the owner count and the gallery after profile ver
   await act(async () => { renderer = create(<OwnerProfileHarness enabled={false} />); });
   expect(fetchMock).not.toHaveBeenCalled();
   await act(async () => { renderer!.update(<OwnerProfileHarness />); });
-  expect(JSON.stringify(renderer!.toJSON())).not.toContain('Your first Swift starts here');
+  expect(JSON.stringify(renderer!.toJSON())).toContain('Loading…');
   await act(async () => { page.resolve({ count: 7, results: [video()] }); });
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(renderer!.root.findByProps({ testID: 'owner-swift-count' }).props.children).toBe(7);
-  expect(renderer!.root.findByProps({ testID: 'creator-swift-1' })).toBeDefined();
+  expect(JSON.stringify(renderer!.toJSON())).toContain('7 Swifts');
 });
 
 it('distinguishes failed uploads and suppresses owner-only status labels for other viewers', () => {

@@ -339,39 +339,24 @@ export default function ProfileScreen() {
 
         {profile && profileVerified && <SwiftProfileSectionView creatorId={profile.id} canView isOwner ghostMode={profile.ghost_mode} refreshKey={swiftRefreshKey} mine={mine} />}
 
-        {/* Interests, grouped the same way the pickers group them. A profile
-            with thirty picks used to be one undifferentiated wall of chips;
-            the headings are what let someone see at a glance that you are
-            mostly sport, or mostly music. */}
+        {/* Interests in one wrapping block, ordered by category, each icon in
+            its category's colour. A heading per category stacked into a tall
+            column whenever somebody had one or two picks in each; the colour
+            still shows at a glance that you are mostly sport, or mostly music. */}
         {interests.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>INTERESTS</Text>
-            {interestSections.map((group, index) => (
-              <View
-                key={group.key || 'more'}
-                style={index > 0 ? styles.interestGroup : undefined}
-              >
-                {/* Only worth a heading when there is more than one — a single
-                    group would just be the word "INTERESTS" said twice. */}
-                {interestSections.length > 1 && (
-                  <View style={styles.interestGroupHeader}>
-                    <Ionicons name={group.icon} size={13} color={group.color} />
-                    <Text style={styles.interestGroupLabel}>{group.label}</Text>
-                  </View>
-                )}
-                <View style={styles.chipWrap}>
-                  {group.items.map((tag) => {
-                    const Icon = iconForInterest(tag.name);
-                    return (
-                      <GlassSurface key={tag.name} style={styles.chip}>
-                        <Icon size={14} color={colors.t2} />
-                        <Text style={styles.chipText}>{tag.name}</Text>
-                      </GlassSurface>
-                    );
-                  })}
-                </View>
-              </View>
-            ))}
+            <View style={styles.chipWrap}>
+              {interestSections.flatMap((group) => group.items.map((tag) => {
+                const Icon = iconForInterest(tag.name);
+                return (
+                  <GlassSurface key={tag.name} style={styles.chip}>
+                    <Icon size={14} color={group.color} />
+                    <Text style={styles.chipText}>{tag.name}</Text>
+                  </GlassSurface>
+                );
+              }))}
+            </View>
           </View>
         )}
 
@@ -522,20 +507,6 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   },
 
   // Interests
-  interestGroup: { marginTop: 14 },
-  interestGroupHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  interestGroupLabel: {
-    fontFamily: fonts.body,
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.t2,
-  },
-
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   // No `backgroundColor` on the three surfaces below — their fill is drawn by
   // `GlassBackdrop`, and a background here would sit on top of the blur.

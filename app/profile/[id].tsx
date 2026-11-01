@@ -190,9 +190,9 @@ function ProfileHero({ profile, relationship, relColor, metaLine, locked }: {
   );
 }
 
-/** Grouped like everywhere else. On somebody else's profile this is what the
- *  list is actually for: "mostly climbing and cycling" reads in a glance where
- *  twenty ungrouped chips do not. */
+/** One wrapping block, ordered by category, each chip marked with its
+ *  category's icon and colour: "mostly climbing and cycling" still reads in a
+ *  glance, without a heading per category stacking into a tall column. */
 function InterestsSection({ interests }: { interests: Interest[] }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
@@ -200,26 +200,14 @@ function InterestsSection({ interests }: { interests: Interest[] }) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Interests</Text>
-      {sectionise(interests).map((group, index, all) => (
-        <View
-          key={group.key || 'more'}
-          style={index > 0 ? styles.interestGroup : undefined}
-        >
-          {all.length > 1 && (
-            <View style={styles.interestGroupHeader}>
-              <Ionicons name={group.icon} size={13} color={group.color} />
-              <Text style={styles.interestGroupLabel}>{group.label}</Text>
-            </View>
-          )}
-          <View style={styles.chipWrap}>
-            {group.items.map((tag) => (
-              <View key={tag.name} style={styles.chip}>
-                <Text style={styles.chipText}>{tag.name}</Text>
-              </View>
-            ))}
+      <View style={styles.chipWrap}>
+        {sectionise(interests).flatMap((group) => group.items.map((tag) => (
+          <View key={tag.name} style={styles.chip}>
+            <Ionicons name={group.icon} size={13} color={group.color} />
+            <Text style={styles.chipText}>{tag.name}</Text>
           </View>
-        </View>
-      ))}
+        )))}
+      </View>
     </View>
   );
 }
@@ -581,22 +569,11 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
     letterSpacing: 1.2, textTransform: 'uppercase', color: colors.t3, marginBottom: 12,
   },
 
-  interestGroup: { marginTop: 14 },
-  interestGroupHeader: {
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 8,
-  },
-  interestGroupLabel: {
-    fontFamily: fonts.body,
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.t2,
-  },
-
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
     backgroundColor: colors.tealTint,
     borderRadius: 20,
     paddingHorizontal: 14,

@@ -11,7 +11,7 @@ import { useCreatorSwifts } from './useCreatorSwifts';
 
 /**
  * The owner's three doors: what their uploads did, a new one, and the private
- * shortlist.
+ * shortlist. On the My Swifts screen (app/swifts/user/[id]).
  *
  * Saved is a link rather than a tab in the gallery below, and that is the whole
  * point of it being here. A shortlist is other people's videos; showing it
@@ -81,9 +81,30 @@ export function SwiftProfileSectionView({ creatorId, canView, isOwner = false, g
   const { items, count, loading, error, refresh } = mine;
 
   if (!canView || (mine.unavailable && !isOwner)) return null;
+  // Your own profile has one door rather than the gallery: the grid, Analytics,
+  // Upload and Saved all live on the My Swifts screen, which kept the profile a
+  // page about the person instead of a second Swifts tab.
+  if (isOwner) {
+    const summary = loading ? 'Loading…' : count === 1 ? '1 Swift' : `${count} Swifts`;
+    return <Pressable
+      testID="my-swifts-entry"
+      style={({ pressed }) => [styles.entry, pressed && { opacity: 0.75 }]}
+      onPress={() => router.push({ pathname: '/swifts/user/[id]', params: { id: creatorId } })}
+      accessibilityRole="button"
+      accessibilityLabel={`My Swifts, ${summary}. Your uploads, analytics and saved Swifts.`}
+    >
+      <View style={styles.entryIcon}><IconSwift size={22} color={colors.teal} /></View>
+      <View style={styles.entryText}>
+        <Text style={styles.title}>My Swifts</Text>
+        <Text style={styles.entrySub}>{summary} · Analytics, uploads and saved</Text>
+        {ghostMode && <Text style={styles.entrySub}>Hidden from others while Ghost Mode is on.</Text>}
+      </View>
+      <IconChevron size={16} color={colors.t3} />
+    </Pressable>;
+  }
   return <View style={styles.section}>
     <View style={styles.heading}>
-      <View style={styles.titleRow}><IconSwift size={21} color={colors.teal} /><Text style={styles.title}>{isOwner ? 'My Swifts' : 'Swifts'}</Text></View>
+      <View style={styles.titleRow}><IconSwift size={21} color={colors.teal} /><Text style={styles.title}>Swifts</Text></View>
       <Pressable
         style={styles.seeAll}
         onPress={() => router.push({ pathname: '/swifts/user/[id]', params: { id: creatorId } })}
@@ -92,20 +113,22 @@ export function SwiftProfileSectionView({ creatorId, canView, isOwner = false, g
         <Text style={styles.link}>See all{count > 0 ? ' (' + count + ')' : ''}</Text><IconChevron size={14} color={colors.teal} />
       </Pressable>
     </View>
-    {isOwner && <SwiftCreatorActions />}
-    {isOwner && ghostMode && <Text style={styles.body}>Your Swifts are hidden from others while Ghost Mode is on.</Text>}
     {loading ? <ActivityIndicator color={colors.teal} style={styles.message} /> : error ? <View style={styles.message}>
       <Text style={styles.body}>{error}</Text><Pressable onPress={() => { void refresh(); }} accessibilityRole="button"><Text style={styles.link}>Try again</Text></Pressable>
     </View> : items.length === 0 ? <View style={styles.message}>
       <IconSwift size={30} color={colors.t3} />
-      <Text style={styles.emptyTitle}>{isOwner ? 'Your first Swift starts here' : 'No Swifts yet'}</Text>
-      <Text style={styles.body}>{isOwner ? 'Your uploads appear here, including videos still being reviewed.' : 'Shared videos will appear here.'}</Text>
+      <Text style={styles.emptyTitle}>No Swifts yet</Text>
+      <Text style={styles.body}>Shared videos will appear here.</Text>
     </View> : <View style={styles.grid}>{items.map((swift) => <SwiftProfileTile key={swift.id} swift={swift} />)}</View>}
   </View>;
 }
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   section: { marginBottom: 28 },
+  entry: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 28, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  entryIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tealTint },
+  entryText: { flex: 1, gap: 2 },
+  entrySub: { fontFamily: fonts.body, fontSize: 13, color: colors.t2 },
   heading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontFamily: fonts.display, fontSize: 20, fontWeight: '600', color: colors.t1 },

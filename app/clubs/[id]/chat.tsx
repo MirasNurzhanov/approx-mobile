@@ -34,12 +34,16 @@ import { catchUpHistory, mergeMessages } from '@/services/chatHistory';
 import { runBusy } from '@/services/busy';
 import { clubsApi } from '@/services/clubs';
 import { venuesApi, type Venue } from '@/services/venues';
+import {
+  answerMeetup, mergeBroadcast, NO_RESPONSES, type MeetupAnswer, type MeetupResponseSummary,
+} from '@/services/meetupResponses';
 import { PlacePicker } from '@/components/map/PlacePicker';
 import { removeMeetupFromMap } from '@/services/nearbyRefresh';
 import {
   MAX_PINS, pinIdFor, pinMeetup, unpinPlace, useIsPinned,
 } from '@/services/pinnedPlaces';
 import { useContentActions } from '@/components/ContentActions';
+import { MeetupResponseBar, MeetupResponsesSheet } from '@/components/clubs/MeetupResponses';
 import { usePermissionPrimer } from '@/components/PermissionPrimer';
 import { Avatar } from '@/components/ui/Avatar';
 import { ChatComposer } from '@/components/chat/ChatComposer';
@@ -65,6 +69,8 @@ interface MeetupProposal {
    *  here so a meetup pinned from the chat drops off the viewer's map at the
    *  same moment as one pinned from the map itself. */
   expires_at?: string;
+  /** Who is in — see components/clubs/MeetupResponses. */
+  responses?: MeetupResponseSummary;
 }
 
 interface ClubMessage {
@@ -136,7 +142,7 @@ function pageOf(data: unknown): RawMsg[] {
  *  At module scope for the same reason as `pageOf` — the call site is inside a
  *  `try`, where a `&&` chain is a "value block" the compiler cannot lower. */
 function isBlank(m: ClubMessage): boolean {
-  return !m.text && !m.image && m.message_type !== 'meetup_proposal';
+  return !m.text && !m.image && m.message_type !== 'meetup_proposal' && m.message_type !== 'member_joined';
 }
 
 /** The reason the socket gave for refusing a message, or a plain fallback.
@@ -298,6 +304,8 @@ function ProposalCard({
   onApprove,
   onReject,
   onDelete,
+  onResponses,
+  onShowResponses,
   actioningId,
 }: {
   proposal: MeetupProposal;
@@ -308,6 +316,8 @@ function ProposalCard({
   onApprove: (id: number) => void;
   onReject: (id: number) => void;
   onDelete: (id: number) => void;
+  onResponses: (id: number, summary: MeetupResponseSummary) => void;
+  onShowResponses: (id: number) => void;
   actioningId: number | null;
 }) {
   const { colors, themeMode } = useTheme();
@@ -318,13 +328,10 @@ function ProposalCard({
   const canDelete = viewerIsOwner || viewerIsProposer;
 
   // ── Going ────────────────────────────────────────────────────────────────
-  // Saying you are going pins the meetup to your own map and does nothing else
-  // — no RSVP, nothing the club or the proposer can see. That is the whole
-  // feature deliberately: an attendance list is a different thing to build,
-  // and this button should not quietly become one. See services/pinnedPlaces.
-  //
-  // Offered on approved proposals only, because a pending one is not on
-  // anybody's map yet, and only when it has somewhere to be.
+  // Members answer "I'm in" or "Nope", and the club sees who — see
+  // components/clubs/MeetupResponses. "I'm in" on an approved meetup with a
+  // place also pins it to your own map (services/pinnedPlaces), and taking it
+  // back unpins it. The proposer is not asked; they keep the plain pin.
   const going = useIsPinned('meetup', proposal.id);
   const [saving, setSaving] = useState(false);
   const canAttend =
@@ -357,6 +364,38 @@ function ProposalCard({
         );
       }
     }, () => setSaving(false));
+  }
+
+  const [answering, setAnswering] = useState(false);
+  const canAnswer = !viewerIsProposer
+    && proposal.status !== 'rejected'
+    && new Date(proposal.event_datetime).getTime() > Date.now();
+
+  function answer(next: MeetupAnswer | null) {
+    if (answering) return;
+    setAnswering(true);
+    void runBusy(async () => {
+      try {
+        onResponses(proposal.id, await answerMeetup(proposal.id, next));
+      } catch {
+        Alert.alert('Answer not saved', 'Try again in a moment.');
+        return;
+      }
+      if (next === 'in' && canAttend && !going) {
+        await pinMeetup({
+          meetupId: proposal.id,
+          latitude: proposal.latitude as number,
+          longitude: proposal.longitude as number,
+          title: proposal.title,
+          clubName,
+          locationName: proposal.location_name,
+          eventDatetime: proposal.event_datetime,
+          expiresAt: proposal.expires_at,
+        }).catch(() => {});
+      } else if (next !== 'in' && going) {
+        await unpinPlace(pinIdFor('meetup', proposal.id)).catch(() => {});
+      }
+    }, () => setAnswering(false));
   }
 
   function confirmDelete() {
@@ -412,8 +451,19 @@ function ProposalCard({
         <Text style={cardStyles.proposer}>Proposed by @{proposerUsername ?? 'member'}</Text>
       </View>
 
-      {/* Going — approved meetups the viewer could actually get to */}
-      {canAttend && (
+      {/* I'm in / Nope, and who has answered */}
+      {(canAnswer || (proposal.responses?.in_count ?? 0) + (proposal.responses?.out_count ?? 0) > 0) && (
+        <MeetupResponseBar
+          summary={proposal.responses ?? NO_RESPONSES}
+          canAnswer={canAnswer}
+          busy={answering}
+          onAnswer={answer}
+          onShowAll={() => onShowResponses(proposal.id)}
+        />
+      )}
+
+      {/* The proposer's own pin — approved meetups with somewhere to be */}
+      {viewerIsProposer && canAttend && (
         <View style={cardStyles.actions}>
           <Pressable
             style={[cardStyles.goingBtn, going && cardStyles.goingBtnOn, saving && cardStyles.actionBtnDisabled]}
@@ -586,7 +636,7 @@ function ClubChatHeader({ name, emblem, memberCount, socketStatus, top, onBack }
 }
 
 /** One message: a meetup proposal card, or an ordinary bubble. */
-function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, clubName, viewerIsOwner, actioningId, onApprove, onReject, onDelete, onReport }: {
+function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, clubName, viewerIsOwner, actioningId, onApprove, onReject, onDelete, onReport, onResponses, onShowResponses }: {
   item: ClubMessage;
   isMine: boolean;
   hydratedItem: ClubMessage;
@@ -598,9 +648,22 @@ function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, clubNam
   onReject: (id: number) => void;
   onDelete: (id: number) => void;
   onReport: (m: ClubMessage) => void;
+  onResponses: (id: number, summary: MeetupResponseSummary) => void;
+  onShowResponses: (id: number) => void;
 }) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
+
+  if (item.message_type === 'member_joined') {
+    return (
+      <View style={styles.systemRow} accessibilityRole="text">
+        <Ionicons name="person-add-outline" size={13} color={colors.t3} />
+        <Text style={styles.systemText}>
+          {isMine ? 'You joined the club' : `@${hydratedItem.sender_username ?? 'someone'} joined the club`}
+        </Text>
+      </View>
+    );
+  }
 
   if (item.message_type === 'meetup_proposal' && item.proposal) {
     return (
@@ -614,6 +677,8 @@ function ClubMessageItem({ item, isMine, hydratedItem, showSenderHeader, clubNam
           onApprove={onApprove}
           onReject={onReject}
           onDelete={onDelete}
+          onResponses={onResponses}
+          onShowResponses={onShowResponses}
           actioningId={actioningId}
         />
         <Text style={styles.proposalTime}>{fmtTime(item.created_at)}</Text>
@@ -986,6 +1051,18 @@ function useClubChat(
             const detail = detailOf(raw);
             setMessages((prev) => prev.filter((m) => !m.pending));
             Alert.alert('Message not sent', detail);
+            return;
+          }
+
+          // Somebody answered a meetup. Same for every reader, so it keeps
+          // this reader's own answer — see services/meetupResponses.
+          if ((raw as { type?: string }).type === 'club_event_responses') {
+            const update = raw as unknown as { event_id: number; responses: MeetupResponseSummary };
+            setMessages((prev) => prev.map((m) => (
+              m.proposal?.id === update.event_id
+                ? { ...m, proposal: { ...m.proposal, responses: mergeBroadcast(m.proposal.responses, update.responses) } }
+                : m
+            )));
             return;
           }
 
@@ -1369,6 +1446,14 @@ export default function ClubChatScreen() {
     setActioningEventId(null);
   }
 
+  // ── I'm in / Nope ─────────────────────────────────────────────────────────
+  const [responsesFor, setResponsesFor] = useState<number | null>(null);
+  function handleResponses(proposalId: number, summary: MeetupResponseSummary) {
+    setMessages((prev) => prev.map((m) => (
+      m.proposal?.id === proposalId ? { ...m, proposal: { ...m.proposal, responses: summary } } : m
+    )));
+  }
+
   const canSend = text.trim().length > 0;
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -1426,6 +1511,8 @@ export default function ClubChatScreen() {
                 onReject={handleReject}
                 onDelete={handleDelete}
                 onReport={reportClubMessage}
+                onResponses={handleResponses}
+                onShowResponses={setResponsesFor}
               />
             );
           }}
@@ -1446,6 +1533,7 @@ export default function ClubChatScreen() {
       {sheets}
 
       <MeetupProposalModal {...proposal.modalProps} top={top} bottom={bottom} />
+      <MeetupResponsesSheet eventId={responsesFor} onClose={() => setResponsesFor(null)} />
     </KeyboardAvoidingView>
   );
 }
@@ -1488,6 +1576,8 @@ const makeStyles = (colors: ColorPalette) => StyleSheet.create({
   // Proposal row (full width, centred)
   proposalRow: { marginVertical: 6, paddingHorizontal: 4 },
   proposalTime: { fontFamily: fonts.body, fontSize: 10, color: colors.t3, textAlign: 'center', marginTop: 4 },
+  systemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginVertical: 8 },
+  systemText: { fontFamily: fonts.body, fontSize: 12, color: colors.t3 },
 
   // Regular bubble rows
   row: { flexDirection: 'row', alignItems: 'flex-end', marginVertical: 2 },

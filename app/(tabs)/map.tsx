@@ -15,6 +15,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useNavAlignedRight, useNavClearance } from '@/hooks/useNavMetrics';
 import { useReduceMotion } from '@/hooks/useReduceMotion';
 import { MODAL_SETTLE_MS, usePermissionPrimer } from '@/components/PermissionPrimer';
+import { LocationDisclosure } from '@/components/LocationDisclosure';
 import { useLocationDisclosure } from '@/services/locationDisclosure';
 import {
   markNotificationsOffered,
@@ -90,9 +91,9 @@ export default function MapScreen() {
   const router = useRouter();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
   const { ensure: ensurePermission, primer } = usePermissionPrimer();
-  // Signed-in root shows "who sees you on the map" first; every question the
-  // map asks waits for it — see `MODAL_SETTLE_MS`.
-  const { acknowledged: locationDisclosed } = useLocationDisclosure();
+  // "Who sees you on the map" comes first, drawn over the map below; every
+  // question the map asks waits for it, and for each other — `MODAL_SETTLE_MS`.
+  const { acknowledged: locationDisclosed, acknowledge: acknowledgeDisclosure } = useLocationDisclosure();
 
   // The device's own position, the permission behind it, and the camera that
   // follows it — see hooks/useMapLocation. Called before every hook that reads
@@ -461,9 +462,17 @@ export default function MapScreen() {
         />
       )}
 
-      {mapVisible && showStoryTutorial && (
+      {mapVisible && showStoryTutorial && locationDisclosed === true && (
         <StoryTutorialOverlay onDismiss={dismissStoryTutorial} />
       )}
+
+      {/* What being on the map means, before anything is sent or asked. Here
+          rather than a root modal — see components/LocationDisclosure. `null`
+          means the flag is still being read, which renders nothing. */}
+      <LocationDisclosure
+        visible={locationDisclosed === false}
+        onAcknowledge={() => { acknowledgeDisclosure().catch(() => {}); }}
+      />
     </View>
   );
 }

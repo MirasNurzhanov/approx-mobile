@@ -1,4 +1,4 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fonts, radius, type as typography } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
@@ -22,6 +22,14 @@ import { useTheme } from '@/context/ThemeContext';
 //
 // The three facts are stated in the order somebody would ask them, and the
 // third is the one that makes the first two acceptable to read.
+//
+// Drawn over the map, not in a `Modal`. It used to be a root-level modal that
+// opened the instant sign-up finished, which is also the instant the app
+// navigates to onboarding; on iOS a modal presented mid-navigation can fail to
+// appear while still counting as open. New accounts got an invisible sheet
+// over the whole app, then — with the map waiting on this screen — no location
+// question at all. The map is the only place this matters, and a plain view
+// there cannot fail to show.
 
 interface Props {
   visible: boolean;
@@ -47,11 +55,12 @@ export function LocationDisclosure({ visible, onAcknowledge }: Props) {
   const { colors } = useTheme();
   const styles = makeStyles(colors);
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      {/* Not a Pressable, and `onRequestClose` is absent: there is nothing to
-          dismiss this with, because a screen somebody can swipe past has not
-          told them anything. */}
+    <View style={[StyleSheet.absoluteFill, styles.layer]}>
+      {/* Not a Pressable: there is nothing to dismiss this with, because a
+          screen somebody can tap past has not told them anything. */}
       <View style={styles.backdrop}>
         <View style={styles.sheet} accessibilityViewIsModal accessible={false}>
           <Text style={styles.title} accessibilityRole="header">
@@ -76,11 +85,13 @@ export function LocationDisclosure({ visible, onAcknowledge }: Props) {
           </Pressable>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
 const makeStyles = (colors: ColorPalette) => StyleSheet.create({
+  // Above the story tutorial (1000) and the map's own controls and nav.
+  layer: { zIndex: 1100, elevation: 12 },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',

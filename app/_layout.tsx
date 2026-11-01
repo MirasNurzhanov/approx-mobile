@@ -27,8 +27,6 @@ import {
 
 import { ApproxLoader } from '@/components/ApproxLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { LocationDisclosure } from '@/components/LocationDisclosure';
-import { useLocationDisclosure } from '@/services/locationDisclosure';
 import { TermsGate } from '@/components/TermsGate';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { NavStyleProvider } from '@/context/NavStyleContext';
@@ -49,11 +47,6 @@ function AppStatusBar() {
 
 function AppShell() {
   const { isLoading, isAuthenticated, logout } = useAuth();
-
-  // Whether this install has been told what being on the map means. Shown
-  // once, and `services/location.ts` transmits nothing until it has been —
-  // see services/locationDisclosure.ts for why the order matters.
-  const { acknowledged: locationDisclosed, acknowledge } = useLocationDisclosure();
 
   // Whether this account still owes us an agreement to the current Terms.
   // `null` until the answer is in, so the gate never flashes on and off for
@@ -199,13 +192,6 @@ function AppShell() {
         <Stack.Screen name="create-club"     options={{ headerShown: false, animation: 'slide_from_bottom' }} />
         <Stack.Screen name="market"          options={{ headerShown: false, animation: 'slide_from_right' }} />
       </Stack>
-      {/* Signed in, and not yet told. `null` means the flag is still being
-          read, which renders nothing rather than flashing this at somebody who
-          dismissed it months ago. */}
-      <LocationDisclosure
-        visible={isAuthenticated && locationDisclosed === false}
-        onAcknowledge={() => { acknowledge().catch(() => {}); }}
-      />
       {/* Last in the tree so it covers everything, including the disclosure
           above — an account that has not agreed to the Terms should not be
           reading about its own visibility first. */}

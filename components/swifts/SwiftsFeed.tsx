@@ -6,6 +6,7 @@ import {
   FlatList,
   LayoutChangeEvent,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -84,6 +85,11 @@ const RAIL_WIDTH = 52;
  *  cards are never both "visible" mid-scroll, which would fight over playback. */
 const VIEWABILITY = { itemVisiblePercentThreshold: 80 } as const;
 
+/** Away from the tab (or the app) at least this long, and coming back reloads
+ *  the feed, so a Swift posted meanwhile is there. Shorter trips — a profile
+ *  and back — keep the viewer's place. */
+const RELOAD_AFTER_AWAY_MS = 30_000;
+
 type FeedState = 'loading' | 'ready' | 'error';
 
 export function SwiftsFeed() {
@@ -151,27 +157,39 @@ export function SwiftsFeed() {
    *  re-POST. The server is idempotent anyway; this saves the round trip. */
   const reportedViews = useRef<Set<number>>(new Set());
 
-  const load = useCallback(() => {
-    cursor.current = null;
-    servedBy.current = {};
-    fetchSwiftFeed()
-      .then((page) => {
-        setSwifts(page.results);
-        cursor.current = page.cursor;
-        for (const [id, source] of Object.entries(page.sources)) {
-          servedBy.current[Number(id)] = source;
-        }
-        setExhausted(!page.hasMore);
-        setState('ready');
-      })
-      .catch(() => setState('error'));
-  }, []);
+  const listRef = useRef<FlatList<Swift>>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(load, [load]);
+  /** A fresh first page. `keepOnError` is for a reload over a feed that is
+   *  already showing: a failed refresh leaves it in place rather than
+   *  swapping it for the error screen. */
+  const load = useCallback((keepOnError = false) => fetchSwiftFeed()
+    .then((page) => {
+      cursor.current = page.cursor;
+      servedBy.current = {};
+      for (const [id, source] of Object.entries(page.sources)) {
+        servedBy.current[Number(id)] = source;
+      }
+      setSwifts(page.results);
+      setActiveIndex(0);
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      setExhausted(!page.hasMore);
+      setState('ready');
+    })
+    .catch(() => { if (!keepOnError) setState('error'); }), []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const refresh = useCallback(() => {
+    closeWatchRef.current(lastSwiftRef.current);
+    watching.current = null;
+    setRefreshing(true);
+    void load(true).finally(() => setRefreshing(false));
+  }, [load]);
 
   const retry = () => {
     setState('loading');
-    load();
+    void load();
   };
 
   const loadMore = useCallback(() => {
@@ -279,6 +297,25 @@ export function SwiftsFeed() {
       watching.current = null;
       void flushSwiftSignals();
     }
+  }, [playbackAllowed]);
+
+  // Back on the tab or in the app: reload if the viewer was gone a while, or
+  // had nothing to watch, so what was posted meanwhile shows up.
+  const awaySince = useRef<number | null>(null);
+  const isEmpty = swifts.length === 0;
+  useEffect(() => {
+    if (!playbackAllowed) {
+      awaySince.current = Date.now();
+      return;
+    }
+    const since = awaySince.current;
+    awaySince.current = null;
+    if (since === null || state !== 'ready') return;
+    if (isEmpty || Date.now() - since >= RELOAD_AFTER_AWAY_MS) {
+      void load(true);
+    }
+    // Only the coming back matters, not every change of what it reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbackAllowed]);
 
   const handleLayout = (e: LayoutChangeEvent) => setHeight(e.nativeEvent.layout.height);
@@ -549,6 +586,9 @@ export function SwiftsFeed() {
         >
           <Text style={styles.retry}>Create a Swift</Text>
         </Pressable>
+        <Pressable onPress={refresh} disabled={refreshing} hitSlop={10} accessibilityRole="button">
+          <Text style={styles.retry}>{refreshing ? 'Refreshing…' : 'Refresh'}</Text>
+        </Pressable>
       </View>
     );
   }
@@ -566,6 +606,7 @@ export function SwiftsFeed() {
       />
       {height > 0 && (
         <FlatList
+          ref={listRef}
           data={swifts}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item, index }) => (
@@ -596,6 +637,9 @@ export function SwiftsFeed() {
           showsVerticalScrollIndicator={false}
           onViewableItemsChanged={handleViewableItemsChanged}
           viewabilityConfig={VIEWABILITY}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="#FFFFFF" />
+          }
           onEndReached={loadMore}
           onEndReachedThreshold={2}
           // Every card holds a video player, so keeping many mounted is the

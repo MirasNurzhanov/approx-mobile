@@ -494,3 +494,64 @@ describe('memoisation actually bails', () => {
     expect(shallowDiff(before, cards(tree)[0].props)).toContain('swift');
   });
 });
+
+describe('a Swift posted after the feed loaded shows up', () => {
+  const withNew = {
+    cursor: null,
+    hasMore: false,
+    sources: {},
+    results: [makeSwift(99), makeSwift(1)],
+  };
+
+  it('reloads when the viewer comes back after a while', async () => {
+    const tree = await renderFeed();
+    const handler = appStateHandler();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    await act(async () => { handler?.('background'); });
+
+    mockApi.fetchSwiftFeed.mockResolvedValue(withNew);
+    now.mockReturnValue(1_000_000 + 31_000);
+    await act(async () => { handler?.('active'); });
+
+    expect(mockApi.fetchSwiftFeed).toHaveBeenCalledTimes(2);
+    expect(cards(tree)[0].props.swift.id).toBe(99);
+  });
+
+  it('keeps the viewer’s place after a short trip away', async () => {
+    await renderFeed();
+    const handler = appStateHandler();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    await act(async () => { handler?.('background'); });
+    now.mockReturnValue(1_000_000 + 5_000);
+    await act(async () => { handler?.('active'); });
+
+    expect(mockApi.fetchSwiftFeed).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads on pull to refresh', async () => {
+    const tree = await renderFeed();
+    mockApi.fetchSwiftFeed.mockResolvedValue(withNew);
+
+    await act(async () => { listProps(tree)?.refreshControl.props.onRefresh(); });
+
+    expect(cards(tree)[0].props.swift.id).toBe(99);
+  });
+
+  it('an empty feed reloads as soon as the viewer comes back', async () => {
+    mockApi.fetchSwiftFeed.mockResolvedValue({ cursor: null, hasMore: false, sources: {}, results: [] });
+    const tree = await renderFeed();
+    const handler = appStateHandler();
+    await act(async () => { handler?.('background'); });
+
+    mockApi.fetchSwiftFeed.mockResolvedValue(withNew);
+    await act(async () => { handler?.('active'); });
+    // The empty screen has no list to measure; the feed that replaces it does.
+    await act(async () => {
+      tree.root.findAll((n) => typeof n.props?.onLayout === 'function')[0]
+        ?.props.onLayout({ nativeEvent: { layout: { height: 800, width: 400 } } });
+    });
+
+    expect(mockApi.fetchSwiftFeed).toHaveBeenCalledTimes(2);
+    expect(cards(tree)[0].props.swift.id).toBe(99);
+  });
+});

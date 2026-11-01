@@ -71,12 +71,15 @@ export async function acknowledgeLocationDisclosure(): Promise<void> {
  * one case where somebody is published without ever having been told.
  */
 export async function resetLocationDisclosure(): Promise<void> {
-  acknowledged = null;
+  // False, not unknown. With `null` here, anything reading the flag before the
+  // removal below lands — a location tick, the background task — went to disk,
+  // found the previous account's '1', and put it back: the next account then
+  // never saw the sheet. Nobody on a signed-out device has read it, so there
+  // is nothing to look up.
+  acknowledged = false;
   try {
     await AsyncStorage.removeItem(STORAGE_KEY);
   } catch {}
-  // After the removal, not before: listeners re-read the store, and reading
-  // it first would hand the next account the previous one's acknowledgement.
   announce();
 }
 

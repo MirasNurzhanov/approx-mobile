@@ -12,6 +12,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import {
   acknowledgeLocationDisclosure,
+  hasAcknowledgedLocationDisclosure,
   resetLocationDisclosure,
   useLocationDisclosure,
 } from '../locationDisclosure';
@@ -46,4 +47,20 @@ it('is shown on a fresh install', async () => {
   await act(async () => { renderer = create(<Probe />); });
   expect(seen).toBe(false);
   await act(async () => { renderer.unmount(); });
+});
+
+it('a read during the sign-out does not bring the previous acknowledgement back', async () => {
+  await acknowledgeLocationDisclosure();
+  // The removal is slow; something asks in the meantime.
+  const remove = jest.spyOn(AsyncStorage, 'removeItem');
+  let finishRemoval!: () => void;
+  remove.mockImplementationOnce(() => new Promise<void>((done) => { finishRemoval = done; }));
+
+  const reset = resetLocationDisclosure();
+  expect(await hasAcknowledgedLocationDisclosure()).toBe(false);
+  finishRemoval();
+  await reset;
+
+  expect(await hasAcknowledgedLocationDisclosure()).toBe(false);
+  remove.mockRestore();
 });

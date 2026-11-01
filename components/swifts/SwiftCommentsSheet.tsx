@@ -21,6 +21,7 @@ import { IconClose, IconMore, IconTrash } from '@/components/ui/icons';
 import { fonts, radius, type as typography, MAX_SCALE_FIXED } from '@/constants/theme';
 import type { ColorPalette } from '@/constants/theme';
 import { useTheme } from '@/context/ThemeContext';
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible';
 import {
   deleteSwiftComment,
   fetchSwiftComments,
@@ -54,6 +55,12 @@ import {
  * is the split that actually works: Android resizes the window itself when
  * `adjustResize` is set, so `padding` there double-counts and leaves a gap the
  * size of the keyboard.
+ *
+ * On iOS the sheet is a `pageSheet`, which starts some 50pt below the top of
+ * the screen. `KeyboardAvoidingView` measures itself against the sheet, not the
+ * screen, so it fell short by exactly that gap and left the composer half under
+ * the keyboard. The sheet's real top is measured and passed in as
+ * `keyboardVerticalOffset`, which is what that prop is for.
  */
 
 interface Props {
@@ -108,6 +115,16 @@ function CommentsBody({
   const [sending, setSending] = useState(false);
   const { present, sheets } = useContentActions();
   const inputRef = useRef<TextInput | null>(null);
+  const keyboardUp = useKeyboardVisible();
+
+  // Where the sheet starts on screen — see the Keyboard note above.
+  const frameRef = useRef<View | null>(null);
+  const [sheetTop, setSheetTop] = useState(0);
+  const measureSheet = useCallback(() => {
+    frameRef.current?.measureInWindow((_x, y) => {
+      if (Number.isFinite(y)) setSheetTop(Math.max(0, y));
+    });
+  }, []);
 
   // Deliberately does not set 'loading' itself: the state already starts there,
   // so doing it here would be a synchronous setState on the mount path for a
@@ -213,110 +230,112 @@ function CommentsBody({
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      // See the component note: `padding` double-counts on Android, which
-      // resizes the window itself.
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={0}
-      accessibilityViewIsModal
-    >
-      {sheets}
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Text style={styles.title} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
-          {total > 0 ? `${formatCount(total)} comments` : 'Comments'}
-        </Text>
-        <Pressable
-          onPress={onClose}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Close comments"
-        >
-          <IconClose size={20} color={colors.t2} />
-        </Pressable>
-      </View>
-
-      {state === 'loading' ? (
-        <View style={styles.centre}>
-          <ActivityIndicator color={colors.teal} />
-        </View>
-      ) : state === 'error' ? (
-        <View style={styles.centre}>
-          <Text style={styles.emptyTitle}>Couldn’t load comments</Text>
+    <View ref={frameRef} style={styles.root} onLayout={measureSheet} collapsable={false}>
+      <KeyboardAvoidingView
+        style={styles.root}
+        // See the component note: `padding` double-counts on Android, which
+        // resizes the window itself.
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? sheetTop : 0}
+        accessibilityViewIsModal
+      >
+        {sheets}
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+          <Text style={styles.title} maxFontSizeMultiplier={MAX_SCALE_FIXED}>
+            {total > 0 ? `${formatCount(total)} comments` : 'Comments'}
+          </Text>
           <Pressable
-            onPress={() => { setState('loading'); load(); }}
-            hitSlop={10}
+            onPress={onClose}
+            hitSlop={12}
             accessibilityRole="button"
+            accessibilityLabel="Close comments"
           >
-            <Text style={styles.retry}>Try again</Text>
+            <IconClose size={20} color={colors.t2} />
           </Pressable>
         </View>
-      ) : comments.length === 0 ? (
-        <View style={styles.centre}>
-          <SwiftCommentIcon size={30} color={colors.t3} />
-          <Text style={styles.emptyTitle}>No comments yet</Text>
-          {allowComments ? (
-            <Text style={styles.emptyBody}>Be the first to say something.</Text>
-          ) : (
-            <Text style={styles.emptyBody}>Comments are turned off.</Text>
-          )}
-        </View>
-      ) : (
-        <FlatList
-          data={comments}
-          keyExtractor={(c) => String(c.id)}
-          contentContainerStyle={styles.list}
-          keyboardShouldPersistTaps="handled"
-          onEndReached={loadMore}
-          onEndReachedThreshold={1.5}
-          // The thread is text, so a generous window costs little and keeps
-          // scrolling smooth on a low-end device.
-          initialNumToRender={12}
-          windowSize={7}
-          removeClippedSubviews={false}
-          ListFooterComponent={
-            paging ? <ActivityIndicator style={styles.footerSpinner} color={colors.t3} /> : null
-          }
-          renderItem={({ item }) => (
-            <CommentRow
-              comment={item}
-              onDelete={confirmDelete}
-              onReport={reportComment}
-              styles={styles}
-              colors={colors}
-            />
-          )}
-        />
-      )}
 
-      {allowComments && (
-        <View style={[styles.composer, { paddingBottom: insets.bottom + 10 }]}>
-          <TextInput
-            ref={inputRef}
-            style={styles.input}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Add a comment"
-            placeholderTextColor={colors.t3}
-            multiline
-            maxLength={500}
-            accessibilityLabel="Add a comment"
+        {state === 'loading' ? (
+          <View style={styles.centre}>
+            <ActivityIndicator color={colors.teal} />
+          </View>
+        ) : state === 'error' ? (
+          <View style={styles.centre}>
+            <Text style={styles.emptyTitle}>Couldn’t load comments</Text>
+            <Pressable
+              onPress={() => { setState('loading'); load(); }}
+              hitSlop={10}
+              accessibilityRole="button"
+            >
+              <Text style={styles.retry}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : comments.length === 0 ? (
+          <View style={styles.centre}>
+            <SwiftCommentIcon size={30} color={colors.t3} />
+            <Text style={styles.emptyTitle}>No comments yet</Text>
+            {allowComments ? (
+              <Text style={styles.emptyBody}>Be the first to say something.</Text>
+            ) : (
+              <Text style={styles.emptyBody}>Comments are turned off.</Text>
+            )}
+          </View>
+        ) : (
+          <FlatList
+            data={comments}
+            keyExtractor={(c) => String(c.id)}
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+            onEndReached={loadMore}
+            onEndReachedThreshold={1.5}
+            // The thread is text, so a generous window costs little and keeps
+            // scrolling smooth on a low-end device.
+            initialNumToRender={12}
+            windowSize={7}
+            removeClippedSubviews={false}
+            ListFooterComponent={
+              paging ? <ActivityIndicator style={styles.footerSpinner} color={colors.t3} /> : null
+            }
+            renderItem={({ item }) => (
+              <CommentRow
+                comment={item}
+                onDelete={confirmDelete}
+                onReport={reportComment}
+                styles={styles}
+                colors={colors}
+              />
+            )}
           />
-          <Pressable
-            onPress={send}
-            disabled={!draft.trim() || sending}
-            hitSlop={10}
-            style={[styles.send, (!draft.trim() || sending) && styles.sendOff]}
-            accessibilityRole="button"
-            accessibilityLabel="Post comment"
-          >
-            {sending
-              ? <ActivityIndicator size="small" color={colors.bg} />
-              : <Text style={styles.sendLabel}>Post</Text>}
-          </Pressable>
-        </View>
-      )}
-    </KeyboardAvoidingView>
+        )}
+
+        {allowComments && (
+          <View style={[styles.composer, { paddingBottom: keyboardUp ? 10 : insets.bottom + 10 }]}>
+            <TextInput
+              ref={inputRef}
+              style={styles.input}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Add a comment"
+              placeholderTextColor={colors.t3}
+              multiline
+              maxLength={500}
+              accessibilityLabel="Add a comment"
+            />
+            <Pressable
+              onPress={send}
+              disabled={!draft.trim() || sending}
+              hitSlop={10}
+              style={[styles.send, (!draft.trim() || sending) && styles.sendOff]}
+              accessibilityRole="button"
+              accessibilityLabel="Post comment"
+            >
+              {sending
+                ? <ActivityIndicator size="small" color={colors.bg} />
+                : <Text style={styles.sendLabel}>Post</Text>}
+            </Pressable>
+          </View>
+        )}
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 

@@ -139,7 +139,7 @@ export interface PublishedSwift {
  * ~500m grid or drop them entirely — a paused creator's Swift carries no
  * location whatever this sends, which is the point.
  */
-export function buildForm(draft: SwiftDraft): FormData {
+export function buildForm(draft: SwiftDraft, posterUri: string | null = null): FormData {
   if (!draft.idempotencyKey) throw new UploadError('This take has no publish key.', false);
   const form = new FormData();
   form.append('idempotency_key', draft.idempotencyKey);
@@ -148,6 +148,11 @@ export function buildForm(draft: SwiftDraft): FormData {
     type: 'video/mp4',
     name: 'swift.mp4',
   } as any);
+  // The still a viewer sees before the video starts, and the card in chats and
+  // grids. Without it every one of those is a black box until playback.
+  if (posterUri) {
+    form.append('thumbnail', { uri: posterUri, type: 'image/jpeg', name: 'poster.jpg' } as any);
+  }
 
   // The *played* length, which is what the sixty-second ceiling is on and what
   // a viewer experiences — `keptDurationMs` already folds in the speed. See
@@ -248,15 +253,16 @@ function uploadFailureMessage(status: number, reason: string): string {
 
 interface TransferOptions {
   draft: SwiftDraft;
+  posterUri: string | null;
   token: string | null;
   onProgress?: (ratio: number) => void;
   signal?: AbortSignal;
 }
 
 /** One attempt at posting the Swift. */
-function transfer({ draft, token, onProgress, signal }: TransferOptions): Promise<PublishedSwift> {
+function transfer({ draft, posterUri, token, onProgress, signal }: TransferOptions): Promise<PublishedSwift> {
   return new Promise((resolve, reject) => {
-    const form = buildForm(draft);
+    const form = buildForm(draft, posterUri);
     const xhr = new XMLHttpRequest();
     let settled = false;
 
@@ -352,6 +358,28 @@ export interface PublishOptions {
 }
 
 /**
+ * A JPEG of the first frame a viewer will see — the trim's start, not the
+ * file's. Null if it cannot be made, which only costs the Swift its poster.
+ *
+ * Required lazily so a development client built before this module was added
+ * still publishes, just without a poster.
+ */
+async function capturePoster(draft: SwiftDraft): Promise<string | null> {
+  if (!draft.uri) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getThumbnailAsync } = require('expo-video-thumbnails') as typeof import('expo-video-thumbnails');
+    const { uri } = await getThumbnailAsync(draft.uri, {
+      time: Math.max(0, Math.round(draft.trimStartMs)),
+      quality: 0.7,
+    });
+    return uri;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Publish a draft. Retries transient failures up to `MAX_ATTEMPTS`; a
  * rejection (bad field, oversized file) is not retried — sending the
  * identical request again would waste the user's data to get the same answer.
@@ -370,6 +398,8 @@ export async function publishSwift(
   }
 
   const token = await tokenStore.getItem('access_token');
+  // Once, not per attempt: a retry sends the same still.
+  const posterUri = await capturePoster(draft);
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -379,6 +409,7 @@ export async function publishSwift(
       onProgress?.({ stage: 'uploading', ratio: 0, attempt });
       return await transfer({
         draft,
+        posterUri,
         token,
         signal,
         onProgress: (ratio) => onProgress?.({ stage: 'uploading', ratio, attempt }),

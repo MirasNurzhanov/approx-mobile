@@ -1,6 +1,11 @@
 import { buildForm, publishSwift } from '../swiftUpload';
 import { createTakeKey, EMPTY_DRAFT, type SwiftDraft } from '../swiftDraft';
 
+const mockThumbnail = jest.fn();
+jest.mock('expo-video-thumbnails', () => ({
+  getThumbnailAsync: (...a: unknown[]) => mockThumbnail(...a),
+}));
+
 // swifts/models.py: latitude/longitude are DecimalField(max_digits=9,
 // decimal_places=6). A raw GPS fix carries full double precision, and
 // FormData.get returns whatever string was appended — so this catches the
@@ -195,5 +200,57 @@ describe('publish retry identity', () => {
   it('refuses to publish a take without a key', async () => {
     await expect(publishSwift({ ...EMPTY_DRAFT, uri: 'file:///swift.mp4' }))
       .rejects.toMatchObject({ retryable: false });
+  });
+});
+
+describe('the poster', () => {
+  // Node's FormData stringifies React Native's {uri, type, name} file objects,
+  // so what was appended is read off `append` rather than back out of the form.
+  const appended = (field: string) => {
+    const append = jest.spyOn(FormData.prototype, 'append');
+    return {
+      value: () => append.mock.calls.filter(([name]) => name === field).map(([, v]) => v),
+      restore: () => append.mockRestore(),
+    };
+  };
+
+  it('is sent as the thumbnail when there is one, and not at all otherwise', () => {
+    const draft = { ...EMPTY_DRAFT, idempotencyKey: createTakeKey(), uri: 'file:///swift.mp4' };
+    const thumbnail = appended('thumbnail');
+    buildForm(draft, 'file:///poster.jpg');
+    expect(thumbnail.value()).toEqual([{ uri: 'file:///poster.jpg', type: 'image/jpeg', name: 'poster.jpg' }]);
+    expect(buildForm(draft).has('thumbnail')).toBe(false);
+    thumbnail.restore();
+  });
+
+  it('is taken at the trim start, once, and a failure still publishes', async () => {
+    const sent: FormData[] = [];
+    class MockXHR {
+      upload = {};
+      status = 200;
+      responseText = '{"id":7}';
+      onload?: () => void;
+      open() {}
+      setRequestHeader() {}
+      send(form: FormData) { sent.push(form); this.onload?.(); }
+    }
+    const originalXHR = Object.getOwnPropertyDescriptor(globalThis, 'XMLHttpRequest');
+    Object.defineProperty(globalThis, 'XMLHttpRequest', { configurable: true, value: MockXHR });
+    try {
+      mockThumbnail.mockReset();
+      const take = { ...EMPTY_DRAFT, uri: 'file:///swift.mp4', idempotencyKey: createTakeKey(), trimStartMs: 1500 };
+      mockThumbnail.mockResolvedValueOnce({ uri: 'file:///poster.jpg', width: 1, height: 1 });
+      await publishSwift(take);
+      expect(mockThumbnail).toHaveBeenCalledTimes(1);
+      expect(mockThumbnail).toHaveBeenCalledWith('file:///swift.mp4', expect.objectContaining({ time: 1500 }));
+      expect(sent[0].has('thumbnail')).toBe(true);
+
+      mockThumbnail.mockRejectedValueOnce(new Error('no frame'));
+      await expect(publishSwift(take)).resolves.toMatchObject({ id: 7 });
+      expect(sent[1].has('thumbnail')).toBe(false);
+    } finally {
+      if (originalXHR) Object.defineProperty(globalThis, 'XMLHttpRequest', originalXHR);
+      else Reflect.deleteProperty(globalThis, 'XMLHttpRequest');
+    }
   });
 });

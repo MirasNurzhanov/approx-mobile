@@ -90,6 +90,10 @@ import { SWIFT_MUSIC_ENABLED } from '@/services/swiftComposer';
  * a different and worse feature.
  */
 
+
+/** Bits per second for a recorded Swift — see the camera view below. */
+const SWIFT_VIDEO_BITRATE = 4_000_000;
+
 export interface CapturedVideo {
   uri: string;
   durationMs: number;
@@ -222,6 +226,9 @@ export function CaptureStep({
         // The OS enforces this, not our timer. In *source* seconds, which is
         // what the camera measures — see the note on duration above.
         maxDuration: recordLimitMs(draft) / 1000,
+        // iOS honours `videoBitrate` (on the view) only with a codec named
+        // here. H.264 rather than HEVC so every Android viewer can decode it.
+        codec: 'avc1',
       });
     } catch {
       Alert.alert('Recording failed', 'Something interrupted the camera. Try again.');
@@ -305,6 +312,9 @@ export function CaptureStep({
         mediaTypes: ['videos'],
         allowsEditing: false,
         quality: 1,
+        // Re-encoded on the way in (iOS). Library videos are often 4K at tens
+        // of megabits; 720p H.264 is about 5 Mbps and plays straight away.
+        videoExportPreset: ImagePicker.VideoExportPreset.H264_1280x720,
       });
     } catch {
       Alert.alert('Could not open your library', 'Try again in a moment.');
@@ -396,6 +406,10 @@ export function CaptureStep({
           enableTorch={recording && flashOn && canFlash}
           mode="video"
           videoQuality="1080p"
+          // A phone records 1080p at 10-25 Mbps by default, so a few seconds
+          // of Swift was 5-15 MB and slow to start on mobile data. 4 Mbps is
+          // what short-form feeds stream 1080p at.
+          videoBitrate={SWIFT_VIDEO_BITRATE}
           // A take recorded with the mic off has no audio track at all, rather
           // than a silent one — `SwiftDraft.micEnabled` argues why that is a
           // different promise from muting. It is a prop on the view rather

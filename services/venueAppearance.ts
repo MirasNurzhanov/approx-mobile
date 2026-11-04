@@ -6,6 +6,10 @@ export function venueAppearance(venue: Pick<Venue, 'slug' | 'category'> | null) 
     color: '#24554D', icon: 'bag-handle-outline' as const,
     caption: 'A little city time, together',
   };
+  if (venue?.category === 'Sport & fitness') return {
+    color: '#6044B5', icon: 'barbell-outline' as const,
+    caption: 'Train together, not alone',
+  };
   if (venue?.category === 'Restaurant & cafe') return {
     color: '#91452F', icon: 'cafe-outline' as const,
     caption: 'Coffee, conversation, your people',

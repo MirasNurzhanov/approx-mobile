@@ -13,3 +13,8 @@ it('keeps a safe default for future venues and closed cards', () => {
   expect(venueAppearance(null).icon).toBe('storefront-outline');
   expect(venueAppearance({ slug: 'new-place', category: 'Other' }).color).toBe('#6044B5');
 });
+
+it('gives gyms a dumbbell', () => {
+  expect(venueAppearance({ slug: 'virgin-active-bank', category: 'Sport & fitness' }).icon).toBe('barbell-outline');
+  expect(venueAppearance({ slug: 'invictus-fitness-samal', category: 'Sport & fitness' }).icon).toBe('barbell-outline');
+});

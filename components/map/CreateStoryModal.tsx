@@ -2,7 +2,7 @@
 // unchanged.
 
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -41,6 +41,8 @@ import { makeStyles } from '@/components/map/mapStyles';
  *  the two sheets `SHEET_H` describes — see `CreateStoryModal`. Taller,
  *  because it holds a photo well and a keyboard-avoiding text field. */
 const STORY_SHEET_H = 620;
+/** The modal's fade plus the sheet's rise (`SHEET_RISE`), with a little room. */
+const FOCUS_AFTER_MS = 450;
 
 // ─── Create Story Modal ───────────────────────────────────────────────────────
 interface CreateStoryModalProps {
@@ -64,6 +66,15 @@ export function CreateStoryModal({ visible, locationless, onClose, onPost }: Cre
   // under the keyboard. This modal fills the screen, so the keyboard's height
   // is exactly the lift — the fix SwiftCommentsSheet uses.
   const keyboardHeight = useKeyboardHeight();
+  // Focused once the sheet has risen, not by `autoFocus`: a keyboard raised
+  // while the modal is still being presented arrives in pieces, and the sheet
+  // ended up behind it.
+  const inputRef = useRef<TextInput>(null);
+  useEffect(() => {
+    if (!visible) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), FOCUS_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [visible]);
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
@@ -234,7 +245,7 @@ export function CreateStoryModal({ visible, locationless, onClose, onPost }: Cre
               onChangeText={(t) => setText(t.slice(0, 280))}
               multiline
               maxLength={280}
-              autoFocus
+              ref={inputRef}
             />
             <Text style={[styles.charCount, text.length > 240 && styles.charCountNear]}>
               {text.length}/280
